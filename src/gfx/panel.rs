@@ -15,7 +15,9 @@ use windows::Win32::Graphics::DirectWrite::{DWRITE_MEASURING_MODE_NATURAL, IDWri
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows_numerics::{Matrix3x2, Vector2};
 
-use super::overlay::{ButtonView, CellView, Icon, Overlay, PanelView, TextStyle, TextView, rgba};
+use super::overlay::{
+    ButtonView, CardView, CellView, Icon, Overlay, PanelView, TextStyle, TextView, rgba,
+};
 use crate::view::Rect;
 
 fn rf(r: Rect) -> D2D_RECT_F {
@@ -59,6 +61,13 @@ impl Overlay {
         let r = rf(b.rect);
         let (cx, cy) = b.rect.center();
         let (cx, cy) = (cx as f32, cy as f32);
+        if !b.enabled {
+            unsafe {
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.28 * o));
+                self.icon(b, r, cx, cy, o, s, 0.28);
+            }
+            return;
+        }
         let back = if b.pressed {
             0.28
         } else if b.hot {
@@ -79,6 +88,25 @@ impl Overlay {
                 self.fill_shape(r, b.round);
             }
             self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.92 * o));
+            self.icon(b, r, cx, cy, o, s, 0.92);
+        }
+    }
+
+    /// Draws the icon of `b` in the current brush colour; `tone` (the icon
+    /// alpha) also scales the multi-tone shape icons.
+    #[allow(clippy::too_many_arguments)]
+    unsafe fn icon(
+        &self,
+        b: &ButtonView,
+        r: D2D_RECT_F,
+        cx: f32,
+        cy: f32,
+        o: f32,
+        s: f32,
+        tone: f32,
+    ) {
+        let o = o * tone / 0.92;
+        unsafe {
             match b.icon {
                 Icon::Glyph(c) => self.glyph(c, r, &self.formats.icon),
                 Icon::Mirrored(c) => {
@@ -358,6 +386,99 @@ impl Overlay {
                 None::<&ID2D1StrokeStyle>,
             );
             self.ctx.PopAxisAlignedClip();
+        }
+    }
+}
+
+impl Overlay {
+    /// The settings card: dark rounded panel, title, close button and rows
+    /// of segmented choices.
+    pub(super) unsafe fn card(&self, c: &CardView, s: f32) {
+        let r = rf(c.rect);
+        let radius = 12.0 * s;
+        let rounded = |rect: D2D_RECT_F, rad: f32| D2D1_ROUNDED_RECT {
+            rect,
+            radiusX: rad,
+            radiusY: rad,
+        };
+        unsafe {
+            // Dim everything behind the card.
+            let size = self.ctx.GetSize();
+            self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.35));
+            self.ctx.FillRectangle(
+                &D2D_RECT_F {
+                    left: 0.0,
+                    top: 0.0,
+                    right: size.width,
+                    bottom: size.height,
+                },
+                &self.brush,
+            );
+            // Soft shadow, then the card.
+            for (grow, a) in [(10.0, 0.10), (5.0, 0.16), (2.0, 0.22)] {
+                let g = grow * s;
+                self.brush.SetColor(&rgba(0.0, 0.0, 0.0, a));
+                self.ctx.FillRoundedRectangle(
+                    &rounded(
+                        D2D_RECT_F {
+                            left: r.left - g,
+                            top: r.top - g + 4.0 * s,
+                            right: r.right + g,
+                            bottom: r.bottom + g + 4.0 * s,
+                        },
+                        radius + g,
+                    ),
+                    &self.brush,
+                );
+            }
+            self.brush.SetColor(&rgba(0.125, 0.125, 0.135, 0.98));
+            self.ctx
+                .FillRoundedRectangle(&rounded(r, radius), &self.brush);
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.08));
+            self.ctx.DrawRoundedRectangle(
+                &rounded(r, radius),
+                &self.brush,
+                s,
+                None::<&ID2D1StrokeStyle>,
+            );
+
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+            self.glyph_str(&c.title.1, rf(c.title.0), &self.formats.heading);
+
+            let (close, hot) = (rf(c.close.0), c.close.1);
+            if hot {
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.14));
+                self.ctx
+                    .FillRoundedRectangle(&rounded(close, 6.0 * s), &self.brush);
+            }
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.85));
+            self.glyph('\u{E711}', close, &self.formats.icon);
+
+            for (rect, text) in &c.labels {
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.78));
+                self.glyph_str(text, rf(*rect), &self.formats.label);
+            }
+            for seg in &c.segments {
+                let sr = rf(seg.rect);
+                let inner = D2D_RECT_F {
+                    left: sr.left + if seg.first { 0.0 } else { 1.0 },
+                    top: sr.top,
+                    right: sr.right - if seg.last { 0.0 } else { 1.0 },
+                    bottom: sr.bottom,
+                };
+                let (fill, text_a) = if seg.selected {
+                    (rgba(0.30, 0.56, 1.0, 0.92), 1.0)
+                } else if seg.hot {
+                    (rgba(1.0, 1.0, 1.0, 0.13), 0.95)
+                } else {
+                    (rgba(1.0, 1.0, 1.0, 0.06), 0.75)
+                };
+                self.brush.SetColor(&fill);
+                self.ctx
+                    .FillRoundedRectangle(&rounded(inner, 6.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, text_a));
+                self.glyph_str(&seg.text, inner, &self.formats.option);
+            }
         }
     }
 }

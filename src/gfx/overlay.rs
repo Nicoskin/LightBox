@@ -41,15 +41,23 @@ pub struct Ui {
     /// Short status in a pill near the bottom (e.g. the zoom level) and its
     /// opacity (for fading out).
     pub badge: Option<(String, f32)>,
+    /// Extra distance of the badge from the bottom edge (above the panel).
+    pub badge_lift: f32,
     /// Bottom panel and filmstrip.
     pub panel: Option<PanelView>,
     /// Thin border around the window (windowed mode).
     pub border: bool,
+    /// Settings card on top of everything.
+    pub card: Option<CardView>,
 }
 
 impl Ui {
     pub fn is_empty(&self) -> bool {
-        self.message.is_none() && self.badge.is_none() && self.panel.is_none() && !self.border
+        self.message.is_none()
+            && self.badge.is_none()
+            && self.panel.is_none()
+            && !self.border
+            && self.card.is_none()
     }
 }
 
@@ -83,6 +91,8 @@ pub struct ButtonView {
     pub pressed: bool,
     /// Toggle that is on.
     pub active: bool,
+    /// Greyed out (e.g. "Save" with nothing to save).
+    pub enabled: bool,
 }
 
 pub struct TextView {
@@ -108,6 +118,25 @@ pub struct CellView {
     pub hot: bool,
 }
 
+/// The settings card.
+pub struct CardView {
+    pub rect: Rect,
+    pub title: (Rect, String),
+    pub close: (Rect, bool),
+    pub labels: Vec<(Rect, String)>,
+    /// Segments: rect, text, selected, hot, first / last in its row.
+    pub segments: Vec<SegmentView>,
+}
+
+pub struct SegmentView {
+    pub rect: Rect,
+    pub text: String,
+    pub selected: bool,
+    pub hot: bool,
+    pub first: bool,
+    pub last: bool,
+}
+
 pub struct PanelView {
     pub opacity: f32,
     pub bar: Rect,
@@ -125,6 +154,9 @@ pub(super) struct Formats {
     pub(super) caption: IDWriteTextFormat,
     pub(super) detail: IDWriteTextFormat,
     pub(super) value: IDWriteTextFormat,
+    pub(super) heading: IDWriteTextFormat,
+    pub(super) label: IDWriteTextFormat,
+    pub(super) option: IDWriteTextFormat,
     scale: f32,
 }
 
@@ -219,10 +251,13 @@ impl Overlay {
                 self.thumbs.clear();
             }
             if let Some((text, opacity)) = &ui.badge {
-                self.badge(text, *opacity, ui.scale)?;
+                self.badge(text, *opacity, ui.scale, ui.badge_lift)?;
             }
             if ui.border {
                 self.border(ui.scale);
+            }
+            if let Some(card) = &ui.card {
+                self.card(card, ui.scale);
             }
             self.ctx.EndDraw(None, None)?;
         }
@@ -270,7 +305,7 @@ impl Overlay {
     }
 
     /// Rounded dark pill with white text, centred near the bottom edge.
-    unsafe fn badge(&self, text: &str, opacity: f32, s: f32) -> Result<()> {
+    unsafe fn badge(&self, text: &str, opacity: f32, s: f32, lift: f32) -> Result<()> {
         let size = unsafe { self.ctx.GetSize() };
         let text = wide(text);
         let mut m = DWRITE_TEXT_METRICS::default();
@@ -286,7 +321,7 @@ impl Overlay {
         let (pad_x, h) = (14.0 * s, 32.0 * s);
         let w = m.width + 2.0 * pad_x;
         let cx = size.width / 2.0;
-        let bottom = size.height - 40.0 * s;
+        let bottom = size.height - 40.0 * s - lift;
         let rect = D2D_RECT_F {
             left: cx - w / 2.0,
             top: bottom - h,
@@ -352,6 +387,9 @@ impl Formats {
             caption: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 14.0, left)?,
             detail: make(ui, DWRITE_FONT_WEIGHT_NORMAL, 12.0, left)?,
             value: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 13.0, center)?,
+            heading: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 18.0, left)?,
+            label: make(ui, DWRITE_FONT_WEIGHT_NORMAL, 13.5, left)?,
+            option: make(ui, DWRITE_FONT_WEIGHT_NORMAL, 13.0, center)?,
             scale: s,
         })
     }

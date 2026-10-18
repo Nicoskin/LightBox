@@ -17,10 +17,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT,
 };
 
-use super::{Anim, AnimKind, App, DIM, MODE_ANIM, Mode};
+use super::{Anim, AnimKind, App, MODE_ANIM, Mode};
 
 /// Smallest windowed-mode window (longer side), in 96-DPI pixels.
 const MIN_WINDOW_DIP: f64 = 160.0;
+/// Width of the dark frame around the photo in windowed mode, 96-DPI pixels.
+pub(super) const FRAME_DIP: f64 = 6.0;
 use crate::view::{self, Rect, View};
 use crate::win::monitor::Monitor;
 use crate::win::window;
@@ -74,21 +76,17 @@ impl App {
         };
         let mon = self.monitor;
         let work = to_rect(mon.work);
-        let size = view::windowed_size(
-            display,
-            (work.width(), work.height()),
-            mon.px(MIN_WINDOW_DIP),
-        );
+        let size = window_size(display, &mon);
         let now = self.view.image_rect(display, self.viewport());
         let (ox, oy) = (f64::from(mon.rect.left), f64::from(mon.rect.top));
         let center = now.offset(ox, oy).center();
         let target = view::place_within(size, center, work);
-        match MODE_ANIM {
+        match self.anim_len(MODE_ANIM) {
             Some(duration) => {
                 self.anim = Some(Anim {
                     kind: AnimKind::Mode {
                         from: now,
-                        to: target.offset(-ox, -oy),
+                        to: target.offset(-ox, -oy).inset(mon.px(FRAME_DIP)),
                         dim: (self.dim, 0.0),
                         opacity: (1.0, 1.0),
                         enter_windowed: Some(target),
@@ -151,7 +149,7 @@ impl App {
         self.fitted = true;
 
         let target = self.fit_view();
-        match (from, target, MODE_ANIM) {
+        match (from, target, self.anim_len(MODE_ANIM)) {
             (Some(from), Some(target), Some(duration)) => {
                 let display = self.display().unwrap_or((1.0, 1.0));
                 let vp = self.viewport();
@@ -162,7 +160,7 @@ impl App {
                     kind: AnimKind::Mode {
                         from,
                         to: target.image_rect(display, vp),
-                        dim: (0.0, DIM),
+                        dim: (0.0, self.settings.dim()),
                         opacity: (1.0, 1.0),
                         enter_windowed: None,
                         end_view: Some(target),
@@ -176,7 +174,7 @@ impl App {
                 if let Some(v) = target {
                     self.view = v;
                 }
-                self.dim = DIM;
+                self.dim = self.settings.dim();
             }
         }
         self.render()
@@ -190,11 +188,7 @@ impl App {
         let mon = Monitor::of_window(self.hwnd);
         self.monitor = mon;
         let work = to_rect(mon.work);
-        let size = view::windowed_size(
-            display,
-            (work.width(), work.height()),
-            mon.px(MIN_WINDOW_DIP),
-        );
+        let size = window_size(display, &mon);
         let center = to_rect(window::rect(self.hwnd)).center();
         let target = view::place_within(size, center, work);
         window::sync_to_compositor();
@@ -203,6 +197,29 @@ impl App {
             target.width().round() as u32,
             target.height().round() as u32,
         )
+    }
+
+    /// Start-up in windowed mode (setting): the window takes the photo's
+    /// size, centred in the work area, before the first frame is drawn.
+    pub(super) fn start_windowed(&mut self) -> Result<()> {
+        let Some(display) = self.display() else {
+            return Ok(());
+        };
+        let mon = self.monitor;
+        let work = to_rect(mon.work);
+        let target = view::place_within(window_size(display, &mon), work.center(), work);
+        self.mode = Mode::Windowed;
+        self.dim = 0.0;
+        window::set_mode(self.hwnd, true, to_win32(target))?;
+        self.gpu.resize(
+            target.width().round() as u32,
+            target.height().round() as u32,
+        )?;
+        if let Some(v) = self.fit_view() {
+            self.view = v;
+        }
+        self.fitted = true;
+        Ok(())
     }
 
     /// Fullscreen: re-cover the monitor (resolution or DPI changed).
@@ -269,11 +286,13 @@ impl App {
         let Some((dw, dh)) = self.display() else {
             return;
         };
+        // The photo inside the frame keeps its aspect ratio.
         let aspect = dw / dh;
+        let f2 = 2.0 * self.monitor.px(FRAME_DIP);
         let w = f64::from(r.right - r.left);
         let h = f64::from(r.bottom - r.top);
-        let h_from_w = (w / aspect).round() as i32;
-        let w_from_h = (h * aspect).round() as i32;
+        let h_from_w = ((w - f2) / aspect + f2).round() as i32;
+        let w_from_h = ((h - f2) * aspect + f2).round() as i32;
         match edge {
             WMSZ_LEFT | WMSZ_RIGHT => r.bottom = r.top + h_from_w,
             WMSZ_TOP | WMSZ_BOTTOM => r.right = r.left + w_from_h,
@@ -337,4 +356,17 @@ impl App {
             _ => None,
         })
     }
+}
+
+/// Windowed-mode window size for a photo of `display` pixels: the photo at
+/// 100 % (or fitted into 90 % of the work area) plus the frame on each side.
+fn window_size(display: (f64, f64), mon: &Monitor) -> (f64, f64) {
+    let f2 = 2.0 * mon.px(FRAME_DIP);
+    let work = to_rect(mon.work);
+    let photo = view::windowed_size(
+        display,
+        (work.width() - f2, work.height() - f2),
+        mon.px(MIN_WINDOW_DIP),
+    );
+    (photo.0 + f2, photo.1 + f2)
 }

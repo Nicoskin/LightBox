@@ -18,8 +18,8 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use super::mode::lparam_point;
 use super::panel::Hot;
 use super::{Anim, AnimKind, App, Drag, Mode, ZOOM_ANIM};
-use crate::gfx::Filter;
 use crate::orientation::Orientation;
+use crate::settings::Wheel;
 use crate::ui::toolbar::Action;
 use crate::view::View;
 use crate::win::window;
@@ -28,8 +28,6 @@ use crate::win::window;
 pub(super) const ZOOM_STEP: f64 = 1.25;
 /// A press-release that moved less than this (pixels) is a click, not a drag.
 const CLICK_SLOP: f64 = 4.0;
-/// Wheel: zooms at the cursor; with Ctrl it browses (configurable in M6).
-const WHEEL_ZOOMS: bool = true;
 
 fn key_down(vk: u16) -> bool {
     // SAFETY: no preconditions.
@@ -56,6 +54,16 @@ impl App {
         wparam: WPARAM,
         lparam: LPARAM,
     ) -> Result<Option<LRESULT>> {
+        if self.card_open {
+            let p = if msg == WM_MOUSEWHEEL {
+                self.screen_to_client(lparam)
+            } else {
+                client_point(lparam)
+            };
+            if self.card_input(msg, wparam.0, p)? {
+                return Ok(Some(LRESULT(0)));
+            }
+        }
         match msg {
             WM_KEYDOWN => {
                 // Bit 30: the key was already down (auto-repeat).
@@ -174,25 +182,39 @@ impl App {
             Action::RotateCcw => self.rotate(Orientation::ROTATE_CCW),
             Action::RotateCw => self.rotate(Orientation::ROTATE_CW),
             Action::Checker => {
-                self.checker = !self.checker;
+                self.settings.checker = !self.settings.checker;
+                self.settings.save();
                 self.render()
             }
             Action::Smoothing => {
-                self.filter = match self.filter {
-                    Filter::Smooth => Filter::Pixelated,
-                    _ => Filter::Smooth,
-                };
+                self.settings.smoothing = !self.settings.smoothing;
+                self.settings.save();
                 self.render()
             }
             Action::Filmstrip => self.toggle_filmstrip(),
             Action::ToggleMode => self.toggle_mode(),
+            Action::FlipH => self.rotate(Orientation::FLIP_H),
+            Action::FlipV => self.rotate(Orientation::FLIP_V),
+            Action::Save => self.save_current(),
+            Action::SaveAs => self.save_as(),
+            Action::Reset => self.reset_current(),
+            Action::Settings => self.open_settings(),
         }
     }
 
     fn on_key(&mut self, vk: u16) -> Result<Option<LRESULT>> {
         let center = self.view_area().center();
         let ch = |c: u8| u16::from(c);
+        let (ctrl, shift) = (key_down(VK_CONTROL.0), key_down(VK_SHIFT.0));
         match vk {
+            k if ctrl && k == ch(b'S') => {
+                if shift {
+                    self.save_as()?;
+                } else {
+                    self.save_current()?;
+                }
+            }
+            k if ctrl && k == ch(b'Z') => self.undo_save()?,
             k if k == VK_ESCAPE.0 => {
                 // SAFETY: posting to our own window.
                 unsafe { PostMessageW(Some(self.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0))? };
@@ -227,7 +249,8 @@ impl App {
 
     fn on_wheel(&mut self, delta: i32, p: (f64, f64)) -> Result<()> {
         // Over the panel the wheel browses; elsewhere it zooms (Ctrl swaps).
-        let browse = self.over_panel(p) || WHEEL_ZOOMS == key_down(VK_CONTROL.0);
+        let zooms = self.settings.wheel == Wheel::Zoom;
+        let browse = self.over_panel(p) || zooms == key_down(VK_CONTROL.0);
         if !browse {
             let notches = f64::from(delta) / f64::from(WHEEL_DELTA);
             return self.zoom_by(ZOOM_STEP.powf(notches), p);
@@ -357,7 +380,7 @@ impl App {
         {
             tracing::error!("{e:#}");
         }
-        match ZOOM_ANIM {
+        match self.anim_len(ZOOM_ANIM) {
             Some(duration) => {
                 self.anim = Some(Anim {
                     kind: AnimKind::View {

@@ -97,6 +97,11 @@ impl Thumbnails {
         any
     }
 
+    /// Forgets a thumbnail so it is made again (the file changed).
+    pub fn forget(&mut self, path: &Path) {
+        self.done.remove(&cache::key(path));
+    }
+
     pub fn get(&self, path: &Path) -> Option<Rc<Thumb>> {
         self.done.get(&cache::key(path)).cloned().flatten()
     }

@@ -35,6 +35,15 @@ impl Rect {
             y1: self.y1 + dy,
         }
     }
+    /// Shrinks the rectangle by `d` on every side.
+    pub fn inset(&self, d: f64) -> Self {
+        Self {
+            x0: self.x0 + d,
+            y0: self.y0 + d,
+            x1: self.x1 - d,
+            y1: self.y1 - d,
+        }
+    }
     pub fn lerp(&self, to: &Rect, t: f64) -> Self {
         let l = |a: f64, b: f64| a + (b - a) * t;
         Self {

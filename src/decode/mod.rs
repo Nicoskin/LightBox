@@ -76,12 +76,17 @@ impl DecodedImage {
         height: u32,
         mut pixels: Vec<u8>,
         source: (u32, u32),
+        premultiply: bool,
     ) -> Result<Self, DecodeError> {
         if width > MAX_TEXTURE_SIDE || height > MAX_TEXTURE_SIDE {
             // TODO(M4): tiling for very large images.
             return Err(DecodeError::TooLarge(source.0, source.1));
         }
-        let has_alpha = alpha::premultiply_in_place(&mut pixels);
+        let has_alpha = if premultiply {
+            alpha::premultiply_in_place(&mut pixels)
+        } else {
+            pixels.as_chunks::<4>().0.iter().any(|p| p[3] != 255)
+        };
         Ok(Self {
             width,
             height,
@@ -121,6 +126,16 @@ pub fn decode_file(path: &Path, hint: Option<SizeHint>) -> Result<DecodedImage, 
     decode_bytes(&data, hint)
 }
 
+/// Full-resolution straight-alpha sRGB RGBA8 for re-encoding ("Save as");
+/// `orientation` tells how it must be turned for display.
+pub fn decode_for_export(data: &[u8]) -> Result<DecodedImage, DecodeError> {
+    match sniff(data) {
+        Format::Jpeg => decode_bytes(data, None),
+        Format::Png => png::decode(data, false),
+        Format::Unknown => Err(DecodeError::Unsupported),
+    }
+}
+
 pub fn decode_bytes(data: &[u8], hint: Option<SizeHint>) -> Result<DecodedImage, DecodeError> {
     match sniff(data) {
         Format::Jpeg => {
@@ -128,7 +143,7 @@ pub fn decode_bytes(data: &[u8], hint: Option<SizeHint>) -> Result<DecodedImage,
             img.orientation = crate::metadata::jpeg_orientation(data);
             Ok(img)
         }
-        Format::Png => png::decode(data),
+        Format::Png => png::decode(data, true),
         Format::Unknown => Err(DecodeError::Unsupported),
     }
 }

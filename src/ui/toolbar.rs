@@ -19,6 +19,12 @@ pub enum Action {
     Smoothing,
     Filmstrip,
     ToggleMode,
+    FlipH,
+    FlipV,
+    Save,
+    SaveAs,
+    Reset,
+    Settings,
 }
 
 pub struct Button {
@@ -44,7 +50,6 @@ pub struct Layout {
 /// Sizes in 96-DPI pixels.
 pub const BAR_H: f64 = 52.0;
 const BAR_H_COMPACT: f64 = 44.0;
-pub const STRIP_H: f64 = 78.0;
 const BTN: f64 = 36.0;
 const BTN_ROUND: f64 = 42.0;
 const GAP: f64 = 4.0;
@@ -53,8 +58,8 @@ const ZOOM_TEXT_W: f64 = 64.0;
 
 /// Height reserved at the bottom of the screen in fullscreen mode, so that
 /// a fitted photo is not covered by the panel.
-pub fn reserved_height(filmstrip: bool) -> f64 {
-    BAR_H + if filmstrip { STRIP_H } else { 0.0 }
+pub fn reserved_height(strip_h: Option<f64>) -> f64 {
+    BAR_H + strip_h.unwrap_or(0.0)
 }
 
 enum Item {
@@ -114,8 +119,15 @@ fn width(items: &[Item], s: f64) -> f64 {
 }
 
 /// Panel layout for a `vp`-sized viewport at UI scale `s`. `compact` is the
-/// windowed-mode variant (no caption, no strip, fewer buttons if narrow).
-pub fn layout(vp: (f64, f64), s: f64, compact: bool, filmstrip: bool, windowed: bool) -> Layout {
+/// windowed-mode variant (no caption, no strip, fewer buttons if narrow);
+/// `strip_h` is the filmstrip height (96-DPI pixels) when it is shown.
+pub fn layout(
+    vp: (f64, f64),
+    s: f64,
+    compact: bool,
+    strip_h: Option<f64>,
+    windowed: bool,
+) -> Layout {
     use Action::*;
     let bar_h = if compact { BAR_H_COMPACT } else { BAR_H } * s;
     let bar = Rect {
@@ -124,9 +136,9 @@ pub fn layout(vp: (f64, f64), s: f64, compact: bool, filmstrip: bool, windowed: 
         x1: vp.0,
         y1: vp.1,
     };
-    let strip = (!compact && filmstrip).then_some(Rect {
+    let strip = strip_h.filter(|_| !compact).map(|h| Rect {
         x0: 0.0,
-        y0: bar.y0 - STRIP_H * s,
+        y0: bar.y0 - h * s,
         x1: vp.0,
         y1: bar.y0,
     });
@@ -187,6 +199,7 @@ pub fn layout(vp: (f64, f64), s: f64, compact: bool, filmstrip: bool, windowed: 
         Item::Gap,
         Item::Button(Filmstrip, Icon::Filmstrip, false),
         Item::Button(ToggleMode, mode_icon, false),
+        Item::Button(Settings, Icon::Glyph('\u{E713}'), false),
     ];
     let rw = width(&right, s);
     let right_x = vp.0 - pad - rw;
@@ -194,7 +207,21 @@ pub fn layout(vp: (f64, f64), s: f64, compact: bool, filmstrip: bool, windowed: 
     if right_x > (vp.0 + cw) / 2.0 + GROUP_GAP * s {
         row(&right, right_x, cy, s, &mut out);
     }
-    let caption_right = (vp.0 - cw) / 2.0 - GROUP_GAP * s;
+    // Editing tools to the left of the centre group.
+    let edit = [
+        Item::Button(FlipH, Icon::Text("\u{21C6}"), false),
+        Item::Button(FlipV, Icon::Text("\u{21C5}"), false),
+        Item::Gap,
+        Item::Button(Save, Icon::Glyph('\u{E74E}'), false),
+        Item::Button(SaveAs, Icon::Glyph('\u{E792}'), false),
+        Item::Button(Reset, Icon::Glyph('\u{E7A7}'), false),
+    ];
+    let ew = width(&edit, s);
+    let mut caption_right = (vp.0 - cw) / 2.0 - GROUP_GAP * s;
+    if caption_right - ew > pad {
+        row(&edit, caption_right - ew, cy, s, &mut out);
+        caption_right -= ew + GROUP_GAP * s;
+    }
     if caption_right > pad + 80.0 * s {
         out.caption = Some(Rect {
             x0: pad + 4.0 * s,
@@ -279,9 +306,9 @@ mod tests {
 
     #[test]
     fn fullscreen_layout() {
-        let l = layout((2560.0, 1440.0), 1.0, false, true, false);
+        let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false);
         no_overlaps(&l);
-        assert_eq!(l.buttons.len(), 12);
+        assert_eq!(l.buttons.len(), 18);
         assert!(l.caption.is_some() && l.zoom_text.is_some());
         let strip = l.strip.unwrap();
         assert_eq!(strip.y1, l.bar.y0);
@@ -298,13 +325,13 @@ mod tests {
     #[test]
     fn compact_layouts_fit() {
         for w in [160.0, 300.0, 500.0, 1400.0] {
-            let l = layout((w, 400.0), 1.0, true, true, true);
+            let l = layout((w, 400.0), 1.0, true, Some(78.0), true);
             no_overlaps(&l);
             assert!(l.strip.is_none());
             assert!(l.buttons.iter().any(|b| b.action == Action::Next), "w={w}");
         }
         // Narrow screens drop the right group instead of overlapping.
-        no_overlaps(&layout((700.0, 400.0), 1.5, false, false, false));
+        no_overlaps(&layout((700.0, 400.0), 1.5, false, None, false));
     }
 
     #[test]

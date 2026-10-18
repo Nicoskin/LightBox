@@ -1,5 +1,5 @@
 use anyhow::{Context as _, Result};
-use windows::Win32::Foundation::{HWND, POINT, RECT};
+use windows::Win32::Foundation::{HINSTANCE, HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_USE_IMMERSIVE_DARK_MODE,
     DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND, DWMWINDOWATTRIBUTE,
@@ -8,12 +8,13 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_DBLCLKS, CreateWindowExW, DispatchMessageW, GWL_STYLE, GetCursorPos, GetWindowRect,
-    IDC_ARROW, LoadCursorW, MSG, PM_REMOVE, PeekMessageW, RegisterClassExW, SW_SHOWNA,
-    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW,
-    SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_STYLE, WM_QUIT, WNDCLASSEXW,
-    WNDPROC, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP, WS_MINIMIZEBOX, WS_POPUP,
-    WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE, WaitMessage,
+    CS_DBLCLKS, CreateWindowExW, DispatchMessageW, GWL_STYLE, GetCursorPos, GetSystemMetrics,
+    GetWindowRect, HICON, IDC_ARROW, IMAGE_ICON, LR_SHARED, LoadCursorW, LoadImageW, MSG,
+    PM_REMOVE, PeekMessageW, RegisterClassExW, SM_CXICON, SM_CXSMICON, SW_SHOWNA, SWP_FRAMECHANGED,
+    SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
+    SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_STYLE, WM_QUIT, WNDCLASSEXW, WNDPROC,
+    WS_CAPTION, WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
+    WS_THICKFRAME, WS_VISIBLE, WaitMessage,
 };
 use windows::core::{BOOL, HSTRING, PCWSTR, w};
 
@@ -43,6 +44,8 @@ pub fn create(rect: RECT, title: &str, wndproc: WNDPROC) -> Result<HWND> {
             lpfnWndProc: wndproc,
             hInstance: instance.into(),
             hCursor: LoadCursorW(None, IDC_ARROW).unwrap_or_default(),
+            hIcon: load_icon(instance.into(), GetSystemMetrics(SM_CXICON)),
+            hIconSm: load_icon(instance.into(), GetSystemMetrics(SM_CXSMICON)),
             lpszClassName: CLASS_NAME,
             ..Default::default()
         };
@@ -64,6 +67,26 @@ pub fn create(rect: RECT, title: &str, wndproc: WNDPROC) -> Result<HWND> {
             None,
         )
         .context("CreateWindowExW")
+    }
+}
+
+/// The application icon (resource 1, see lightbox.rc) at `size` px.
+fn load_icon(instance: HINSTANCE, size: i32) -> HICON {
+    // SAFETY: resource ordinal 1 in our own module; shared icons need no
+    // destruction.
+    unsafe {
+        LoadImageW(
+            Some(instance),
+            // MAKEINTRESOURCE(1): a resource ordinal, not a real pointer.
+            #[expect(clippy::manual_dangling_ptr, reason = "resource ordinal")]
+            PCWSTR(1 as *const u16),
+            IMAGE_ICON,
+            size,
+            size,
+            LR_SHARED,
+        )
+        .map(|h| HICON(h.0))
+        .unwrap_or_default()
     }
 }
 

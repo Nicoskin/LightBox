@@ -121,6 +121,13 @@ impl Cache {
         }
     }
 
+    /// Drops an entry (the file changed on disk).
+    pub fn remove(&mut self, path: &Path) {
+        if let Some(it) = self.items.remove(&key(path)) {
+            self.used -= slot_bytes(&it.slot);
+        }
+    }
+
     #[cfg(test)]
     fn used(&self) -> usize {
         self.used

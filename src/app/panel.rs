@@ -7,8 +7,9 @@ use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 
 use super::{App, Mode, PANEL_HOLD_MS, PANEL_TIMER, WM_APP_THUMB, post};
 use crate::cache;
-use crate::gfx::{ButtonView, CellView, PanelView, TextStyle, TextView};
+use crate::gfx::{ButtonView, CardView, CellView, PanelView, SegmentView, TextStyle, TextView};
 use crate::orientation::Orientation;
+use crate::ui::settings_card;
 use crate::ui::thumbs::Thumbnails;
 use crate::ui::toolbar::{self, Action, Layout};
 use crate::view::Rect;
@@ -32,7 +33,7 @@ impl App {
             self.viewport(),
             self.ui_scale(),
             windowed,
-            self.filmstrip,
+            self.strip_height(),
             windowed,
         )
     }
@@ -70,6 +71,12 @@ impl App {
         } else {
             self.hide_panel();
         }
+    }
+
+    /// Height of the panel (bar + strip) from the bottom edge, pixels.
+    pub(super) fn panel_height(&self) -> f64 {
+        let l = self.panel_layout();
+        self.viewport().1 - l.strip.map_or(l.bar.y0, |s| s.y0)
     }
 
     /// `true` if `p` is over the (visible) panel or strip.
@@ -117,10 +124,15 @@ impl App {
                 hot: self.hot == Some(Hot::Button(b.action)),
                 pressed: self.pressed == Some(Hot::Button(b.action)),
                 active: match b.action {
-                    Action::Checker => self.checker,
-                    Action::Smoothing => self.filter == crate::gfx::Filter::Smooth,
-                    Action::Filmstrip => self.filmstrip,
+                    Action::Checker => self.settings.checker,
+                    Action::Smoothing => self.settings.smoothing,
+                    Action::Filmstrip => self.settings.filmstrip,
                     _ => false,
+                },
+                enabled: match b.action {
+                    Action::Save => self.dirty(),
+                    Action::Reset => self.edits.contains_key(&cache::key(&self.current)),
+                    _ => true,
                 },
             })
             .collect();
@@ -218,7 +230,8 @@ impl App {
     }
 
     pub(super) fn toggle_filmstrip(&mut self) -> Result<()> {
-        self.filmstrip = !self.filmstrip;
+        self.settings.filmstrip = !self.settings.filmstrip;
+        self.settings.save();
         if self.fitted
             && let Some(v) = self.fit_view()
         {
@@ -243,7 +256,7 @@ impl App {
         let Some(thumbs) = &self.thumbs else {
             return;
         };
-        if !self.filmstrip || self.mode == Mode::Windowed || self.files.is_empty() {
+        if !self.settings.filmstrip || self.mode == Mode::Windowed || self.files.is_empty() {
             return;
         }
         let Some(strip) = self.panel_layout().strip else {
@@ -268,7 +281,7 @@ impl App {
 
     pub(super) fn on_thumbs(&mut self) -> Result<()> {
         let got = self.thumbs.as_mut().is_some_and(Thumbnails::receive);
-        if got && self.panel_alpha > 0.0 && self.filmstrip {
+        if got && self.panel_alpha > 0.0 && self.settings.filmstrip {
             self.render()?;
         }
         Ok(())
@@ -282,5 +295,102 @@ pub fn zoom_label(scale: f64) -> String {
         format!("{pct:.1} %")
     } else {
         format!("{pct:.0} %")
+    }
+}
+
+impl App {
+    fn card_layout(&self) -> settings_card::CardLayout {
+        settings_card::layout(self.viewport(), self.ui_scale())
+    }
+
+    pub(super) fn card_view(&self) -> Option<CardView> {
+        if !self.card_open {
+            return None;
+        }
+        let l = self.card_layout();
+        let mut labels = Vec::new();
+        let mut segments = Vec::new();
+        for row in &l.rows {
+            labels.push((row.label, row.text.to_string()));
+            let n = row.choices.len();
+            for (i, (c, text, rect)) in row.choices.iter().enumerate() {
+                segments.push(SegmentView {
+                    rect: *rect,
+                    text: (*text).to_string(),
+                    selected: settings_card::is_selected(&self.settings, *c),
+                    hot: self.card_hot == Some(settings_card::Hit::Choice(*c)),
+                    first: i == 0,
+                    last: i + 1 == n,
+                });
+            }
+        }
+        Some(CardView {
+            rect: l.card,
+            title: (l.title, "Настройки".to_string()),
+            close: (l.close, self.card_hot == Some(settings_card::Hit::Close)),
+            labels,
+            segments,
+        })
+    }
+
+    pub(super) fn open_settings(&mut self) -> Result<()> {
+        self.card_open = true;
+        self.card_hot = None;
+        self.render()
+    }
+
+    pub(super) fn close_settings(&mut self) -> Result<()> {
+        self.card_open = false;
+        self.render()
+    }
+
+    /// Input while the card is open: it takes all mouse and keyboard input.
+    pub(super) fn card_input(&mut self, msg: u32, wparam: usize, p: (f64, f64)) -> Result<bool> {
+        use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+        use windows::Win32::UI::WindowsAndMessaging::{
+            WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+        };
+        let l = self.card_layout();
+        match msg {
+            WM_MOUSEMOVE => {
+                let hot = l.hit(p).filter(|h| *h != settings_card::Hit::Card);
+                if hot != self.card_hot {
+                    self.card_hot = hot;
+                    self.render()?;
+                }
+            }
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_MOUSEWHEEL => {}
+            WM_LBUTTONUP => match l.hit(p) {
+                None | Some(settings_card::Hit::Close) => self.close_settings()?,
+                Some(settings_card::Hit::Choice(c)) => self.choose(c)?,
+                Some(settings_card::Hit::Card) => {}
+            },
+            WM_KEYDOWN if wparam == usize::from(VK_ESCAPE.0) => self.close_settings()?,
+            WM_KEYDOWN => {}
+            _ => return Ok(false),
+        }
+        Ok(true)
+    }
+
+    /// Applies a choice from the card, with its immediate effects.
+    fn choose(&mut self, c: settings_card::Choice) -> Result<()> {
+        use settings_card::Choice;
+        settings_card::apply(&mut self.settings, c);
+        self.settings.save();
+        match c {
+            Choice::Thumbs(_) | Choice::Filmstrip(_) => {
+                if self.fitted
+                    && let Some(v) = self.fit_view()
+                {
+                    self.view = v;
+                }
+                self.request_thumbs();
+            }
+            Choice::Dim(_) if self.mode == Mode::Fullscreen && self.anim.is_none() => {
+                self.dim = self.settings.dim();
+            }
+            _ => {}
+        }
+        self.render()
     }
 }

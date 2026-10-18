@@ -13,6 +13,8 @@ mod texture;
 
 pub use compositor::Compositor;
 pub use device::{Adapter, Gpu};
-pub use overlay::{ButtonView, CellView, Icon, PanelView, TextStyle, TextView, Thumb, Ui};
+pub use overlay::{
+    ButtonView, CardView, CellView, Icon, PanelView, SegmentView, TextStyle, TextView, Thumb, Ui,
+};
 pub use renderer::{Background, DrawParams, Filter, Layer};
 pub use texture::GpuImage;

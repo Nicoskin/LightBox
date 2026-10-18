@@ -21,6 +21,8 @@ fn main() {
 
     println!("cargo:rerun-if-changed=shaders");
     println!("cargo:rerun-if-changed=lightbox.manifest");
+    println!("cargo:rerun-if-changed=lightbox.rc");
+    println!("cargo:rerun-if-changed=assets/lightbox.ico");
     println!("cargo:rerun-if-env-changed=FXC");
 
     compile_shaders(&manifest_dir, &out_dir);
@@ -32,6 +34,8 @@ fn main() {
         "cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}",
         manifest.display()
     );
+
+    compile_resources(&manifest_dir, &out_dir);
 
     // Graphics DLLs are loaded lazily on the GPU-init thread instead of by the
     // loader before `main`, so their load time overlaps with decoding.
@@ -79,13 +83,37 @@ fn find_fxc() -> Option<PathBuf> {
     if let Ok(p) = env::var("FXC") {
         return Some(PathBuf::from(p));
     }
+    find_sdk_tool("fxc.exe")
+}
+
+/// Compiles `lightbox.rc` (the icon) with the SDK's `rc.exe` and links the
+/// result. Without a Windows SDK the exe simply has no icon.
+fn compile_resources(manifest_dir: &Path, out_dir: &Path) {
+    let Some(rc) = find_sdk_tool("rc.exe") else {
+        println!("cargo:warning=rc.exe not found, building without an icon");
+        return;
+    };
+    let res = out_dir.join("lightbox.res");
+    let status = Command::new(rc)
+        .current_dir(manifest_dir)
+        .args(["/nologo", "/fo"])
+        .arg(&res)
+        .arg("lightbox.rc")
+        .status()
+        .expect("failed to run rc.exe");
+    assert!(status.success(), "rc.exe failed");
+    println!("cargo:rustc-link-arg-bins={}", res.display());
+}
+
+/// Newest Windows 10/11 SDK copy of an x64 tool (fxc.exe, rc.exe).
+fn find_sdk_tool(name: &str) -> Option<PathBuf> {
     let kits = env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into());
     let bin = Path::new(&kits).join(r"Windows Kits\10\bin");
     let mut versions: Vec<PathBuf> = fs::read_dir(&bin)
         .ok()?
         .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.join(r"x64\fxc.exe").is_file())
+        .filter(|p| p.join("x64").join(name).is_file())
         .collect();
     versions.sort();
-    versions.pop().map(|p| p.join(r"x64\fxc.exe"))
+    versions.pop().map(|p| p.join("x64").join(name))
 }

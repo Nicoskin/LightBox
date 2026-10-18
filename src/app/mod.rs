@@ -8,10 +8,11 @@ mod input;
 mod mode;
 mod nav;
 mod panel;
+mod save;
 mod textures;
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -21,7 +22,7 @@ use anyhow::Result;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::Graphics::Gdi::ValidateRect;
 use windows::Win32::UI::WindowsAndMessaging::{
-    DefWindowProcW, KillTimer, MINMAXINFO, PostQuitMessage, SetTimer, WM_APP, WM_DESTROY,
+    DefWindowProcW, KillTimer, MINMAXINFO, PostQuitMessage, SetTimer, WM_APP, WM_CLOSE, WM_DESTROY,
     WM_ERASEBKGND, WM_GETMINMAXINFO, WM_NCCALCSIZE, WM_PAINT, WM_TIMER,
 };
 
@@ -30,6 +31,7 @@ use crate::decode::{DecodeError, DecodedImage};
 use crate::gfx::{Adapter, Background, Compositor, DrawParams, Filter, Gpu, GpuImage, Layer, Ui};
 use crate::loader::Loader;
 use crate::orientation::Orientation;
+use crate::settings::Settings;
 use crate::ui::thumbs::Thumbnails;
 use crate::view::{self, Rect, View};
 use crate::win::monitor::Monitor;
@@ -42,20 +44,18 @@ const WM_APP_DECODED: u32 = WM_APP + 2;
 /// Posted by the folder-scan thread.
 const WM_APP_LIBRARY: u32 = WM_APP + 3;
 
-/// Backdrop opacity in fullscreen mode.
-const DIM: f32 = 0.8;
-/// Background of the windowed mode when the photo does not fill the window
-/// (#1E1E1E as linear premultiplied RGBA).
-const WINDOW_BG: [f32; 4] = [0.0129, 0.0129, 0.0129, 1.0];
+/// Windowed mode: the frame around the photo and any area it does not
+/// cover (#2B2B2B as linear premultiplied RGBA).
+const WINDOW_BG: [f32; 4] = [0.0242, 0.0242, 0.0242, 1.0];
 /// Gap between a fitted image and the screen edge, in 96-DPI pixels.
 const FIT_MARGIN_DIP: f64 = 24.0;
 /// Checkerboard cell size, in 96-DPI pixels.
 const CHECKER_DIP: f64 = 8.0;
-/// Animation lengths (`None` disables animations — a setting in M6).
-const ZOOM_ANIM: Option<Duration> = Some(Duration::from_millis(100));
-const MODE_ANIM: Option<Duration> = Some(Duration::from_millis(150));
-const TURN_ANIM: Option<Duration> = Some(Duration::from_millis(220));
-const OPEN_ANIM: Option<Duration> = Some(Duration::from_millis(200));
+/// Animation lengths, milliseconds (all off with `animations = false`).
+const ZOOM_ANIM: u64 = 100;
+const MODE_ANIM: u64 = 150;
+const TURN_ANIM: u64 = 220;
+const OPEN_ANIM: u64 = 200;
 /// Page turn: how far (fraction of the viewport width) the images slide.
 const TURN_SHIFT: f64 = 0.06;
 /// The zoom badge stays this long after the last zoom, then fades out.
@@ -68,6 +68,8 @@ const PANEL_FADE: Duration = Duration::from_millis(180);
 const PANEL_TIMER: usize = 2;
 /// Posted by the thumbnail thread.
 const WM_APP_THUMB: u32 = WM_APP + 4;
+/// Posted by the writer thread after each finished job.
+const WM_APP_SAVED: u32 = WM_APP + 5;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -158,22 +160,32 @@ pub struct App {
     /// Zoom badge: shown, and since when it fades out.
     badge: bool,
     badge_fade: Option<Instant>,
-    /// Checkerboard (vs. nothing) behind transparent areas.
-    checker: bool,
-    filter: Filter,
+    settings: Settings,
 
     // Panel.
     /// Panel opacity now and where it is heading (0 hidden, 1 shown).
     panel_alpha: f32,
     panel_target: f32,
     panel_tick: Instant,
-    filmstrip: bool,
     hot: Option<panel::Hot>,
     pressed: Option<panel::Hot>,
     thumbs: Option<Thumbnails>,
     /// Rotations / mirrors made by the user, per file (cache key); written
     /// to the file in M2.
     edits: HashMap<String, Orientation>,
+    /// Background file writer (rotations, "Save as", undo).
+    writer: Option<crate::edit::Writer>,
+    /// Files with a rotation being written.
+    saving: HashSet<String>,
+    /// Saved files being decoded again, with the edit that was written.
+    reloading: HashMap<String, Orientation>,
+    /// Writes that Ctrl+Z can undo, most recent last.
+    undo: Vec<crate::edit::Undo>,
+    /// Status message shown in the badge.
+    notice: Option<(String, Instant)>,
+    /// Settings card shown, and the item under the mouse.
+    card_open: bool,
+    card_hot: Option<crate::ui::settings_card::Hit>,
 
     // Input.
     drag: Option<Drag>,
@@ -195,6 +207,7 @@ impl App {
         path: PathBuf,
         decoded: Result<DecodedImage, DecodeError>,
         monitor: Monitor,
+        settings: Settings,
     ) -> Result<Self> {
         let compositor = Compositor::new(hwnd)?;
         let mut app = Self {
@@ -219,25 +232,30 @@ impl App {
                 center: (0.0, 0.0),
             },
             fitted: true,
-            dim: DIM,
+            dim: settings.dim(),
             opacity: 1.0,
             anim: None,
             badge: false,
             badge_fade: None,
-            checker: true,
-            filter: Filter::Smooth,
             panel_alpha: 1.0,
             panel_target: 1.0,
             panel_tick: Instant::now(),
-            filmstrip: true,
             hot: None,
             pressed: None,
             thumbs: None,
             edits: HashMap::new(),
+            writer: None,
+            saving: HashSet::new(),
+            reloading: HashMap::new(),
+            undo: Vec::new(),
+            notice: None,
+            card_open: false,
+            card_hot: None,
             drag: None,
             wheel_accum: 0,
             fast_nav: false,
             mode_switched_at: Instant::now(),
+            settings,
         };
         let current = app.current.clone();
         app.store_result(
@@ -245,6 +263,9 @@ impl App {
             decoded.map(std::sync::Arc::new).map_err(|e| e.to_string()),
         );
         app.show_current()?;
+        if app.settings.open_mode == crate::settings::OpenMode::Windowed {
+            app.start_windowed()?;
+        }
         crate::bench::mark("texture upload");
         Ok(app)
     }
@@ -326,6 +347,26 @@ impl App {
         Ok(())
     }
 
+    /// Animation length, or `None` when animations are turned off.
+    fn anim_len(&self, ms: u64) -> Option<Duration> {
+        self.settings.animations.then(|| Duration::from_millis(ms))
+    }
+
+    fn filter(&self) -> Filter {
+        if self.settings.smoothing {
+            Filter::Smooth
+        } else {
+            Filter::Pixelated
+        }
+    }
+
+    /// Filmstrip height (96-DPI pixels) if it is shown.
+    fn strip_height(&self) -> Option<f64> {
+        self.settings
+            .filmstrip
+            .then(|| self.settings.thumb_size.strip_height())
+    }
+
     fn viewport(&self) -> (f64, f64) {
         let (w, h) = self.gpu.size();
         (f64::from(w), f64::from(h))
@@ -373,8 +414,9 @@ impl App {
         match self.mode {
             Mode::Fullscreen => {
                 let m = self.monitor.px(FIT_MARGIN_DIP);
-                let bottom =
-                    (crate::ui::toolbar::reserved_height(self.filmstrip) * self.ui_scale()).round();
+                let bottom = (crate::ui::toolbar::reserved_height(self.strip_height())
+                    * self.ui_scale())
+                .round();
                 Rect {
                     x0: m,
                     y0: m,
@@ -382,12 +424,14 @@ impl App {
                     y1: h - bottom - (m / 2.0).round(),
                 }
             }
+            // Inside the frame.
             Mode::Windowed => Rect {
                 x0: 0.0,
                 y0: 0.0,
                 x1: w,
                 y1: h,
-            },
+            }
+            .inset(self.monitor.px(mode::FRAME_DIP)),
         }
     }
 
@@ -432,7 +476,7 @@ impl App {
             quad,
             origin: [rect.x0 as f32, rect.y0 as f32],
             // Skip the background pass entirely for opaque images.
-            background: if img.has_alpha && self.checker {
+            background: if img.has_alpha && self.settings.checker {
                 Background::Checker(self.monitor.px(CHECKER_DIP) as f32)
             } else {
                 Background::None
@@ -482,7 +526,7 @@ impl App {
         let params = DrawParams {
             clear,
             layers: &layers,
-            filter: self.filter,
+            filter: self.filter(),
         };
         let ui = Ui {
             scale: self.ui_scale() as f32,
@@ -494,14 +538,20 @@ impl App {
                     .unwrap_or_default();
                 format!("Не удалось открыть файл\n{name}: {e}")
             }),
-            // The panel shows the zoom level itself.
-            badge: if self.panel_alpha < 0.5 {
+            // The panel shows the zoom level itself; notices always show.
+            badge: if self.panel_alpha < 0.5 || self.notice.is_some() {
                 self.badge_text()
             } else {
                 None
             },
+            badge_lift: if self.panel_target > 0.5 {
+                self.panel_height() as f32
+            } else {
+                0.0
+            },
             panel: self.panel_view(),
             border: self.mode == Mode::Windowed,
+            card: self.card_view(),
         };
         self.gpu.draw(&params, &ui)
     }
@@ -514,13 +564,18 @@ impl App {
         let opacity = self.badge_fade.map_or(1.0, |f| {
             1.0 - (f.elapsed().as_secs_f32() / BADGE_FADE.as_secs_f32()).min(1.0)
         });
-        Some((panel::zoom_label(self.zoom_target().scale), opacity))
+        let text = match &self.notice {
+            Some((t, _)) => t.clone(),
+            None => panel::zoom_label(self.zoom_target().scale),
+        };
+        Some((text, opacity))
     }
 
     /// Shows the zoom badge and (re)starts its hide timer.
     fn show_badge(&mut self) {
         self.badge = true;
         self.badge_fade = None;
+        self.notice = None;
         // SAFETY: own window; re-arming an existing timer id just resets it.
         unsafe { SetTimer(Some(self.hwnd), BADGE_TIMER, BADGE_HOLD_MS, None) };
     }
@@ -596,6 +651,7 @@ impl App {
             if f.elapsed() >= BADGE_FADE {
                 self.badge = false;
                 self.badge_fade = None;
+                self.notice = None;
             } else {
                 moving = true;
             }
@@ -648,14 +704,20 @@ impl App {
     /// Opening animation: the photo grows from the centre while the
     /// backdrop darkens. The first frame is already visible (not empty).
     fn start_open_anim(&mut self) {
-        let (Some(duration), Some(img), Some(fit)) = (OPEN_ANIM, self.display(), self.fit_view())
+        let (Some(duration), Some(img), Some(fit)) =
+            (self.anim_len(OPEN_ANIM), self.display(), self.fit_view())
         else {
             return;
         };
         let vp = self.viewport();
         let to = fit.image_rect(img, vp);
         let (cx, cy) = to.center();
-        let k = 0.82;
+        // In a window the photo already fills the frame: a gentler zoom.
+        let k = if self.mode == Mode::Windowed {
+            0.94
+        } else {
+            0.82
+        };
         let from = Rect {
             x0: cx - to.width() * k / 2.0,
             y0: cy - to.height() * k / 2.0,
@@ -669,7 +731,7 @@ impl App {
             kind: AnimKind::Mode {
                 from,
                 to,
-                dim: (self.dim, DIM),
+                dim: (self.dim, self.settings.dim()),
                 opacity: (self.opacity, 1.0),
                 enter_windowed: None,
                 end_view: Some(fit),
@@ -733,6 +795,18 @@ impl App {
             WM_APP_THUMB => {
                 self.on_thumbs()?;
                 Ok(Some(LRESULT(0)))
+            }
+            WM_APP_SAVED => {
+                self.on_saved()?;
+                Ok(Some(LRESULT(0)))
+            }
+            WM_CLOSE => {
+                // Write a pending rotation and wait for all writes to finish.
+                self.leave_current();
+                if let Some(w) = &mut self.writer {
+                    w.finish();
+                }
+                Ok(None)
             }
             _ => {
                 if let Some(r) = self.handle_window(msg, wparam, lparam)? {

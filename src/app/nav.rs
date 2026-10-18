@@ -37,6 +37,17 @@ impl App {
             post(hwnd, WM_APP_DECODED);
         }));
 
+        self.rescan_folder();
+        self.start_thumbs();
+        self.start_writer();
+        self.show_panel();
+        self.update_title();
+        self.schedule();
+    }
+
+    /// Lists the current folder on a background thread (WM_APP_LIBRARY).
+    pub(super) fn rescan_folder(&mut self) {
+        let hwnd = self.hwnd.0 as isize;
         let current = self.current.clone();
         let dir = current
             .parent()
@@ -54,10 +65,6 @@ impl App {
         if let Err(e) = spawned {
             tracing::error!("cannot start folder scan: {e}");
         }
-        self.start_thumbs();
-        self.show_panel();
-        self.update_title();
-        self.schedule();
     }
 
     pub(super) fn on_library(&mut self) -> Result<()> {
@@ -82,6 +89,14 @@ impl App {
     pub(super) fn on_decoded(&mut self) -> Result<()> {
         let mut redraw = false;
         while let Some(done) = self.loader.as_ref().and_then(Loader::try_recv) {
+            let key = cache::key(&done.path);
+            // A rewritten file came back: its pixels now include the saved
+            // rotation, so the remaining edit shrinks accordingly.
+            if done.result.is_ok()
+                && let Some(saved) = self.reloading.remove(&key)
+            {
+                self.apply_saved_edit(&key, saved);
+            }
             let is_current = cache::key(&done.path) == cache::key(&self.current);
             let ok = done.result.as_ref().ok().cloned();
             self.store_result(&done.path, done.result);
@@ -133,6 +148,8 @@ impl App {
         if index == self.index || index >= self.files.len() {
             return Ok(());
         }
+        // Write / ask about a rotation of the photo being left.
+        self.leave_current();
         let t0 = std::time::Instant::now();
         self.finish_anim()?;
         self.direction = if index > self.index { 1 } else { -1 };
@@ -189,7 +206,19 @@ impl App {
                 .shown
                 .as_ref()
                 .is_some_and(|(_, t)| !Rc::ptr_eq(t, &tex));
+            let before = self.display();
             self.shown = Some((key, tex));
+            // The file was rewritten or restored with other dimensions
+            // (undo of a rotation): fit again.
+            if self.display() != before {
+                if self.mode == Mode::Windowed {
+                    self.fit_window_to_image()?;
+                }
+                if let Some(v) = self.fit_view() {
+                    self.view = v;
+                    self.fitted = true;
+                }
+            }
             return Ok(changed);
         }
         // Settle any running animation on the old image first.
@@ -206,7 +235,8 @@ impl App {
         self.opacity = 1.0;
         self.badge = false;
         // Page turn, unless the user is skimming with key auto-repeat.
-        if let (Some(duration), Some((old_key, old)), false) = (TURN_ANIM, previous, self.fast_nav)
+        if let (Some(duration), Some((old_key, old)), false) =
+            (self.anim_len(TURN_ANIM), previous, self.fast_nav)
         {
             let (old, shift) = match self.mode {
                 Mode::Fullscreen => (

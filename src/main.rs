@@ -12,11 +12,14 @@ mod app;
 mod bench;
 mod cache;
 mod decode;
+mod edit;
+mod encode;
 mod gfx;
 mod library;
 mod loader;
 mod metadata;
 mod orientation;
+mod settings;
 mod ui;
 mod view;
 mod win;
@@ -163,7 +166,8 @@ fn run(args: &Args) -> Result<()> {
     };
     bench::mark("joined");
 
-    let mut app = app::App::new(hwnd, gpu, pending_hw, path, decoded, monitor)?;
+    let settings = settings::Settings::load();
+    let mut app = app::App::new(hwnd, gpu, pending_hw, path, decoded, monitor, settings)?;
     app.first_frame()?;
     // Activation (focus, text services) is slow; do it once the photo is up.
     win::window::activate(hwnd);

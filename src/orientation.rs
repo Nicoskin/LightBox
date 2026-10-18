@@ -63,6 +63,14 @@ impl Orientation {
         }
     }
 
+    /// The operation that undoes this one.
+    pub fn inverse(self) -> Orientation {
+        (1..=8)
+            .map(Orientation)
+            .find(|o| self.then(*o) == Orientation::IDENTITY)
+            .unwrap_or(Orientation::IDENTITY)
+    }
+
     /// This orientation followed by the display operation `op` (e.g.
     /// [`Self::ROTATE_CW`]): the image as shown now, transformed by `op`.
     pub fn then(self, op: Orientation) -> Orientation {
@@ -107,6 +115,8 @@ mod tests {
                 o
             );
             assert_eq!(o.then(Orientation::FLIP_H).then(Orientation::FLIP_H), o);
+            assert_eq!(o.then(o.inverse()), Orientation::IDENTITY);
+            assert_eq!(o.inverse().then(o), Orientation::IDENTITY);
             assert_eq!(o.then(Orientation::FLIP_V).then(Orientation::FLIP_V), o);
             // Two 90° turns equal a 180° turn equal both mirrors.
             assert_eq!(

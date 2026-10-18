@@ -43,6 +43,10 @@ impl Textures {
         }
     }
 
+    pub fn remove(&mut self, key: &str) {
+        self.items.retain(|(k, _)| k != key);
+    }
+
     /// Drops everything (e.g. when switching to another GPU device).
     pub fn clear(&mut self) {
         self.items.clear();

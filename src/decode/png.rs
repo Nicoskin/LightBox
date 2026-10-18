@@ -7,7 +7,7 @@ use png::{ColorType, Decoder, Limits, Transformations};
 
 use super::{DecodeError, DecodedImage, MAX_TEXTURE_SIDE};
 
-pub fn decode(data: &[u8]) -> Result<DecodedImage, DecodeError> {
+pub fn decode(data: &[u8], premultiply: bool) -> Result<DecodedImage, DecodeError> {
     // TODO(M4): keep 16-bit precision (R16G16B16A16_FLOAT), ICC/gAMA, APNG.
     let mut dec = Decoder::new_with_limits(
         Cursor::new(data),
@@ -47,7 +47,7 @@ pub fn decode(data: &[u8]) -> Result<DecodedImage, DecodeError> {
         return Err(DecodeError::Png("unexpected buffer size".into()));
     }
     crate::bench::mark("decoded (png)");
-    DecodedImage::from_straight_rgba(w, h, rgba, (w, h))
+    DecodedImage::from_straight_rgba(w, h, rgba, (w, h), premultiply)
 }
 
 fn png_err(e: png::DecodingError) -> DecodeError {

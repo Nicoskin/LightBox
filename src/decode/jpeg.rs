@@ -65,6 +65,7 @@ pub fn decode(data: &[u8], hint: Option<SizeHint>) -> Result<DecodedImage, Decod
         h as u32,
         pixels,
         (header.width as u32, header.height as u32),
+        true,
     )
 }
 

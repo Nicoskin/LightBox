@@ -15,6 +15,10 @@ path = "src/main.rs"
 name = "gen_testdata"
 path = "tools/gen_testdata.rs"
 
+[[example]]
+name = "gen_icon"
+path = "tools/gen_icon.rs"
+
 [[bench]]
 name = "decode"
 harness = false
@@ -29,6 +33,10 @@ turbojpeg = { version = "1.5.1", default-features = false, features = ["cmake", 
 png = "0.18.1"
 kamadak-exif = "0.6.1"
 windows-numerics = "0.3.1"
+serde = { version = "1.0.229", features = ["derive"] }
+toml = "1.1.8"
+miniz_oxide = "0.8.9"
+crc32fast = "1.5.2"
 
 [dependencies.windows]
 version = "0.62.2"
@@ -54,6 +62,7 @@ features = [
     "Win32_UI_HiDpi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",
+    "Win32_UI_Shell_Common",
     "Win32_UI_WindowsAndMessaging",
 ]
 
