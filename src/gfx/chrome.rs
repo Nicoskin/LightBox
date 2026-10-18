@@ -316,3 +316,76 @@ impl Overlay {
         Ok(())
     }
 }
+
+impl Overlay {
+    /// Small dark label above (or below, near the top) the control at
+    /// `anchor`, kept inside the window.
+    pub(super) unsafe fn tooltip(&self, anchor: Rect, text: &str, s: f32) -> Result<()> {
+        use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS;
+        let size = unsafe { self.ctx.GetSize() };
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        let mut m = DWRITE_TEXT_METRICS::default();
+        // SAFETY: plain DirectWrite calls; the layout lives for the call.
+        unsafe {
+            let layout = self.dwrite.CreateTextLayout(
+                &wide,
+                &self.formats.detail,
+                size.width,
+                size.height,
+            )?;
+            layout.GetMetrics(&mut m)?;
+        }
+        let (pad, h, gap) = (9.0 * s, 26.0 * s, 8.0 * s);
+        let w = m.width + 2.0 * pad;
+        let cx = ((anchor.x0 + anchor.x1) / 2.0) as f32;
+        let left = (cx - w / 2.0).clamp(4.0 * s, (size.width - w - 4.0 * s).max(0.0));
+        let above = anchor.y0 as f32 - gap - h;
+        let top = if above >= 0.0 {
+            above
+        } else {
+            anchor.y1 as f32 + gap
+        };
+        let r = D2D_RECT_F {
+            left,
+            top,
+            right: left + w,
+            bottom: top + h,
+        };
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.25));
+            self.ctx.FillRoundedRectangle(
+                &rounded(
+                    D2D_RECT_F {
+                        top: r.top + 2.0 * s,
+                        bottom: r.bottom + 2.0 * s,
+                        ..r
+                    },
+                    6.0 * s,
+                ),
+                &self.brush,
+            );
+            self.brush.SetColor(&rgba(0.16, 0.16, 0.17, 0.97));
+            self.ctx
+                .FillRoundedRectangle(&rounded(r, 6.0 * s), &self.brush);
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.12));
+            self.ctx.DrawRoundedRectangle(
+                &rounded(r, 6.0 * s),
+                &self.brush,
+                s,
+                None::<&ID2D1StrokeStyle>,
+            );
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+            self.glyph_str(
+                text,
+                D2D_RECT_F {
+                    left: r.left + pad,
+                    right: r.right - pad + 2.0,
+                    ..r
+                },
+                &self.formats.detail,
+            );
+        }
+        Ok(())
+    }
+}

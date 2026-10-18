@@ -14,6 +14,7 @@ mod panel;
 mod save;
 mod system;
 mod textures;
+mod tooltip;
 mod vector;
 
 use std::cell::RefCell;
@@ -92,6 +93,8 @@ const PANEL_FADE: Duration = Duration::from_millis(180);
 const PANEL_TIMER: usize = 2;
 /// Hover delay before the transparency menu opens.
 const MENU_TIMER: usize = 3;
+/// Hover delay before a tooltip appears.
+const TOOLTIP_TIMER: usize = 4;
 /// Filmstrip glide: time constant of the exponential approach, seconds.
 const STRIP_TAU: f64 = 0.06;
 /// Posted by the thumbnail thread.
@@ -241,6 +244,8 @@ pub struct App {
     dial_drag: Option<(f64, f64)>,
     /// Channel view: 0 = colour, 1..3 = R, G, B, 4 = alpha (Shift+1..4).
     channel: u32,
+    /// Control whose tooltip is shown.
+    tooltip: Option<panel::Hot>,
     /// Pixel under the cursor (colour readout).
     probe: Option<inspector::Probe>,
     info_state: inspector::InfoState,
@@ -346,6 +351,7 @@ impl App {
             angle: 0.0,
             dial_drag: None,
             channel: 0,
+            tooltip: None,
             probe: None,
             info_state: inspector::InfoState::default(),
             hist_state: inspector::HistState::default(),
@@ -762,6 +768,7 @@ impl App {
             dial: self.dial_view(),
             info: self.info_view(),
             histogram: self.histogram_view(),
+            tooltip: self.tooltip_view(),
         };
         self.gpu.draw(&params, &ui)
     }
@@ -981,6 +988,11 @@ impl App {
     }
 
     fn on_timer(&mut self, id: usize) {
+        if id == TOOLTIP_TIMER
+            && let Err(e) = self.tooltip_timer()
+        {
+            tracing::error!("tooltip: {e:#}");
+        }
         if id == MENU_TIMER
             && let Err(e) = self.menu_timer()
         {

@@ -189,7 +189,7 @@ impl Default for Settings {
             confirm_delete: true,
             resident: false,
             autostart: false,
-            quick_look: true,
+            quick_look: false,
             editor: None,
             quick_folders: Vec::new(),
         }

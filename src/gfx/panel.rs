@@ -235,6 +235,54 @@ impl Overlay {
                     self.ctx
                         .DrawRectangle(&r, &self.brush, s, None::<&ID2D1StrokeStyle>);
                 }
+                Icon::Grid => {
+                    let (h, w) = (7.5 * s, 1.3 * s);
+                    let none = None::<&ID2D1StrokeStyle>;
+                    for k in 0..4 {
+                        let t = -h + k as f32 * (2.0 * h / 3.0);
+                        self.ctx.DrawLine(
+                            Vector2 {
+                                X: cx - h,
+                                Y: cy + t,
+                            },
+                            Vector2 {
+                                X: cx + h,
+                                Y: cy + t,
+                            },
+                            &self.brush,
+                            w,
+                            none,
+                        );
+                        self.ctx.DrawLine(
+                            Vector2 {
+                                X: cx + t,
+                                Y: cy - h,
+                            },
+                            Vector2 {
+                                X: cx + t,
+                                Y: cy + h,
+                            },
+                            &self.brush,
+                            w,
+                            none,
+                        );
+                    }
+                }
+                Icon::Histogram => {
+                    let base = cy + 7.0 * s;
+                    for (k, height) in [5.0f32, 11.0, 8.0, 14.0, 6.0].iter().enumerate() {
+                        let x = cx - 8.0 * s + k as f32 * 3.4 * s;
+                        self.ctx.FillRectangle(
+                            &D2D_RECT_F {
+                                left: x,
+                                top: base - height * s,
+                                right: x + 2.4 * s,
+                                bottom: base,
+                            },
+                            &self.brush,
+                        );
+                    }
+                }
                 Icon::Filmstrip => {
                     let (w, h, gap) = (5.0 * s, 8.0 * s, 1.5 * s);
                     for k in -1..=1 {

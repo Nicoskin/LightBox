@@ -119,11 +119,7 @@ impl App {
                     }
                     self.render()?;
                 } else if drag.is_some_and(|d| !d.moved) {
-                    if key_down(VK_CONTROL.0) {
-                        self.copy_color(p)?;
-                    } else {
-                        self.on_click(p)?;
-                    }
+                    self.on_click(p)?;
                 }
                 Ok(Some(LRESULT(0)))
             }
@@ -238,6 +234,9 @@ impl App {
             Action::Reset => self.reset_current(),
             Action::Settings => self.open_settings(),
             Action::Straighten => self.toggle_dial(),
+            Action::Grid => self.toggle_grid(),
+            Action::Info => self.toggle_info(),
+            Action::Histogram => self.toggle_histogram(),
         }
     }
 

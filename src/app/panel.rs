@@ -134,6 +134,7 @@ impl App {
     pub(super) fn set_hot(&mut self, hot: Option<Hot>) -> Result<()> {
         if hot != self.hot {
             self.hot = hot;
+            self.arm_tooltip();
             self.render()?;
         }
         Ok(())
@@ -163,6 +164,9 @@ impl App {
                     Action::Smoothing => self.settings.smoothing,
                     Action::Filmstrip => self.settings.filmstrip,
                     Action::Straighten => self.dial_open,
+                    Action::Grid => self.settings.pixel_grid,
+                    Action::Info => self.info_state.open,
+                    Action::Histogram => self.hist_state.open,
                     _ => false,
                 },
                 enabled: match b.action {
@@ -467,7 +471,22 @@ impl App {
                     self.apply_resident();
                 }
             }
-            Choice::QuickLook(_) => self.apply_quick_look(),
+            // Space in Explorer needs the viewer waiting in the tray, also
+            // after a restart: turning it on turns those on too.
+            Choice::QuickLook(on) => {
+                if on {
+                    self.settings.resident = true;
+                    if !self.settings.autostart {
+                        self.settings.autostart = true;
+                        self.set_autostart(true);
+                    }
+                    self.settings.save();
+                    self.apply_resident();
+                    self.notice("Пробел в проводнике работает, пока Lightbox в трее");
+                } else {
+                    self.apply_quick_look();
+                }
+            }
             Choice::Editor(true) => {
                 let start = self
                     .settings

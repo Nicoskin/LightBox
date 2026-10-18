@@ -23,6 +23,10 @@ pub enum Action {
     FlipV,
     /// Shows / hides the straightening dial.
     Straighten,
+    /// Pixel grid (G), info panel (I), histogram (H).
+    Grid,
+    Info,
+    Histogram,
     Save,
     SaveAs,
     Reset,
@@ -202,6 +206,10 @@ pub fn layout(
         Item::Gap,
         Item::Button(Checker, Icon::Checker, false),
         Item::Button(Smoothing, Icon::Smoothing, false),
+        Item::Button(Grid, Icon::Grid, false),
+        Item::Gap,
+        Item::Button(Info, Icon::Glyph('\u{E946}'), false),
+        Item::Button(Histogram, Icon::Histogram, false),
         Item::Gap,
         Item::Button(Filmstrip, Icon::Filmstrip, false),
         Item::Button(ToggleMode, mode_icon, false),
@@ -315,7 +323,7 @@ mod tests {
     fn fullscreen_layout() {
         let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false);
         no_overlaps(&l);
-        assert_eq!(l.buttons.len(), 19);
+        assert_eq!(l.buttons.len(), 22);
         assert!(l.caption.is_some() && l.zoom_text.is_some());
         let strip = l.strip.unwrap();
         assert_eq!(strip.y1, l.bar.y0);

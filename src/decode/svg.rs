@@ -32,13 +32,43 @@ pub fn parse(data: &[u8]) -> Result<usvg::Tree, DecodeError> {
         fontdb: fonts(),
         ..Default::default()
     };
-    let tree =
-        usvg::Tree::from_data(data, &opt).map_err(|e| DecodeError::Other(format!("SVG: {e}")))?;
+    let tree = match usvg::Tree::from_data(data, &opt) {
+        Ok(t) => t,
+        // Inline SVG copied from web pages often lacks the namespace that
+        // browsers do not insist on: add it and try again.
+        Err(e) => add_namespace(data)
+            .and_then(|fixed| usvg::Tree::from_data(&fixed, &opt).ok())
+            .ok_or_else(|| DecodeError::Other(format!("SVG: {e}")))?,
+    };
     let size = tree.size();
     if !(size.width() > 0.0 && size.height() > 0.0) {
         return Err(DecodeError::Unsupported);
     }
     Ok(tree)
+}
+
+/// The document with `xmlns="http://www.w3.org/2000/svg"` (and the xlink
+/// namespace if used) added to its root element; `None` if it has one or
+/// is not plain text.
+fn add_namespace(data: &[u8]) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(data).ok()?;
+    if text.contains("http://www.w3.org/2000/svg") {
+        return None;
+    }
+    let at = text.match_indices("<svg").map(|(i, _)| i + 4).find(|&i| {
+        text[i..]
+            .chars()
+            .next()
+            .is_some_and(|c| c.is_whitespace() || c == '>' || c == '/')
+    })?;
+    let mut s = String::with_capacity(text.len() + 96);
+    s.push_str(&text[..at]);
+    s.push_str(r#" xmlns="http://www.w3.org/2000/svg""#);
+    if text.contains("xlink:") && !text.contains("xmlns:xlink") {
+        s.push_str(r#" xmlns:xlink="http://www.w3.org/1999/xlink""#);
+    }
+    s.push_str(&text[at..]);
+    Some(s.into_bytes())
 }
 
 pub fn decode(data: &[u8], hint: Option<SizeHint>) -> Result<RawImage, DecodeError> {
@@ -114,6 +144,17 @@ mod tests {
         let at = |x: u32, y: u32| &px[((y * img.width + x) * 4) as usize..][..4];
         assert_eq!(at(512, 512), &[255, 0, 0, 255]); // inside the circle
         assert_eq!(at(1500, 512)[3], 0); // transparent outside
+    }
+
+    #[test]
+    fn svg_without_namespace() {
+        // As copied from a web page: no xmlns, size from the viewBox only.
+        let svg = br##"<svg viewBox="0 0 25.4 25.4" aria-hidden="true"><path fill="#111111" d="M0 12.7C0 5.7 5.7 0 12.7 0S25.4 5.7 25.4 12.7 19.7 25.4 12.7 25.4 0 19.7 0 12.7Z"></path></svg>"##;
+        let tree = parse(svg).unwrap();
+        assert!((tree.size().width() - 25.4).abs() < 1e-3);
+        let img = decode(svg, None).unwrap();
+        assert_eq!((img.width, img.height), (2048, 2048));
+        assert!(add_namespace(br#"<svg xmlns="http://www.w3.org/2000/svg"/>"#).is_none());
     }
 
     #[test]

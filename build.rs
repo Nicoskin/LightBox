@@ -88,17 +88,71 @@ fn find_fxc() -> Option<PathBuf> {
 
 /// Compiles `lightbox.rc` (the icon) with the SDK's `rc.exe` and links the
 /// result. Without a Windows SDK the exe simply has no icon.
+/// Name shown by Windows for the program (must match `APP_NAME` in main.rs).
+const PRODUCT: &str = "Lightbox";
+
 fn compile_resources(manifest_dir: &Path, out_dir: &Path) {
     let Some(rc) = find_sdk_tool("rc.exe") else {
         println!("cargo:warning=rc.exe not found, building without an icon");
         return;
     };
+    // lightbox.rc (icon) plus a version block generated from Cargo.toml:
+    // Explorer shows its FileDescription in "Open with" and Task Manager.
+    let version = env::var("CARGO_PKG_VERSION").unwrap_or_else(|_| "0.0.0".into());
+    let mut parts = version
+        .split('.')
+        .map(|p| p.parse::<u16>().unwrap_or(0))
+        .chain(std::iter::repeat(0));
+    let (a, b, c) = (
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+        parts.next().unwrap_or(0),
+    );
+    // The generated script lives in OUT_DIR: the icon needs an absolute path.
+    let icon = manifest_dir
+        .join("assets")
+        .join("lightbox.ico")
+        .display()
+        .to_string()
+        .replace('\\', "\\\\");
+    let base = fs::read_to_string(manifest_dir.join("lightbox.rc"))
+        .expect("lightbox.rc")
+        .replace("assets/lightbox.ico", &icon);
+    let rc_text = format!(
+        r#"{base}
+1 VERSIONINFO
+FILEVERSION {a},{b},{c},0
+PRODUCTVERSION {a},{b},{c},0
+FILEOS 0x40004
+FILETYPE 0x1
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "041904B0"
+    BEGIN
+      VALUE "FileDescription", "{PRODUCT}"
+      VALUE "ProductName", "{PRODUCT}"
+      VALUE "FileVersion", "{version}"
+      VALUE "ProductVersion", "{version}"
+      VALUE "InternalName", "lightbox"
+      VALUE "OriginalFilename", "lightbox.exe"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x419, 1200
+  END
+END
+"#
+    );
+    let rc_file = out_dir.join("lightbox.rc");
+    fs::write(&rc_file, rc_text).expect("write rc");
     let res = out_dir.join("lightbox.res");
     let status = Command::new(rc)
         .current_dir(manifest_dir)
         .args(["/nologo", "/fo"])
         .arg(&res)
-        .arg("lightbox.rc")
+        .arg(&rc_file)
         .status()
         .expect("failed to run rc.exe");
     assert!(status.success(), "rc.exe failed");

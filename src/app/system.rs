@@ -25,10 +25,10 @@ use windows::Win32::UI::Shell::{
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GUITHREADINFO, GetClassNameW, GetForegroundWindow,
-    GetGUIThreadInfo, GetMessageW, GetWindowThreadProcessId, HHOOK, IsIconic, IsWindowVisible,
-    KBDLLHOOKSTRUCT, MSG, PostMessageW, RegisterWindowMessageW, SW_HIDE, SW_RESTORE, SW_SHOW,
-    SetForegroundWindow, SetWindowsHookExW, ShowWindow, TranslateMessage, UnhookWindowsHookEx,
-    WH_KEYBOARD_LL, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP,
+    GetGUIThreadInfo, GetMessageW, GetParent, GetWindowThreadProcessId, HHOOK, IsIconic,
+    IsWindowVisible, KBDLLHOOKSTRUCT, MSG, PostMessageW, RegisterWindowMessageW, SW_HIDE,
+    SW_RESTORE, SW_SHOW, SetForegroundWindow, SetWindowsHookExW, ShowWindow, TranslateMessage,
+    UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP,
 };
 use windows::core::{Interface as _, w};
 
@@ -456,10 +456,23 @@ fn explorer_items_focused(fg: HWND) -> bool {
         if GetGUIThreadInfo(thread, &mut info).is_err() {
             return false;
         }
-        matches!(
-            class_name(info.hwndFocus).as_str(),
-            "DirectUIHWND" | "SysListView32"
-        )
+        // The item list lives in a SHELLDLL_DefView window (the address
+        // bar and search box do not); its rename field is an "Edit".
+        let focus = info.hwndFocus;
+        if focus.is_invalid() || class_name(focus) == "Edit" {
+            return false;
+        }
+        let mut h = focus;
+        for _ in 0..6 {
+            if class_name(h) == "SHELLDLL_DefView" {
+                return true;
+            }
+            match GetParent(h) {
+                Ok(p) if !p.is_invalid() => h = p,
+                _ => break,
+            }
+        }
+        false
     }
 }
 

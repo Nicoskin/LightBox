@@ -60,6 +60,8 @@ pub struct Ui {
     pub info: Option<InfoView>,
     /// Histogram overlay (H).
     pub histogram: Option<HistogramView>,
+    /// Tooltip: the control it belongs to and the text.
+    pub tooltip: Option<(Rect, String)>,
 }
 
 impl Ui {
@@ -74,6 +76,7 @@ impl Ui {
             && self.dial.is_none()
             && self.info.is_none()
             && self.histogram.is_none()
+            && self.tooltip.is_none()
     }
 }
 
@@ -93,6 +96,10 @@ pub enum Icon {
     Angle,
     /// Solid swatch of an sRGB grey level.
     Swatch(f32),
+    /// A 3 × 3 grid (pixel grid).
+    Grid,
+    /// Three bars (histogram).
+    Histogram,
 }
 
 /// Premultiplied BGRA thumbnail; `id` identifies it for bitmap caching.
@@ -188,7 +195,7 @@ pub(super) struct Formats {
 pub struct Overlay {
     pub(super) ctx: ID2D1DeviceContext,
     target: Option<ID2D1Bitmap1>,
-    dwrite: IDWriteFactory,
+    pub(super) dwrite: IDWriteFactory,
     pub(super) formats: Formats,
     pub(super) brush: ID2D1SolidColorBrush,
     /// D2D bitmaps of filmstrip thumbnails, by [`Thumb::id`].
@@ -298,6 +305,9 @@ impl Overlay {
             }
             if let Some(card) = &ui.card {
                 self.card(card, ui.scale);
+            }
+            if let Some((anchor, text)) = &ui.tooltip {
+                self.tooltip(*anchor, text, ui.scale)?;
             }
             self.ctx.EndDraw(None, None)?;
         }

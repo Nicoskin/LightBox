@@ -529,24 +529,32 @@ mod tests {
     }
 
     #[test]
-    fn generated_png_metadata() {
-        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/comfyui.png");
+    fn png_text_chunks_and_camera_exif() {
+        // A tiny PNG with ComfyUI chunks, built here (no sample file).
+        let mut bytes = Vec::new();
+        {
+            let mut e = png::Encoder::new(&mut bytes, 2, 2);
+            e.set_color(png::ColorType::Rgb);
+            e.add_text_chunk(
+                "prompt".into(),
+                r#"{"3":{"class_type":"KSampler","inputs":{"seed":7,"positive":["6",0]}},"6":{"class_type":"CLIPTextEncode","inputs":{"text":"a red fox"}}}"#.into(),
+            )
+            .unwrap();
+            e.add_ztxt_chunk("workflow".into(), r#"{"nodes":[]}"#.into())
+                .unwrap();
+            let mut w = e.write_header().unwrap();
+            w.write_image_data(&[0; 12]).unwrap();
+        }
+        let ai = ai_from_text(&png_text(&bytes).unwrap()).expect("ai");
+        assert_eq!((ai.tool, ai.prompt.as_str()), ("ComfyUI", "a red fox"));
+        assert_eq!(ai.workflow.as_deref(), Some(r#"{"nodes":[]}"#));
+
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/camera_exif.jpg");
         if !p.exists() {
             return;
         }
-        let info = gather(&p);
-        let ai = info.ai.expect("ai metadata");
-        assert_eq!(ai.tool, "ComfyUI");
-        assert!(ai.prompt.starts_with("a lighthouse at dusk"));
-        assert_eq!(ai.negative, "blurry, low quality");
-        assert!(ai.workflow.is_some());
-        assert!(info.size > 0 && info.modified.is_some());
-
-        let a = gather(&p.with_file_name("a1111.png")).ai.expect("a1111");
-        assert_eq!(a.tool, "A1111");
-        assert!(a.params.contains(&("Seed".into(), "3141592653".into())));
-
-        let cam = gather(&p.with_file_name("camera_exif.jpg"));
+        let cam = gather(&p);
+        assert!(cam.size > 0 && cam.modified.is_some());
         let row = |l: &str| {
             cam.exif
                 .iter()

@@ -139,7 +139,8 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         Choice::TurnAnimation(v) => s.turn_animation == v,
         Choice::Dim(v) => s.dim_percent == v,
         Choice::Resident(v) => s.resident == v,
-        Choice::QuickLook(v) => s.quick_look == v,
+        // Only works while the viewer waits in the tray.
+        Choice::QuickLook(v) => (s.quick_look && s.resident) == v,
         Choice::Autostart(v) => s.autostart == v,
         Choice::ConfirmDelete(v) => s.confirm_delete == v,
         Choice::Editor(v) => s.editor.is_some() == v,
@@ -159,7 +160,10 @@ pub fn apply(s: &mut Settings, c: Choice) {
         Choice::TurnAnimation(v) => s.turn_animation = v,
         Choice::Dim(v) => s.dim_percent = v,
         Choice::Resident(v) => s.resident = v,
-        Choice::QuickLook(v) => s.quick_look = v,
+        Choice::QuickLook(v) => {
+            s.quick_look = v;
+            s.resident |= v;
+        }
         Choice::Autostart(v) => s.autostart = v,
         Choice::ConfirmDelete(v) => s.confirm_delete = v,
         Choice::Editor(false) => s.editor = None,

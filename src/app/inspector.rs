@@ -1,5 +1,4 @@
-//! Pixel inspector: colour under the cursor, Ctrl+click → HEX, channel
-//! views, pixel grid, histogram (H) and the info panel (I).
+//! Pixel inspector: colour under the cursor, channel views, pixel grid, histogram (H) and the info panel (I).
 
 use std::rc::Rc;
 use std::sync::Arc;
@@ -133,22 +132,6 @@ impl App {
             self.render()?;
         }
         Ok(())
-    }
-
-    /// Ctrl+click: the colour under the cursor as HEX to the clipboard.
-    pub(super) fn copy_color(&mut self, p: (f64, f64)) -> Result<()> {
-        let Some(probe) = self.probe_at(p) else {
-            return Ok(());
-        };
-        let hex = probe.hex();
-        match clipboard::set_text(self.hwnd, &hex) {
-            Ok(()) => self.notice(&format!("Скопировано {hex}")),
-            Err(e) => {
-                tracing::warn!("clipboard: {e:#}");
-                self.notice("Не удалось скопировать");
-            }
-        }
-        self.render()
     }
 
     /// Top of the inspector overlays: below the title bar or the corner

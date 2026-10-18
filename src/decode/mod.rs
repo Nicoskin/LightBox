@@ -478,7 +478,7 @@ fn sniff(data: &[u8], ext: &str) -> Format {
     if data.len() >= 2 && data[0] == b'P' && (b'1'..=b'7').contains(&data[1]) {
         return Format::Image(F::Pnm);
     }
-    if ext == "svgz" && starts(&[0x1F, 0x8B]) || looks_like_svg(data) {
+    if ext == "svgz" && starts(&[0x1F, 0x8B]) || ext == "svg" || looks_like_svg(data) {
         return Format::Svg;
     }
     if is_raw_ext {
@@ -492,11 +492,11 @@ fn sniff(data: &[u8], ext: &str) -> Format {
 }
 
 fn looks_like_svg(data: &[u8]) -> bool {
-    let head = &data[..data.len().min(1024)];
+    // Editors write long prologues (comments, DOCTYPE, metadata).
+    let head = &data[..data.len().min(8192)];
     let text = String::from_utf8_lossy(head);
     let t = text.trim_start_matches('\u{feff}').trim_start();
-    (t.starts_with("<?xml") || t.starts_with("<svg") || t.starts_with("<!--"))
-        && text.contains("<svg")
+    t.starts_with('<') && text.contains("<svg")
 }
 
 #[cfg(test)]
