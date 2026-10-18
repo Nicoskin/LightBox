@@ -50,6 +50,8 @@ pub struct Layer<'a> {
     pub origin: [f32; 2],
     pub background: Background,
     pub opacity: f32,
+    /// EXIF-style orientation 1..8 to display the texture with.
+    pub orientation: u32,
 }
 
 /// Everything needed to draw one frame.
@@ -198,7 +200,7 @@ impl Renderer {
                     viewport: [w as f32, h as f32],
                     checker_origin: layer.origin,
                     checker_size: checker,
-                    orientation: u32::from(layer.image.orientation.exif()),
+                    orientation: layer.orientation,
                     bg_mode,
                     opacity: layer.opacity.clamp(0.0, 1.0),
                     ..Default::default()

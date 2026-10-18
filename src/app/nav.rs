@@ -54,6 +54,8 @@ impl App {
         if let Err(e) = spawned {
             tracing::error!("cannot start folder scan: {e}");
         }
+        self.start_thumbs();
+        self.show_panel();
         self.update_title();
         self.schedule();
     }
@@ -72,6 +74,7 @@ impl App {
             self.current = p.clone();
         }
         self.update_title();
+        self.request_thumbs();
         self.schedule();
         Ok(())
     }
@@ -140,6 +143,7 @@ impl App {
         if shown {
             self.render()?;
         }
+        self.request_thumbs();
         tracing::debug!(
             "navigate to {}: {:.2} ms ({})",
             self.current.display(),
@@ -202,10 +206,11 @@ impl App {
         self.opacity = 1.0;
         self.badge = false;
         // Page turn, unless the user is skimming with key auto-repeat.
-        if let (Some(duration), Some((_, old)), false) = (TURN_ANIM, previous, self.fast_nav) {
+        if let (Some(duration), Some((old_key, old)), false) = (TURN_ANIM, previous, self.fast_nav)
+        {
             let (old, shift) = match self.mode {
                 Mode::Fullscreen => (
-                    Some((old, old_view)),
+                    Some((old_key, old, old_view)),
                     self.viewport().0 * TURN_SHIFT * self.direction as f64,
                 ),
                 // The window already has the new photo's shape: fade only.

@@ -106,6 +106,7 @@ pub struct View {
 }
 
 impl View {
+    #[cfg(test)]
     /// View that fits the image into the viewport with a margin on each side,
     /// enlarging small images only with `upscale`.
     pub fn fit(img: (f64, f64), viewport: (f64, f64), margin: f64, upscale: bool) -> Self {
@@ -166,22 +167,54 @@ impl View {
         }
     }
 
+    #[cfg(test)]
     /// Keeps the image on screen: an axis that fits is centred, an axis
     /// larger than the viewport may not reveal empty space at its edges.
     pub fn clamped(&self, img: (f64, f64), viewport: (f64, f64)) -> Self {
-        let axis = |c: f64, len: f64, vp: f64| {
-            let half = vp / 2.0 / self.scale;
-            if len * self.scale <= vp {
-                len / 2.0
+        let full = Rect {
+            x0: 0.0,
+            y0: 0.0,
+            x1: viewport.0,
+            y1: viewport.1,
+        };
+        self.clamped_in(img, full, viewport)
+    }
+
+    /// Like [`Self::clamped`], but an axis that fits inside `area` (the part
+    /// of the screen not covered by the panel) is centred in `area`.
+    pub fn clamped_in(&self, img: (f64, f64), area: Rect, viewport: (f64, f64)) -> Self {
+        let s = self.scale;
+        let axis = |c: f64, len: f64, vp: f64, a0: f64, a1: f64| {
+            let half = vp / 2.0 / s;
+            let size = len * s;
+            if size <= a1 - a0 {
+                len / 2.0 + (vp / 2.0 - (a0 + a1) / 2.0) / s
+            } else if size <= vp {
+                // Larger than the area but fits the screen: stay on screen.
+                c.clamp(len - half, half)
             } else {
                 c.clamp(half, len - half)
             }
         };
         Self {
-            scale: self.scale,
+            scale: s,
             center: (
-                axis(self.center.0, img.0, viewport.0),
-                axis(self.center.1, img.1, viewport.1),
+                axis(self.center.0, img.0, viewport.0, area.x0, area.x1),
+                axis(self.center.1, img.1, viewport.1, area.y0, area.y1),
+            ),
+        }
+    }
+
+    /// Fits the image into `area` (centred there), enlarging only with `upscale`.
+    pub fn fit_in(img: (f64, f64), area: Rect, viewport: (f64, f64), upscale: bool) -> Self {
+        let f = if upscale { fill_scale } else { fit_scale };
+        let scale = f(img.0, img.1, area.width(), area.height());
+        let (ax, ay) = area.center();
+        Self {
+            scale,
+            center: (
+                img.0 / 2.0 + (viewport.0 / 2.0 - ax) / scale,
+                img.1 / 2.0 + (viewport.1 / 2.0 - ay) / scale,
             ),
         }
     }
@@ -329,6 +362,33 @@ mod tests {
         }
         .clamped((4000.0, 3000.0), vp);
         assert_eq!(big.center, (500.0, 2600.0));
+    }
+
+    #[test]
+    fn fit_in_area_and_clamp_agree() {
+        let vp = (2000.0, 1000.0);
+        let area = Rect {
+            x0: 20.0,
+            y0: 20.0,
+            x1: 1980.0,
+            y1: 850.0,
+        };
+        let img = (4000.0, 3000.0);
+        let v = View::fit_in(img, area, vp, false);
+        let r = v.image_rect(img, vp);
+        assert!((r.center().1 - 435.0).abs() < 1.0, "{r:?}");
+        assert!(r.y0 >= 19.0 && r.y1 <= 851.0);
+        // Clamping a fitted view leaves it unchanged.
+        let c = v.clamped_in(img, area, vp);
+        assert!((c.center.0 - v.center.0).abs() < 1e-9 && (c.center.1 - v.center.1).abs() < 1e-9);
+        // Bigger than the area but smaller than the screen: no panic, on screen.
+        let mid = View {
+            scale: 0.3,
+            center: (0.0, 0.0),
+        }
+        .clamped_in(img, area, vp);
+        let r = mid.image_rect(img, vp);
+        assert!(r.y0 >= -1e-9 && r.y1 <= 1000.0 + 1e-9, "{r:?}");
     }
 
     #[test]

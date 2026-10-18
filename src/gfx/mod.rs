@@ -7,11 +7,12 @@
 mod compositor;
 mod device;
 mod overlay;
+mod panel;
 mod renderer;
 mod texture;
 
 pub use compositor::Compositor;
 pub use device::{Adapter, Gpu};
-pub use overlay::Ui;
+pub use overlay::{ButtonView, CellView, Icon, PanelView, TextStyle, TextView, Thumb, Ui};
 pub use renderer::{Background, DrawParams, Filter, Layer};
 pub use texture::GpuImage;

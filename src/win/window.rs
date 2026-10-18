@@ -1,18 +1,19 @@
 use anyhow::{Context as _, Result};
-use windows::Win32::Foundation::{HWND, RECT};
+use windows::Win32::Foundation::{HWND, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
     DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_USE_IMMERSIVE_DARK_MODE,
-    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND, DWMWINDOWATTRIBUTE, DwmFlush,
-    DwmSetWindowAttribute,
+    DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND, DWMWCP_ROUND, DWMWINDOWATTRIBUTE,
+    DwmExtendFrameIntoClientArea, DwmFlush, DwmSetWindowAttribute,
 };
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CS_DBLCLKS, CreateWindowExW, DispatchMessageW, GWL_STYLE, GetWindowRect, IDC_ARROW,
-    LoadCursorW, MSG, PM_REMOVE, PeekMessageW, RegisterClassExW, SW_SHOWNA, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
-    SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_STYLE, WM_QUIT, WNDCLASSEXW, WNDPROC,
-    WS_CAPTION, WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
-    WS_THICKFRAME, WS_VISIBLE, WaitMessage,
+    CS_DBLCLKS, CreateWindowExW, DispatchMessageW, GWL_STYLE, GetCursorPos, GetWindowRect,
+    IDC_ARROW, LoadCursorW, MSG, PM_REMOVE, PeekMessageW, RegisterClassExW, SW_SHOWNA,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW,
+    SetWindowPos, SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_STYLE, WM_QUIT, WNDCLASSEXW,
+    WNDPROC, WS_CAPTION, WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP, WS_MINIMIZEBOX, WS_POPUP,
+    WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE, WaitMessage,
 };
 use windows::core::{BOOL, HSTRING, PCWSTR, w};
 
@@ -104,6 +105,15 @@ pub fn rect(hwnd: HWND) -> RECT {
     r
 }
 
+pub fn cursor_pos() -> POINT {
+    let mut p = POINT::default();
+    // SAFETY: valid out-pointer.
+    unsafe {
+        let _ = GetCursorPos(&mut p);
+    }
+    p
+}
+
 /// Sets a DWM window attribute; failures (older Windows) are ignored.
 fn dwm_attr<T>(hwnd: HWND, attr: DWMWINDOWATTRIBUTE, value: T) {
     // SAFETY: own window; the value outlives the call and its size matches.
@@ -129,6 +139,19 @@ fn set_frame(hwnd: HWND, windowed: bool) {
     dwm_attr(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, BOOL::from(true));
     dwm_attr(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, corners);
     dwm_attr(hwnd, DWMWA_BORDER_COLOR, border);
+    // A one-pixel "frame" extended into the client area makes DWM draw the
+    // drop shadow of a window without a visible system frame.
+    let m = i32::from(windowed);
+    let margins = MARGINS {
+        cxLeftWidth: m,
+        cxRightWidth: m,
+        cyTopHeight: m,
+        cyBottomHeight: m,
+    };
+    // SAFETY: own window; the struct outlives the call.
+    unsafe {
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &margins);
+    }
 }
 
 /// Switches between the fullscreen and windowed styles and moves the window

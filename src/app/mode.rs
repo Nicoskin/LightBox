@@ -69,7 +69,7 @@ impl App {
         if self.mode == Mode::Windowed {
             return Ok(()); // the animation that just ended entered it
         }
-        let Some(display) = self.shown_image().map(|i| i.display) else {
+        let Some(display) = self.display() else {
             return Ok(()); // nothing to put in a window
         };
         let mon = self.monitor;
@@ -146,13 +146,14 @@ impl App {
         window::set_mode(self.hwnd, false, mon.rect)?;
         let (w, h) = mon.size();
         self.gpu.resize(w, h)?;
+        self.request_thumbs();
         self.mode_switched_at = Instant::now();
         self.fitted = true;
 
         let target = self.fit_view();
         match (from, target, MODE_ANIM) {
             (Some(from), Some(target), Some(duration)) => {
-                let display = self.shown_image().map_or((1.0, 1.0), |i| i.display);
+                let display = self.display().unwrap_or((1.0, 1.0));
                 let vp = self.viewport();
                 // First frame: the photo exactly where the window was.
                 self.view = View::placed(display, from, vp);
@@ -183,7 +184,7 @@ impl App {
 
     /// Windowed mode, new photo: resize the window to it, keeping the centre.
     pub(super) fn fit_window_to_image(&mut self) -> Result<()> {
-        let Some(display) = self.shown_image().map(|i| i.display) else {
+        let Some(display) = self.display() else {
             return Ok(());
         };
         let mon = Monitor::of_window(self.hwnd);
@@ -224,8 +225,8 @@ impl App {
             if let Some(v) = self.fit_view() {
                 self.view = v;
             }
-        } else if let Some(img) = self.shown_image() {
-            self.view = self.view.clamped(img.display, self.viewport());
+        } else {
+            self.view = self.clamp(self.view);
         }
         self.render()
     }
@@ -256,6 +257,7 @@ impl App {
             (_, true, ..) => HTRIGHT,
             (_, _, true, _) => HTTOP,
             (.., true) => HTBOTTOM,
+            _ if self.over_panel((x, y)) => HTCLIENT,
             _ if self.drag_moves_window() => HTCAPTION,
             _ => HTCLIENT,
         };
@@ -264,7 +266,7 @@ impl App {
 
     /// Keeps the photo's aspect ratio while the user resizes the window.
     fn on_sizing(&self, edge: u32, r: &mut RECT) {
-        let Some((dw, dh)) = self.shown_image().map(|i| i.display) else {
+        let Some((dw, dh)) = self.display() else {
             return;
         };
         let aspect = dw / dh;

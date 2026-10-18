@@ -7,9 +7,11 @@
 mod input;
 mod mode;
 mod nav;
+mod panel;
 mod textures;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::mpsc::{Receiver, TryRecvError};
@@ -27,6 +29,8 @@ use crate::cache::{self, Cache};
 use crate::decode::{DecodeError, DecodedImage};
 use crate::gfx::{Adapter, Background, Compositor, DrawParams, Filter, Gpu, GpuImage, Layer, Ui};
 use crate::loader::Loader;
+use crate::orientation::Orientation;
+use crate::ui::thumbs::Thumbnails;
 use crate::view::{self, Rect, View};
 use crate::win::monitor::Monitor;
 use textures::Textures;
@@ -58,6 +62,12 @@ const TURN_SHIFT: f64 = 0.06;
 const BADGE_HOLD_MS: u32 = 1000;
 const BADGE_FADE: Duration = Duration::from_millis(300);
 const BADGE_TIMER: usize = 1;
+/// The panel hides this long after the last mouse movement.
+const PANEL_HOLD_MS: u32 = 2000;
+const PANEL_FADE: Duration = Duration::from_millis(180);
+const PANEL_TIMER: usize = 2;
+/// Posted by the thumbnail thread.
+const WM_APP_THUMB: u32 = WM_APP + 4;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -92,7 +102,7 @@ enum AnimKind {
     /// slides in (`shift` pixels, signed by direction). Without `old` (windowed
     /// mode) the new image just fades in.
     Turn {
-        old: Option<(Rc<GpuImage>, View)>,
+        old: Option<(String, Rc<GpuImage>, View)>,
         shift: f64,
     },
 }
@@ -152,6 +162,19 @@ pub struct App {
     checker: bool,
     filter: Filter,
 
+    // Panel.
+    /// Panel opacity now and where it is heading (0 hidden, 1 shown).
+    panel_alpha: f32,
+    panel_target: f32,
+    panel_tick: Instant,
+    filmstrip: bool,
+    hot: Option<panel::Hot>,
+    pressed: Option<panel::Hot>,
+    thumbs: Option<Thumbnails>,
+    /// Rotations / mirrors made by the user, per file (cache key); written
+    /// to the file in M2.
+    edits: HashMap<String, Orientation>,
+
     // Input.
     drag: Option<Drag>,
     wheel_accum: i32,
@@ -203,6 +226,14 @@ impl App {
             badge_fade: None,
             checker: true,
             filter: Filter::Smooth,
+            panel_alpha: 1.0,
+            panel_target: 1.0,
+            panel_tick: Instant::now(),
+            filmstrip: true,
+            hot: None,
+            pressed: None,
+            thumbs: None,
+            edits: HashMap::new(),
             drag: None,
             wheel_accum: 0,
             fast_nav: false,
@@ -308,31 +339,93 @@ impl App {
         self.shown.as_ref().map(|(_, t)| &**t)
     }
 
-    /// "Fit" for the current mode: fullscreen fits within a margin without
+    /// Orientation an image is displayed with: EXIF plus the user's edits.
+    fn orientation_of(&self, key: &str, img: &GpuImage) -> Orientation {
+        self.edits
+            .get(key)
+            .map_or(img.orientation, |e| img.orientation.then(*e))
+    }
+
+    /// Full-resolution size in display orientation (including user rotation).
+    fn display_of(&self, key: &str, img: &GpuImage) -> (f64, f64) {
+        let (dw, dh) = img.display;
+        let stored = if img.orientation.swaps_axes() {
+            (dh, dw)
+        } else {
+            (dw, dh)
+        };
+        if self.orientation_of(key, img).swaps_axes() {
+            (stored.1, stored.0)
+        } else {
+            stored
+        }
+    }
+
+    /// Display size of the shown image.
+    fn display(&self) -> Option<(f64, f64)> {
+        self.shown.as_ref().map(|(k, t)| self.display_of(k, t))
+    }
+
+    /// Screen area photos are fitted into; fullscreen keeps the bottom free
+    /// for the panel (and the filmstrip), like Picasa.
+    fn view_area(&self) -> Rect {
+        let (w, h) = self.viewport();
+        match self.mode {
+            Mode::Fullscreen => {
+                let m = self.monitor.px(FIT_MARGIN_DIP);
+                let bottom =
+                    (crate::ui::toolbar::reserved_height(self.filmstrip) * self.ui_scale()).round();
+                Rect {
+                    x0: m,
+                    y0: m,
+                    x1: w - m,
+                    y1: h - bottom - (m / 2.0).round(),
+                }
+            }
+            Mode::Windowed => Rect {
+                x0: 0.0,
+                y0: 0.0,
+                x1: w,
+                y1: h,
+            },
+        }
+    }
+
+    /// "Fit" for the current mode: fullscreen fits into the view area without
     /// enlarging; windowed fills the window.
     fn fit_view(&self) -> Option<View> {
-        let img = self.shown_image()?;
-        Some(match self.mode {
-            Mode::Fullscreen => View::fit(
-                img.display,
-                self.viewport(),
-                self.monitor.px(FIT_MARGIN_DIP),
-                false,
-            ),
-            Mode::Windowed => View::fit(img.display, self.viewport(), 0.0, true),
-        })
+        let d = self.display()?;
+        Some(View::fit_in(
+            d,
+            self.view_area(),
+            self.viewport(),
+            self.mode == Mode::Windowed,
+        ))
+    }
+
+    /// Keeps a view on screen (centred in the view area where it fits).
+    fn clamp(&self, v: View) -> View {
+        match self.display() {
+            Some(d) => v.clamped_in(d, self.view_area(), self.viewport()),
+            None => v,
+        }
     }
 
     /// Image rectangle on screen (viewport coordinates), if an image is shown.
     fn image_rect(&self) -> Option<Rect> {
-        let img = self.shown_image()?;
-        Some(self.view.image_rect(img.display, self.viewport()))
+        Some(self.view.image_rect(self.display()?, self.viewport()))
     }
 
     /// One image layer: `view` placement at `opacity`.
-    fn layer<'a>(&self, img: &'a GpuImage, view: &View, opacity: f32) -> Option<Layer<'a>> {
+    fn layer<'a>(
+        &self,
+        key: &str,
+        img: &'a GpuImage,
+        view: &View,
+        opacity: f32,
+    ) -> Option<Layer<'a>> {
         let vp = self.viewport();
-        let rect = view.image_rect(img.display, vp);
+        let rect = view.image_rect(self.display_of(key, img), vp);
         let quad = view::visible_quad(rect, vp)?;
         Some(Layer {
             image: img,
@@ -345,6 +438,7 @@ impl App {
                 Background::None
             },
             opacity,
+            orientation: u32::from(self.orientation_of(key, img).exif()),
         })
     }
 
@@ -357,7 +451,7 @@ impl App {
     }
 
     fn render(&mut self) -> Result<()> {
-        let shown = self.shown.as_ref().map(|(_, t)| Rc::clone(t));
+        let shown = self.shown.clone();
         let mut layers = Vec::with_capacity(2);
         match (&self.anim, &shown) {
             (
@@ -365,17 +459,19 @@ impl App {
                     kind: AnimKind::Turn { old, shift },
                     ..
                 }),
-                Some(new),
+                Some((key, new)),
             ) => {
                 let t = self.anim_t();
-                if let Some((old_img, old_view)) = old {
+                if let Some((old_key, old_img, old_view)) = old {
                     let v = old_view.pan(-shift * t, 0.0);
-                    layers.extend(self.layer(old_img, &v, (1.0 - t) as f32));
+                    layers.extend(self.layer(old_key, old_img, &v, (1.0 - t) as f32));
                 }
                 let v = self.view.pan(shift * (1.0 - t), 0.0);
-                layers.extend(self.layer(new, &v, t as f32));
+                layers.extend(self.layer(key, new, &v, t as f32));
             }
-            (_, Some(img)) => layers.extend(self.layer(img, &self.view, self.opacity)),
+            (_, Some((key, img))) => {
+                layers.extend(self.layer(key, img, &self.view, self.opacity));
+            }
             (_, None) => {}
         }
         // Mode transitions run in fullscreen geometry, so they use `dim`.
@@ -398,7 +494,14 @@ impl App {
                     .unwrap_or_default();
                 format!("Не удалось открыть файл\n{name}: {e}")
             }),
-            badge: self.badge_text(),
+            // The panel shows the zoom level itself.
+            badge: if self.panel_alpha < 0.5 {
+                self.badge_text()
+            } else {
+                None
+            },
+            panel: self.panel_view(),
+            border: self.mode == Mode::Windowed,
         };
         self.gpu.draw(&params, &ui)
     }
@@ -411,13 +514,7 @@ impl App {
         let opacity = self.badge_fade.map_or(1.0, |f| {
             1.0 - (f.elapsed().as_secs_f32() / BADGE_FADE.as_secs_f32()).min(1.0)
         });
-        let pct = self.zoom_target().scale * 100.0;
-        let text = if pct < 10.0 {
-            format!("{pct:.1} %")
-        } else {
-            format!("{pct:.0} %")
-        };
-        Some((text, opacity))
+        Some((panel::zoom_label(self.zoom_target().scale), opacity))
     }
 
     /// Shows the zoom badge and (re)starts its hide timer.
@@ -465,8 +562,8 @@ impl App {
                         opacity,
                         ..
                     } => {
-                        if let Some(img) = self.shown_image() {
-                            self.view = View::placed(img.display, from.lerp(to, t), vp);
+                        if let Some(d) = self.display() {
+                            self.view = View::placed(d, from.lerp(to, t), vp);
                         }
                         self.dim = dim.0 + (dim.1 - dim.0) * t as f32;
                         self.opacity = opacity.0 + (opacity.1 - opacity.0) * t as f32;
@@ -479,6 +576,20 @@ impl App {
                 moving = true;
                 dirty = true;
             }
+        }
+        // Panel fade in / out.
+        let now = Instant::now();
+        let dt = now.duration_since(self.panel_tick).as_secs_f32();
+        self.panel_tick = now;
+        if (self.panel_alpha - self.panel_target).abs() > f32::EPSILON {
+            let step = dt / PANEL_FADE.as_secs_f32();
+            self.panel_alpha = if self.panel_target > self.panel_alpha {
+                (self.panel_alpha + step).min(self.panel_target)
+            } else {
+                (self.panel_alpha - step).max(self.panel_target)
+            };
+            dirty = true;
+            moving |= (self.panel_alpha - self.panel_target).abs() > f32::EPSILON;
         }
         if let Some(f) = self.badge_fade {
             dirty = true;
@@ -537,11 +648,8 @@ impl App {
     /// Opening animation: the photo grows from the centre while the
     /// backdrop darkens. The first frame is already visible (not empty).
     fn start_open_anim(&mut self) {
-        let (Some(duration), Some(img), Some(fit)) = (
-            OPEN_ANIM,
-            self.shown_image().map(|i| i.display),
-            self.fit_view(),
-        ) else {
+        let (Some(duration), Some(img), Some(fit)) = (OPEN_ANIM, self.display(), self.fit_view())
+        else {
             return;
         };
         let vp = self.viewport();
@@ -581,6 +689,9 @@ impl App {
     }
 
     fn on_timer(&mut self, id: usize) {
+        if id == PANEL_TIMER {
+            self.panel_timer();
+        }
         if id == BADGE_TIMER {
             // SAFETY: own window and timer.
             unsafe {
@@ -617,6 +728,10 @@ impl App {
             }
             WM_APP_LIBRARY => {
                 self.on_library()?;
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_THUMB => {
+                self.on_thumbs()?;
                 Ok(Some(LRESULT(0)))
             }
             _ => {

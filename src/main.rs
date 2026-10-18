@@ -17,6 +17,7 @@ mod library;
 mod loader;
 mod metadata;
 mod orientation;
+mod ui;
 mod view;
 mod win;
 

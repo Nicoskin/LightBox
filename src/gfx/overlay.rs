@@ -18,15 +18,21 @@ use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
     DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-    DWRITE_MEASURING_MODE_NATURAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_CENTER,
-    DWRITE_TEXT_METRICS, DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
+    DWRITE_MEASURING_MODE_NATURAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT,
+    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS,
+    DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGISurface, IDXGISwapChain1};
-use windows::core::{Interface as _, w};
+use windows::core::{BOOL, Interface as _, PCWSTR, w};
+
+use std::collections::HashMap;
+use std::rc::Rc;
+
+use crate::view::Rect;
 
 /// What to draw over the image.
-#[derive(Clone, Debug, Default)]
+#[derive(Default)]
 pub struct Ui {
     /// UI scale (DPI / 96).
     pub scale: f32,
@@ -35,30 +41,104 @@ pub struct Ui {
     /// Short status in a pill near the bottom (e.g. the zoom level) and its
     /// opacity (for fading out).
     pub badge: Option<(String, f32)>,
+    /// Bottom panel and filmstrip.
+    pub panel: Option<PanelView>,
+    /// Thin border around the window (windowed mode).
+    pub border: bool,
 }
 
 impl Ui {
     pub fn is_empty(&self) -> bool {
-        self.message.is_none() && self.badge.is_none()
+        self.message.is_none() && self.badge.is_none() && self.panel.is_none() && !self.border
     }
 }
 
-struct Formats {
+/// Button icon.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Icon {
+    /// Segoe Fluent Icons / MDL2 Assets glyph.
+    Glyph(char),
+    /// Glyph mirrored horizontally (e.g. counter-clockwise rotate).
+    Mirrored(char),
+    Text(&'static str),
+    /// Drawn shapes for which no glyph fits.
+    Checker,
+    Smoothing,
+    Filmstrip,
+}
+
+/// Premultiplied BGRA thumbnail; `id` identifies it for bitmap caching.
+pub struct Thumb {
+    pub id: u64,
+    pub width: u32,
+    pub height: u32,
+    pub bgra: Vec<u8>,
+}
+
+pub struct ButtonView {
+    pub rect: Rect,
+    pub icon: Icon,
+    pub round: bool,
+    pub hot: bool,
+    pub pressed: bool,
+    /// Toggle that is on.
+    pub active: bool,
+}
+
+pub struct TextView {
+    pub rect: Rect,
+    pub text: String,
+    pub style: TextStyle,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TextStyle {
+    /// Left-aligned file name.
+    Caption,
+    /// Left-aligned secondary line.
+    Detail,
+    /// Centred, e.g. the zoom percentage.
+    Value,
+}
+
+pub struct CellView {
+    pub rect: Rect,
+    pub thumb: Option<Rc<Thumb>>,
+    pub current: bool,
+    pub hot: bool,
+}
+
+pub struct PanelView {
+    pub opacity: f32,
+    pub bar: Rect,
+    pub strip: Option<Rect>,
+    pub buttons: Vec<ButtonView>,
+    pub texts: Vec<TextView>,
+    pub cells: Vec<CellView>,
+}
+
+pub(super) struct Formats {
     title: IDWriteTextFormat,
     body: IDWriteTextFormat,
     badge: IDWriteTextFormat,
+    pub(super) icon: IDWriteTextFormat,
+    pub(super) caption: IDWriteTextFormat,
+    pub(super) detail: IDWriteTextFormat,
+    pub(super) value: IDWriteTextFormat,
     scale: f32,
 }
 
 pub struct Overlay {
-    ctx: ID2D1DeviceContext,
+    pub(super) ctx: ID2D1DeviceContext,
     target: Option<ID2D1Bitmap1>,
     dwrite: IDWriteFactory,
-    formats: Formats,
-    brush: ID2D1SolidColorBrush,
+    pub(super) formats: Formats,
+    pub(super) brush: ID2D1SolidColorBrush,
+    /// D2D bitmaps of filmstrip thumbnails, by [`Thumb::id`].
+    pub(super) thumbs: HashMap<u64, ID2D1Bitmap1>,
 }
 
-const fn rgba(r: f32, g: f32, b: f32, a: f32) -> D2D1_COLOR_F {
+pub(super) const fn rgba(r: f32, g: f32, b: f32, a: f32) -> D2D1_COLOR_F {
     D2D1_COLOR_F { r, g, b, a }
 }
 
@@ -88,6 +168,7 @@ impl Overlay {
                 dwrite,
                 formats,
                 brush,
+                thumbs: HashMap::new(),
             })
         }
     }
@@ -132,8 +213,16 @@ impl Overlay {
             if let Some(msg) = &ui.message {
                 self.message(msg, ui.scale);
             }
+            if let Some(panel) = &ui.panel {
+                self.panel(panel, ui.scale)?;
+            } else {
+                self.thumbs.clear();
+            }
             if let Some((text, opacity)) = &ui.badge {
                 self.badge(text, *opacity, ui.scale)?;
+            }
+            if ui.border {
+                self.border(ui.scale);
             }
             self.ctx.EndDraw(None, None)?;
         }
@@ -230,11 +319,16 @@ impl Overlay {
 
 impl Formats {
     fn new(dwrite: &IDWriteFactory, s: f32) -> Result<Self> {
-        let make = |weight: DWRITE_FONT_WEIGHT, size: f32| -> Result<IDWriteTextFormat> {
+        let icons = icon_family(dwrite);
+        let make = |family: PCWSTR,
+                    weight: DWRITE_FONT_WEIGHT,
+                    size: f32,
+                    align: DWRITE_TEXT_ALIGNMENT|
+         -> Result<IDWriteTextFormat> {
             // SAFETY: plain COM calls with static strings.
             unsafe {
                 let f = dwrite.CreateTextFormat(
-                    w!("Segoe UI"),
+                    family,
                     None,
                     weight,
                     DWRITE_FONT_STYLE_NORMAL,
@@ -242,16 +336,46 @@ impl Formats {
                     size * s,
                     w!(""),
                 )?;
-                f.SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER)?;
+                f.SetTextAlignment(align)?;
                 f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER)?;
+                f.SetWordWrapping(DWRITE_WORD_WRAPPING_NO_WRAP)?;
                 Ok(f)
             }
         };
+        let ui = w!("Segoe UI");
+        let (center, left) = (DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING);
         Ok(Self {
-            title: make(DWRITE_FONT_WEIGHT_SEMI_BOLD, 22.0)?,
-            body: make(DWRITE_FONT_WEIGHT_NORMAL, 15.0)?,
-            badge: make(DWRITE_FONT_WEIGHT_SEMI_BOLD, 15.0)?,
+            title: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 22.0, center)?,
+            body: make(ui, DWRITE_FONT_WEIGHT_NORMAL, 15.0, center)?,
+            badge: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 15.0, center)?,
+            icon: make(icons, DWRITE_FONT_WEIGHT_NORMAL, 16.0, center)?,
+            caption: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 14.0, left)?,
+            detail: make(ui, DWRITE_FONT_WEIGHT_NORMAL, 12.0, left)?,
+            value: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 13.0, center)?,
             scale: s,
         })
+    }
+}
+
+/// "Segoe Fluent Icons" (Windows 11) or "Segoe MDL2 Assets" (Windows 10);
+/// both use the same code points for the glyphs we need.
+fn icon_family(dwrite: &IDWriteFactory) -> PCWSTR {
+    let fluent = w!("Segoe Fluent Icons");
+    let mut collection = None;
+    // SAFETY: out-pointers are valid for the calls.
+    let found = unsafe {
+        dwrite
+            .GetSystemFontCollection(&mut collection, false)
+            .ok()
+            .and(collection)
+            .is_some_and(|c| {
+                let (mut index, mut exists) = (0u32, BOOL(0));
+                c.FindFamilyName(fluent, &mut index, &mut exists).is_ok() && exists.as_bool()
+            })
+    };
+    if found {
+        fluent
+    } else {
+        w!("Segoe MDL2 Assets")
     }
 }
