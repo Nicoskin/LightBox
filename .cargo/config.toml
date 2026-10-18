@@ -1,0 +1,4 @@
+[target.x86_64-pc-windows-msvc]
+# Static CRT: a single self-contained exe. No target-cpu=native — SIMD is
+# detected at runtime (libjpeg-turbo, zune-*), so the exe runs on any x64.
+rustflags = ["-C", "target-feature=+crt-static"]

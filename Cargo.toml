@@ -1,0 +1,81 @@
+[package]
+name = "lightbox"
+version = "0.1.0"
+edition = "2024"
+description = "Fast image viewer for Windows in the spirit of Picasa Photo Viewer"
+license = "MIT"
+publish = false
+build = "build.rs"
+
+[[bin]]
+name = "lightbox"
+path = "src/main.rs"
+
+[[example]]
+name = "gen_testdata"
+path = "tools/gen_testdata.rs"
+
+[[bench]]
+name = "decode"
+harness = false
+
+[dependencies]
+anyhow = "1.0.104"
+thiserror = "2.0.21"
+mimalloc = { version = "0.1.52", default-features = false }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.23", default-features = false, features = ["fmt", "std"] }
+turbojpeg = { version = "1.5.1", default-features = false, features = ["cmake", "require-simd"] }
+png = "0.18.1"
+
+[dependencies.windows]
+version = "0.62.2"
+features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D11",
+    "Win32_Graphics_DirectComposition",
+    "Win32_Graphics_Dwm",
+    "Win32_Graphics_Dxgi",
+    "Win32_Graphics_Dxgi_Common",
+    "Win32_Graphics_Gdi",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Console",
+    "Win32_System_LibraryLoader",
+    "Win32_System_SystemInformation",
+    "Win32_System_Threading",
+    "Win32_UI_HiDpi",
+    "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging",
+]
+
+[dev-dependencies]
+criterion = { version = "0.8.2", default-features = false }
+zune-core = "0.5"
+zune-jpeg = "0.5.15"
+zune-png = "0.5.2"
+
+# Dependencies are always optimised: decoders are unusably slow at opt-level 0,
+# and it makes cmake build libjpeg-turbo against the release static CRT (/MT),
+# matching Rust's own CRT even in dev builds.
+[profile.dev.package."*"]
+opt-level = 3
+debug = false
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+debug = false
+
+# Same as release but keeps symbols for profiling.
+[profile.profiling]
+inherits = "release"
+strip = false
+debug = "line-tables-only"
+
+[profile.bench]
+inherits = "release"
+strip = false

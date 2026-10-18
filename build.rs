@@ -1,0 +1,91 @@
+//! Build script: compiles HLSL shaders to bytecode with `fxc.exe` and embeds the
+//! application manifest (per-monitor v2 DPI awareness etc.).
+//!
+//! Shaders are compiled ahead of time so that nothing is compiled at startup.
+//! If `fxc.exe` cannot be found (no Windows SDK), the committed bytecode in
+//! `shaders/compiled/` is used instead. Refresh it with `shaders/compile.ps1`.
+
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::{env, fs};
+
+/// (source file, entry point, profile, output name)
+const SHADERS: &[(&str, &str, &str, &str)] = &[
+    ("shaders/image.hlsl", "VSMain", "vs_5_0", "image_vs.cso"),
+    ("shaders/image.hlsl", "PSMain", "ps_5_0", "image_ps.cso"),
+];
+
+fn main() {
+    let out_dir = PathBuf::from(env::var("OUT_DIR").expect("OUT_DIR"));
+    let manifest_dir = PathBuf::from(env::var("CARGO_MANIFEST_DIR").expect("CARGO_MANIFEST_DIR"));
+
+    println!("cargo:rerun-if-changed=shaders");
+    println!("cargo:rerun-if-changed=lightbox.manifest");
+    println!("cargo:rerun-if-env-changed=FXC");
+
+    compile_shaders(&manifest_dir, &out_dir);
+
+    // Embed the manifest into the executable (no extra resource compiler needed).
+    let manifest = manifest_dir.join("lightbox.manifest");
+    println!("cargo:rustc-link-arg-bins=/MANIFEST:EMBED");
+    println!(
+        "cargo:rustc-link-arg-bins=/MANIFESTINPUT:{}",
+        manifest.display()
+    );
+
+    // Graphics DLLs are loaded lazily on the GPU-init thread instead of by the
+    // loader before `main`, so their load time overlaps with decoding.
+    for dll in DELAY_LOAD {
+        println!("cargo:rustc-link-arg-bins=/DELAYLOAD:{dll}");
+    }
+    println!("cargo:rustc-link-arg-bins=delayimp.lib");
+}
+
+const DELAY_LOAD: &[&str] = &["d3d11.dll", "dxgi.dll", "dcomp.dll"];
+
+fn compile_shaders(manifest_dir: &Path, out_dir: &Path) {
+    let fxc = find_fxc();
+    for (src, entry, profile, out_name) in SHADERS {
+        let out = out_dir.join(out_name);
+        let fallback = manifest_dir.join("shaders/compiled").join(out_name);
+        match &fxc {
+            Some(fxc) => {
+                let status = Command::new(fxc)
+                    .args(["/nologo", "/O3", "/Qstrip_reflect", "/Qstrip_debug"])
+                    .arg("/E")
+                    .arg(entry)
+                    .arg("/T")
+                    .arg(profile)
+                    .arg("/Fo")
+                    .arg(&out)
+                    .arg(manifest_dir.join(src))
+                    .status()
+                    .expect("failed to run fxc.exe");
+                assert!(status.success(), "fxc failed for {src}:{entry}");
+            }
+            None => {
+                println!(
+                    "cargo:warning=fxc.exe not found, using precompiled {}",
+                    fallback.display()
+                );
+                fs::copy(&fallback, &out).expect("precompiled shader missing");
+            }
+        }
+    }
+}
+
+/// Locates `fxc.exe`: `FXC` env var, then the newest Windows 10/11 SDK.
+fn find_fxc() -> Option<PathBuf> {
+    if let Ok(p) = env::var("FXC") {
+        return Some(PathBuf::from(p));
+    }
+    let kits = env::var("ProgramFiles(x86)").unwrap_or_else(|_| r"C:\Program Files (x86)".into());
+    let bin = Path::new(&kits).join(r"Windows Kits\10\bin");
+    let mut versions: Vec<PathBuf> = fs::read_dir(&bin)
+        .ok()?
+        .filter_map(|e| e.ok().map(|e| e.path()))
+        .filter(|p| p.join(r"x64\fxc.exe").is_file())
+        .collect();
+    versions.sort();
+    versions.pop().map(|p| p.join(r"x64\fxc.exe"))
+}
