@@ -1,5 +1,6 @@
 // Image quad: draws the visible part of the image with orientation,
-// transparency background and (later) channel / pixel-grid modes.
+// transparency background, a free rotation and (later) channel / pixel-grid
+// modes.
 //
 // Colour pipeline: the texture is R8G8B8A8_UNORM_SRGB holding *premultiplied
 // linear* colour (encoded back to sRGB per channel), so sampling returns
@@ -8,7 +9,7 @@
 
 cbuffer Params : register(b0)
 {
-    float4 dst_rect;       // visible quad on screen, pixels: x0, y0, x1, y1
+    float4 dst_rect;       // visible quad on screen (unrotated), pixels: x0, y0, x1, y1
     float4 uv_rect;        // matching display-space UV:      u0, v0, u1, v1
     float4 bg_color;       // solid background, premultiplied linear
     float2 viewport;       // render target size, pixels
@@ -19,8 +20,11 @@ cbuffer Params : register(b0)
     uint   channel_mode;   // 0 = RGBA (reserved: 1..4 = R, G, B, A)
     uint   grid;           // reserved: pixel grid
     float  opacity;        // layer opacity (fades, page turns)
-    uint2  pad;
+    float2 rot;            // rotation about `pivot`: (cos, sin); (1, 0) = none
     float4 tex_rect;       // content part of the texture: offset xy, size zw (tiles)
+    float2 pivot;          // rotation centre, screen pixels
+    uint   edges;          // sides of this part that are image edges: 1 left, 2 top, 4 right, 8 bottom
+    uint   pad;
 };
 
 Texture2D<float4> image : register(t0);
@@ -30,6 +34,7 @@ struct VSOut
 {
     float4 pos : SV_Position;
     float2 uv  : TEXCOORD0;
+    float2 d   : TEXCOORD1; // display-space UV of the part (edge anti-aliasing)
 };
 
 // Maps display-space UV (after orientation) to texture UV.
@@ -54,19 +59,39 @@ VSOut VSMain(uint id : SV_VertexID)
     float2 c = float2(id & 1, id >> 1);
     float2 p = lerp(dst_rect.xy, dst_rect.zw, c);
     float2 d = lerp(uv_rect.xy, uv_rect.zw, c);
+    float2 q = p - pivot;
+    p = pivot + float2(q.x * rot.x - q.y * rot.y, q.x * rot.y + q.y * rot.x);
 
     VSOut o;
     o.pos = float4(p.x / viewport.x * 2.0 - 1.0, 1.0 - p.y / viewport.y * 2.0, 0.0, 1.0);
     o.uv = tex_rect.xy + orient(d, orientation) * tex_rect.zw;
+    o.d = d;
     return o;
+}
+
+// Distance in screen pixels from the pixel centre to where `v` reaches 0.
+float edge_px(float v, float dx, float dy)
+{
+    return v / max(length(float2(dx, dy)), 1e-7);
 }
 
 float4 PSMain(VSOut i) : SV_Target
 {
     float4 c = image.Sample(samp, i.uv); // premultiplied, linear
 
+    // A turned image has slanted edges: fade the outermost pixel row.
+    float cover = 1.0;
+    if (rot.y != 0.0)
+    {
+        float2 dx = ddx(i.d), dy = ddy(i.d);
+        if (edges & 1) cover *= saturate(edge_px(i.d.x, dx.x, dy.x));
+        if (edges & 2) cover *= saturate(edge_px(i.d.y, dx.y, dy.y));
+        if (edges & 4) cover *= saturate(edge_px(1.0 - i.d.x, dx.x, dy.x));
+        if (edges & 8) cover *= saturate(edge_px(1.0 - i.d.y, dx.y, dy.y));
+    }
+
     if (bg_mode == 0)
-        return c * opacity; // transparent areas show the dimmed backdrop
+        return c * opacity * cover; // transparent areas show the backdrop
 
     float4 bg = bg_color;
     if (bg_mode == 1)
@@ -76,5 +101,5 @@ float4 PSMain(VSOut i) : SV_Target
         float v = ((cell.x + cell.y) & 1) ? 0.6038 : 1.0;
         bg = float4(v, v, v, 1.0);
     }
-    return (c + bg * (1.0 - c.a)) * opacity;
+    return (c + bg * (1.0 - c.a)) * opacity * cover;
 }

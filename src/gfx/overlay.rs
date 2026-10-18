@@ -49,6 +49,12 @@ pub struct Ui {
     pub border: bool,
     /// Settings card on top of everything.
     pub card: Option<CardView>,
+    /// Title bar (windowed) or the corner close button (fullscreen).
+    pub caption: Option<CaptionView>,
+    /// Pop-up menu (transparency background).
+    pub menu: Option<MenuView>,
+    /// Straightening dial.
+    pub dial: Option<DialView>,
 }
 
 impl Ui {
@@ -58,6 +64,9 @@ impl Ui {
             && self.panel.is_none()
             && !self.border
             && self.card.is_none()
+            && self.caption.is_none()
+            && self.menu.is_none()
+            && self.dial.is_none()
     }
 }
 
@@ -73,6 +82,10 @@ pub enum Icon {
     Checker,
     Smoothing,
     Filmstrip,
+    /// An angle (straightening dial).
+    Angle,
+    /// Solid swatch of an sRGB grey level.
+    Swatch(f32),
 }
 
 /// Premultiplied BGRA thumbnail; `id` identifies it for bitmap caching.
@@ -151,6 +164,7 @@ pub(super) struct Formats {
     body: IDWriteTextFormat,
     badge: IDWriteTextFormat,
     pub(super) icon: IDWriteTextFormat,
+    pub(super) small_icon: IDWriteTextFormat,
     pub(super) caption: IDWriteTextFormat,
     pub(super) detail: IDWriteTextFormat,
     pub(super) value: IDWriteTextFormat,
@@ -245,10 +259,19 @@ impl Overlay {
             if let Some(msg) = &ui.message {
                 self.message(msg, ui.scale);
             }
+            if let Some(caption) = &ui.caption {
+                self.caption(caption);
+            }
             if let Some(panel) = &ui.panel {
                 self.panel(panel, ui.scale)?;
             } else {
                 self.thumbs.clear();
+            }
+            if let Some(dial) = &ui.dial {
+                self.dial(dial, ui.scale)?;
+            }
+            if let Some(menu) = &ui.menu {
+                self.menu(menu, ui.scale);
             }
             if let Some((text, opacity)) = &ui.badge {
                 self.badge(text, *opacity, ui.scale, ui.badge_lift)?;
@@ -384,6 +407,7 @@ impl Formats {
             body: make(ui, DWRITE_FONT_WEIGHT_NORMAL, 15.0, center)?,
             badge: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 15.0, center)?,
             icon: make(icons, DWRITE_FONT_WEIGHT_NORMAL, 16.0, center)?,
+            small_icon: make(icons, DWRITE_FONT_WEIGHT_NORMAL, 10.0, center)?,
             caption: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 14.0, left)?,
             detail: make(ui, DWRITE_FONT_WEIGHT_NORMAL, 12.0, left)?,
             value: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 13.0, center)?,
@@ -416,4 +440,51 @@ fn icon_family(dwrite: &IDWriteFactory) -> PCWSTR {
     } else {
         w!("Segoe MDL2 Assets")
     }
+}
+
+/// Title bar / corner close button.
+pub struct CaptionView {
+    /// Windowed title bar background.
+    pub bar: Option<Rect>,
+    pub title: Option<(Rect, String)>,
+    pub buttons: Vec<CaptionButtonView>,
+    /// Fullscreen style: round buttons over the picture.
+    pub round: bool,
+    pub opacity: f32,
+}
+
+pub struct CaptionButtonView {
+    pub rect: Rect,
+    pub glyph: char,
+    /// The close button (red when hovered).
+    pub close: bool,
+    pub hot: bool,
+    pub pressed: bool,
+}
+
+pub struct MenuView {
+    pub rect: Rect,
+    pub items: Vec<MenuItemView>,
+}
+
+pub struct MenuItemView {
+    pub rect: Rect,
+    pub label: String,
+    /// sRGB grey of a solid swatch; `None` = checkerboard.
+    pub swatch: Option<f32>,
+    pub selected: bool,
+    pub hot: bool,
+}
+
+pub struct DialView {
+    pub rect: Rect,
+    pub ruler: Rect,
+    pub reset: Rect,
+    /// Current angle, degrees, and its label.
+    pub angle: f64,
+    pub label: String,
+    /// Ruler spacing, screen pixels per degree.
+    pub px_per_deg: f64,
+    pub reset_hot: bool,
+    pub opacity: f32,
 }

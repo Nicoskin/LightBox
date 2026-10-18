@@ -4,12 +4,14 @@
 //! - `input`: keyboard and mouse;
 //! - `mode`: fullscreen ↔ windowed switching and window geometry.
 
+mod chrome;
 mod input;
 mod mode;
 mod nav;
 mod panel;
 mod save;
 mod textures;
+mod vector;
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
@@ -83,10 +85,16 @@ const BADGE_TIMER: usize = 1;
 const PANEL_HOLD_MS: u32 = 2000;
 const PANEL_FADE: Duration = Duration::from_millis(180);
 const PANEL_TIMER: usize = 2;
+/// Hover delay before the transparency menu opens.
+const MENU_TIMER: usize = 3;
+/// Filmstrip glide: time constant of the exponential approach, seconds.
+const STRIP_TAU: f64 = 0.06;
 /// Posted by the thumbnail thread.
 const WM_APP_THUMB: u32 = WM_APP + 4;
 /// Posted by the writer thread after each finished job.
 const WM_APP_SAVED: u32 = WM_APP + 5;
+/// Posted by the vector thread with a sharper rendering of an SVG.
+const WM_APP_VECTOR: u32 = WM_APP + 6;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -205,6 +213,21 @@ pub struct App {
     /// Settings card shown, and the item under the mouse.
     card_open: bool,
     card_hot: Option<crate::ui::settings_card::Hit>,
+    /// Filmstrip scroll position (file index, fractional while gliding)
+    /// and when its glide was last advanced.
+    strip_pos: f64,
+    strip_tick: Option<Instant>,
+    /// Transparency-background menu shown.
+    menu_open: bool,
+    /// Straightening dial shown, the current free rotation (degrees, view
+    /// only) and an ongoing ruler drag (start x, angle then).
+    dial_open: bool,
+    angle: f64,
+    dial_drag: Option<(f64, f64)>,
+    /// SVG: renders the visible region at screen resolution, and the
+    /// latest such rendering.
+    vector: Option<vector::VectorWorker>,
+    detail: Option<vector::Detail>,
 
     // Input.
     drag: Option<Drag>,
@@ -254,6 +277,7 @@ impl App {
             view: View {
                 scale: 1.0,
                 center: (0.0, 0.0),
+                angle: 0.0,
             },
             fitted: true,
             dim: settings.dim(),
@@ -275,6 +299,14 @@ impl App {
             notice: None,
             card_open: false,
             card_hot: None,
+            strip_pos: 0.0,
+            strip_tick: None,
+            menu_open: false,
+            dial_open: false,
+            angle: 0.0,
+            dial_drag: None,
+            vector: None,
+            detail: None,
             drag: None,
             wheel_accum: 0,
             fast_nav: false,
@@ -371,6 +403,13 @@ impl App {
         Ok(())
     }
 
+    /// Page-turn length, or `None` when that animation is turned off.
+    fn turn_len(&self) -> Option<Duration> {
+        self.settings
+            .turn_animation
+            .then(|| Duration::from_millis(TURN_ANIM))
+    }
+
     /// Animation length, or `None` when animations are turned off.
     fn anim_len(&self, ms: u64) -> Option<Duration> {
         self.settings.animations.then(|| Duration::from_millis(ms))
@@ -448,26 +487,29 @@ impl App {
                     y1: h - bottom - (m / 2.0).round(),
                 }
             }
-            // Inside the frame.
-            Mode::Windowed => Rect {
-                x0: 0.0,
-                y0: 0.0,
-                x1: w,
-                y1: h,
-            }
-            .inset(self.monitor.px(mode::FRAME_DIP)),
+            // Below the title bar, inside the frame.
+            Mode::Windowed => mode::photo_area(
+                Rect {
+                    x0: 0.0,
+                    y0: 0.0,
+                    x1: w,
+                    y1: h,
+                },
+                &self.monitor,
+            ),
         }
     }
 
-    /// "Fit" for the current mode: fullscreen fits into the view area without
-    /// enlarging; windowed fills the window.
+    /// "Fit": the whole photo (turned by the free angle) inside the view
+    /// area, never enlarged past 100 %.
     fn fit_view(&self) -> Option<View> {
         let d = self.display()?;
         Some(View::fit_in(
             d,
             self.view_area(),
             self.viewport(),
-            self.mode == Mode::Windowed,
+            false,
+            self.angle,
         ))
     }
 
@@ -492,26 +534,42 @@ impl App {
         img: &'a GpuImage,
         view: &View,
         opacity: f32,
+        detail: Option<&'a GpuImage>,
     ) -> Option<Layer<'a>> {
         let vp = self.viewport();
         let orient = self.orientation_of(key, img);
         let disp = self.display_of(key, img);
         let rect = view.image_rect(disp, vp);
         let longest_on_screen = view.scale * disp.0.max(disp.1);
+        // A turned view shows more than the viewport's own rectangle.
+        let clip = view::view_clip(vp, view.angle);
         let mut parts = Vec::new();
+        // SVG zoomed in: the sharp re-rendering of the visible region.
+        let detail =
+            detail.and_then(|t| Some((t.tiles.first()?, self.detail_part(key, img, view)?)));
         match &img.overview {
+            _ if detail.is_some() => {
+                parts.extend(detail.map(|(tile, (quad, edges))| Part {
+                    srv: &tile.srv,
+                    quad,
+                    tex: tile.uv,
+                    edges,
+                }));
+            }
             Some((t, ow, oh)) if longest_on_screen <= f64::from(*ow.max(oh)) => {
-                parts.extend(view::visible_quad(rect, vp).map(|quad| Part {
+                parts.extend(view::visible_quad_in(rect, clip).map(|quad| Part {
                     srv: &t.srv,
                     quad,
                     tex: t.uv,
+                    edges: 15,
                 }));
             }
             _ => {
                 let stored = (f64::from(img.width), f64::from(img.height));
-                let (tdw, _) = orient.apply_size(img.width, img.height);
+                let (tdw, tdh) = orient.apply_size(img.width, img.height);
+                let (tdw, tdh) = (f64::from(tdw), f64::from(tdh));
                 // Screen pixels per texture pixel.
-                let k = view.scale * disp.0 / f64::from(tdw);
+                let k = view.scale * disp.0 / tdw;
                 for t in &img.tiles {
                     let r = orient.stored_rect_to_display(
                         [
@@ -528,10 +586,15 @@ impl App {
                         x1: rect.x0 + r[2] * k,
                         y1: rect.y0 + r[3] * k,
                     };
-                    parts.extend(view::visible_quad(screen, vp).map(|quad| Part {
+                    let edges = u32::from(r[0] <= 0.0)
+                        | u32::from(r[1] <= 0.0) << 1
+                        | u32::from(r[2] >= tdw) << 2
+                        | u32::from(r[3] >= tdh) << 3;
+                    parts.extend(view::visible_quad_in(screen, clip).map(|quad| Part {
                         srv: &t.srv,
                         quad,
                         tex: t.uv,
+                        edges,
                     }));
                 }
             }
@@ -539,17 +602,26 @@ impl App {
         if parts.is_empty() {
             return None;
         }
+        let (cos, sin) = view.rotation();
         Some(Layer {
             parts,
             origin: [rect.x0 as f32, rect.y0 as f32],
             // Skip the background pass entirely for opaque images.
-            background: if img.has_alpha && self.settings.checker {
-                Background::Checker(self.monitor.px(CHECKER_DIP) as f32)
-            } else {
-                Background::None
+            background: match (
+                img.has_alpha && self.settings.checker,
+                self.settings.alpha_bg.gray(),
+            ) {
+                (false, _) => Background::None,
+                (true, None) => Background::Checker(self.monitor.px(CHECKER_DIP) as f32),
+                (true, Some(g)) => {
+                    let l = srgb_to_linear(g);
+                    Background::Solid([l, l, l, 1.0])
+                }
             },
             opacity,
             orientation: u32::from(orient.exif()),
+            rotation: [cos as f32, sin as f32],
+            pivot: [(vp.0 / 2.0) as f32, (vp.1 / 2.0) as f32],
         })
     }
 
@@ -563,6 +635,7 @@ impl App {
 
     fn render(&mut self) -> Result<()> {
         let shown = self.shown.clone();
+        let detail = self.detail_tex();
         let mut layers = Vec::with_capacity(2);
         match (&self.anim, &shown) {
             (
@@ -575,13 +648,13 @@ impl App {
                 let t = self.anim_t();
                 if let Some((old_key, old_img, old_view)) = old {
                     let v = old_view.pan(-shift * t, 0.0);
-                    layers.extend(self.layer(old_key, old_img, &v, (1.0 - t) as f32));
+                    layers.extend(self.layer(old_key, old_img, &v, (1.0 - t) as f32, None));
                 }
                 let v = self.view.pan(shift * (1.0 - t), 0.0);
-                layers.extend(self.layer(key, new, &v, t as f32));
+                layers.extend(self.layer(key, new, &v, t as f32, detail.as_deref()));
             }
             (_, Some((key, img))) => {
-                layers.extend(self.layer(key, img, &self.view, self.opacity));
+                layers.extend(self.layer(key, img, &self.view, self.opacity, detail.as_deref()));
             }
             (_, None) => {}
         }
@@ -619,6 +692,9 @@ impl App {
             panel: self.panel_view(),
             border: self.mode == Mode::Windowed,
             card: self.card_view(),
+            caption: self.caption_view(),
+            menu: self.menu_view(),
+            dial: self.dial_view(),
         };
         self.gpu.draw(&params, &ui)
     }
@@ -712,6 +788,26 @@ impl App {
             };
             dirty = true;
             moving |= (self.panel_alpha - self.panel_target).abs() > f32::EPSILON;
+        }
+        // Filmstrip glide towards the current file.
+        let target = self.index as f64;
+        if self.strip_pos != target {
+            let shown = self.panel_alpha > 0.0 && self.panel_layout().strip.is_some();
+            let dt = self
+                .strip_tick
+                .map_or(0.0, |t| now.duration_since(t).as_secs_f64());
+            self.strip_tick = Some(now);
+            // Never lag more than a screenful behind (Home / End).
+            let max_lag = 12.0;
+            self.strip_pos = self.strip_pos.clamp(target - max_lag, target + max_lag);
+            self.strip_pos += (target - self.strip_pos) * (1.0 - (-dt / STRIP_TAU).exp());
+            if !shown || !self.settings.animations || (self.strip_pos - target).abs() < 0.002 {
+                self.strip_pos = target;
+                self.strip_tick = None;
+            } else {
+                moving = true;
+            }
+            dirty |= shown;
         }
         if let Some(f) = self.badge_fade {
             dirty = true;
@@ -818,6 +914,11 @@ impl App {
     }
 
     fn on_timer(&mut self, id: usize) {
+        if id == MENU_TIMER
+            && let Err(e) = self.menu_timer()
+        {
+            tracing::error!("menu: {e:#}");
+        }
         if id == PANEL_TIMER {
             self.panel_timer();
         }
@@ -867,6 +968,10 @@ impl App {
                 self.on_saved()?;
                 Ok(Some(LRESULT(0)))
             }
+            WM_APP_VECTOR => {
+                self.on_vector()?;
+                Ok(Some(LRESULT(0)))
+            }
             WM_CLOSE => {
                 // Write a pending rotation and wait for all writes to finish.
                 self.leave_current();
@@ -909,13 +1014,17 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
         }
         // No visible frame in either mode: the client area is the whole window.
         WM_NCCALCSIZE if wparam.0 != 0 => return LRESULT(0),
-        // Allow small windows (tiny images); the system default for
-        // captioned windows is ~136×39.
+        // Small enough for tiny images, large enough for the caption buttons.
         WM_GETMINMAXINFO => {
+            // SAFETY: no preconditions; 0 (failure) falls back to 96 DPI.
+            let dpi = match unsafe { windows::Win32::UI::HiDpi::GetDpiForWindow(hwnd) } {
+                0 => 96,
+                d => d,
+            } as i32;
             // SAFETY: for WM_GETMINMAXINFO, lParam points to a MINMAXINFO.
             let mmi = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
-            mmi.ptMinTrackSize.x = 32;
-            mmi.ptMinTrackSize.y = 32;
+            mmi.ptMinTrackSize.x = 220 * dpi / 96;
+            mmi.ptMinTrackSize.y = 140 * dpi / 96;
             return LRESULT(0);
         }
         _ => {}
@@ -946,5 +1055,14 @@ pub fn post(hwnd: isize, msg: u32) {
             WPARAM(0),
             LPARAM(0),
         );
+    }
+}
+
+/// sRGB-encoded value → linear light.
+fn srgb_to_linear(v: f32) -> f32 {
+    if v <= 0.04045 {
+        v / 12.92
+    } else {
+        ((v + 0.055) / 1.055).powf(2.4)
     }
 }

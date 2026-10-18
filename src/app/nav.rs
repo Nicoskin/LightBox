@@ -9,9 +9,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use super::{
-    Anim, AnimKind, App, Mode, TURN_ANIM, TURN_SHIFT, WM_APP_DECODED, WM_APP_LIBRARY, post,
-};
+use super::{Anim, AnimKind, App, TURN_SHIFT, WM_APP_DECODED, WM_APP_LIBRARY, post};
 use crate::cache::{self, Slot};
 use crate::decode::{DecodedImage, SizeHint};
 use crate::gfx::GpuImage;
@@ -81,6 +79,7 @@ impl App {
             .position(|p| library::same_path(p, &self.current))
             .unwrap_or(0);
         self.files = files;
+        self.strip_pos = self.index as f64;
         if let Some(p) = self.files.get(self.index) {
             self.current = p.clone();
         }
@@ -171,6 +170,8 @@ impl App {
         self.finish_anim()?;
         self.direction = if index > self.index { 1 } else { -1 };
         self.index = index;
+        // The free rotation belongs to the photo being left.
+        self.angle = 0.0;
         self.current = self.files[index].clone();
         self.update_title();
         let shown = self.show_current()?;
@@ -227,14 +228,11 @@ impl App {
             self.shown = Some((key, tex));
             // The file was rewritten or restored with other dimensions
             // (undo of a rotation): fit again.
-            if self.display() != before {
-                if self.mode == Mode::Windowed {
-                    self.fit_window_to_image()?;
-                }
-                if let Some(v) = self.fit_view() {
-                    self.view = v;
-                    self.fitted = true;
-                }
+            if self.display() != before
+                && let Some(v) = self.fit_view()
+            {
+                self.view = v;
+                self.fitted = true;
             }
             return Ok(changed);
         }
@@ -242,9 +240,6 @@ impl App {
         self.finish_anim()?;
         let old_view = self.view;
         let previous = self.shown.replace((key, tex));
-        if self.mode == Mode::Windowed {
-            self.fit_window_to_image()?;
-        }
         if let Some(v) = self.fit_view() {
             self.view = v;
             self.fitted = true;
@@ -253,16 +248,10 @@ impl App {
         self.badge = false;
         // Page turn, unless the user is skimming with key auto-repeat.
         if let (Some(duration), Some((old_key, old)), false) =
-            (self.anim_len(TURN_ANIM), previous, self.fast_nav)
+            (self.turn_len(), previous, self.fast_nav)
         {
-            let (old, shift) = match self.mode {
-                Mode::Fullscreen => (
-                    Some((old_key, old, old_view)),
-                    self.viewport().0 * TURN_SHIFT * self.direction as f64,
-                ),
-                // The window already has the new photo's shape: fade only.
-                Mode::Windowed => (None, 0.0),
-            };
+            let old = Some((old_key, old, old_view));
+            let shift = self.viewport().0 * TURN_SHIFT * self.direction as f64;
             self.anim = Some(Anim {
                 kind: AnimKind::Turn { old, shift },
                 start: Instant::now(),
@@ -362,6 +351,7 @@ impl App {
             }
         }
         loader.request(wanted);
+        self.update_detail();
     }
 
     pub(super) fn update_title(&self) {

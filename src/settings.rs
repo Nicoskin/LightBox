@@ -47,6 +47,46 @@ pub enum Wheel {
     Browse,
 }
 
+/// What shows through transparent areas of an image (when enabled).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum AlphaBg {
+    /// Grey / white checkerboard.
+    #[default]
+    Checker,
+    White,
+    Gray,
+    Black,
+}
+
+impl AlphaBg {
+    pub const ALL: [AlphaBg; 4] = [
+        AlphaBg::Checker,
+        AlphaBg::White,
+        AlphaBg::Gray,
+        AlphaBg::Black,
+    ];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            AlphaBg::Checker => "Шахматка",
+            AlphaBg::White => "Белый",
+            AlphaBg::Gray => "Серый",
+            AlphaBg::Black => "Чёрный",
+        }
+    }
+
+    /// Solid colour as sRGB grey level (`None` for the checkerboard).
+    pub fn gray(self) -> Option<f32> {
+        match self {
+            AlphaBg::Checker => None,
+            AlphaBg::White => Some(1.0),
+            AlphaBg::Gray => Some(0.5),
+            AlphaBg::Black => Some(0.0),
+        }
+    }
+}
+
 /// When a rotation made on screen is written to the file.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
@@ -77,10 +117,15 @@ pub struct Settings {
     pub open_mode: OpenMode,
     pub filmstrip: bool,
     pub thumb_size: ThumbSize,
+    /// Show a background behind transparent areas, and which one.
     pub checker: bool,
+    pub alpha_bg: AlphaBg,
     pub smoothing: bool,
     pub wheel: Wheel,
+    /// Zoom, mode and filmstrip animations.
     pub animations: bool,
+    /// Slide / fade when stepping to another photo.
+    pub turn_animation: bool,
     /// Backdrop darkness in fullscreen mode, percent.
     pub dim_percent: u8,
     pub save_mode: SaveMode,
@@ -99,9 +144,11 @@ impl Default for Settings {
             filmstrip: true,
             thumb_size: ThumbSize::Medium,
             checker: true,
+            alpha_bg: AlphaBg::Checker,
             smoothing: true,
             wheel: Wheel::Zoom,
             animations: true,
+            turn_animation: true,
             dim_percent: 80,
             save_mode: SaveMode::Auto,
             keep_file_dates: true,

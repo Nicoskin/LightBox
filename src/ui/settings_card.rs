@@ -15,6 +15,7 @@ pub enum Choice {
     KeepDates(bool),
     Imperfect(Option<ImperfectJpeg>),
     Animations(bool),
+    TurnAnimation(bool),
     Dim(u8),
 }
 
@@ -79,8 +80,15 @@ pub fn rows() -> Vec<Row> {
             ],
         },
         Row {
-            label: "Анимации",
+            label: "Анимации интерфейса",
             choices: vec![(Animations(true), "Вкл"), (Animations(false), "Выкл")],
+        },
+        Row {
+            label: "Смена фото",
+            choices: vec![
+                (TurnAnimation(true), "Плавно"),
+                (TurnAnimation(false), "Сразу"),
+            ],
         },
         Row {
             label: "Затемнение фона",
@@ -99,6 +107,7 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         Choice::KeepDates(v) => s.keep_file_dates == v,
         Choice::Imperfect(v) => s.imperfect_jpeg == v,
         Choice::Animations(v) => s.animations == v,
+        Choice::TurnAnimation(v) => s.turn_animation == v,
         Choice::Dim(v) => s.dim_percent == v,
     }
 }
@@ -113,6 +122,7 @@ pub fn apply(s: &mut Settings, c: Choice) {
         Choice::KeepDates(v) => s.keep_file_dates = v,
         Choice::Imperfect(v) => s.imperfect_jpeg = v,
         Choice::Animations(v) => s.animations = v,
+        Choice::TurnAnimation(v) => s.turn_animation = v,
         Choice::Dim(v) => s.dim_percent = v,
     }
 }

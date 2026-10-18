@@ -115,14 +115,11 @@ impl App {
 
     /// "Сбросить": back to the file's own orientation.
     pub(super) fn reset_current(&mut self) -> Result<()> {
-        if self.edits.remove(&cache::key(&self.current)).is_some() {
-            if self.mode == super::Mode::Windowed {
-                self.fit_window_to_image()?;
-            }
-            if let Some(v) = self.fit_view() {
-                self.view = v;
-                self.fitted = true;
-            }
+        if self.edits.remove(&cache::key(&self.current)).is_some()
+            && let Some(v) = self.fit_view()
+        {
+            self.view = v;
+            self.fitted = true;
         }
         self.render()
     }

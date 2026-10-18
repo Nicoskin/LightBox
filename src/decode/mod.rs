@@ -16,7 +16,7 @@ mod png;
 mod psd;
 mod raw;
 pub mod scale;
-mod svg;
+pub mod svg;
 mod wic;
 
 use std::path::Path;

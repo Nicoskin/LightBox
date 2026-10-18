@@ -6,13 +6,13 @@ use anyhow::Result;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetDoubleClickTime, GetKeyState, ReleaseCapture, SetCapture, VK_ADD, VK_CONTROL, VK_END,
-    VK_ESCAPE, VK_F11, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0, VK_NUMPAD1, VK_OEM_MINUS,
-    VK_OEM_PLUS, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SUBTRACT,
+    VK_ESCAPE, VK_F11, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0, VK_NUMPAD1, VK_OEM_4, VK_OEM_6,
+    VK_OEM_MINUS, VK_OEM_PLUS, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SUBTRACT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     PostMessageW, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CLOSE, WM_KEYDOWN, WM_LBUTTONDBLCLK,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCMOUSEMOVE, WM_XBUTTONUP,
-    XBUTTON1,
+    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCMOUSEMOVE, WM_RBUTTONUP,
+    WM_XBUTTONUP, XBUTTON1,
 };
 
 use super::mode::lparam_point;
@@ -84,9 +84,14 @@ impl App {
             WM_MOUSEMOVE => {
                 let p = client_point(lparam);
                 self.show_panel();
+                if let Some(start) = self.dial_drag {
+                    self.drag_dial(start, p.0, key_down(VK_SHIFT.0))?;
+                    return Ok(Some(LRESULT(0)));
+                }
                 if self.drag.is_none() {
                     let hot = self.panel_hit(p);
                     self.set_hot(hot)?;
+                    self.menu_hover(p)?;
                 }
                 self.on_drag(p)?;
                 Ok(Some(LRESULT(0)))
@@ -101,12 +106,13 @@ impl App {
                 let p = client_point(lparam);
                 let drag = self.drag.take();
                 let pressed = self.pressed.take();
+                self.dial_drag = None;
                 // SAFETY: releasing our own capture.
                 unsafe {
                     let _ = ReleaseCapture();
                 }
                 if let Some(h) = pressed {
-                    if self.panel_hit(p) == Some(h) {
+                    if h != Hot::DialRuler && self.panel_hit(p) == Some(h) {
                         self.activate(h)?;
                     }
                     self.render()?;
@@ -118,15 +124,25 @@ impl App {
             WM_CAPTURECHANGED => {
                 self.drag = None;
                 self.pressed = None;
+                self.dial_drag = None;
                 Ok(Some(LRESULT(0)))
             }
             WM_LBUTTONDBLCLK => {
                 let p = client_point(lparam);
-                if self.panel_hit(p).is_some() {
+                if self.panel_hit(p) == Some(Hot::DialRuler) {
+                    self.set_angle(0.0)?;
+                } else if self.panel_hit(p).is_some() {
                     // Fast clicks on a panel button are separate clicks.
                     self.on_button_down(p)?;
                 } else {
                     self.on_double_click(p)?;
+                }
+                Ok(Some(LRESULT(0)))
+            }
+            WM_RBUTTONUP => {
+                // Right click on the transparency button: choose the background.
+                if self.panel_hit(client_point(lparam)) == Some(Hot::Button(Action::Checker)) {
+                    self.open_menu()?;
                 }
                 Ok(Some(LRESULT(0)))
             }
@@ -141,8 +157,15 @@ impl App {
     }
 
     fn on_button_down(&mut self, p: (f64, f64)) -> Result<()> {
+        // A click outside the open menu only closes it.
+        if self.menu_open && self.menu_hit(p).is_none() {
+            return self.close_menu();
+        }
         if let Some(h) = self.panel_hit(p) {
             self.pressed = Some(h);
+            if h == Hot::DialRuler {
+                self.dial_drag = Some((p.0, self.angle));
+            }
             self.drag = None;
             // SAFETY: own window.
             unsafe { SetCapture(self.hwnd) };
@@ -167,6 +190,10 @@ impl App {
         match h {
             Hot::Button(a) => self.run_action(a),
             Hot::Cell(i) => self.go_to(i),
+            Hot::Caption(b) => self.caption_action(b),
+            Hot::Menu(bg) => self.choose_background(bg),
+            Hot::DialReset => self.set_angle(0.0),
+            Hot::DialRuler => Ok(()),
         }
     }
 
@@ -199,6 +226,7 @@ impl App {
             Action::SaveAs => self.save_as(),
             Action::Reset => self.reset_current(),
             Action::Settings => self.open_settings(),
+            Action::Straighten => self.toggle_dial(),
         }
     }
 
@@ -215,6 +243,8 @@ impl App {
                 }
             }
             k if ctrl && k == ch(b'Z') => self.undo_save()?,
+            k if k == VK_ESCAPE.0 && self.menu_open => self.close_menu()?,
+            k if k == VK_ESCAPE.0 && self.dial_open => self.toggle_dial()?,
             k if k == VK_ESCAPE.0 => {
                 // SAFETY: posting to our own window.
                 unsafe { PostMessageW(Some(self.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0))? };
@@ -242,12 +272,24 @@ impl App {
             k if k == ch(b'F') => self.toggle_filmstrip()?,
             k if k == ch(b'T') => self.run_action(Action::Checker)?,
             k if k == ch(b'N') => self.run_action(Action::Smoothing)?,
+            // [ and ]: turn by 1° (Shift: 0.1°).
+            k if k == VK_OEM_4.0 || k == VK_OEM_6.0 => {
+                let step = if shift { 0.1 } else { 1.0 };
+                let step = if k == VK_OEM_4.0 { -step } else { step };
+                self.set_angle(((self.angle + step) * 10.0).round() / 10.0)?;
+            }
             _ => return Ok(None),
         }
         Ok(Some(LRESULT(0)))
     }
 
     fn on_wheel(&mut self, delta: i32, p: (f64, f64)) -> Result<()> {
+        // Over the dial the wheel turns the picture.
+        if matches!(self.panel_hit(p), Some(Hot::DialRuler | Hot::DialReset)) {
+            let step = if key_down(VK_SHIFT.0) { 0.1 } else { 1.0 };
+            let a = self.angle + step * f64::from(delta.signum());
+            return self.set_angle((a * 10.0).round() / 10.0);
+        }
         // Over the panel the wheel browses; elsewhere it zooms (Ctrl swaps).
         let zooms = self.settings.wheel == Wheel::Zoom;
         let browse = self.over_panel(p) || zooms == key_down(VK_CONTROL.0);
@@ -289,6 +331,7 @@ impl App {
             self.view = v;
             self.fitted = false;
             self.render()?;
+            self.update_detail();
         }
         Ok(())
     }

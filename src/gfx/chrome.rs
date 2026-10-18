@@ -1,0 +1,318 @@
+//! Drawing of the window caption, the pop-up menu and the straightening dial.
+
+use anyhow::Result;
+use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
+use windows::Win32::Graphics::Direct2D::{
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ELLIPSE, D2D1_ROUNDED_RECT, ID2D1StrokeStyle,
+};
+use windows_numerics::Vector2;
+
+use super::overlay::{CaptionView, DialView, MenuView, Overlay, rgba};
+use super::panel::rf;
+use crate::view::Rect;
+
+/// Windows 11 caption "close" red.
+const CLOSE_RED: (f32, f32, f32) = (0.77, 0.17, 0.11);
+/// Accent used for toggles and the dial needle.
+const ACCENT: (f32, f32, f32) = (0.30, 0.56, 1.0);
+/// Title bar background (#1C1C1C).
+const TITLE_BG: f32 = 0.11;
+
+fn rounded(rect: D2D_RECT_F, r: f32) -> D2D1_ROUNDED_RECT {
+    D2D1_ROUNDED_RECT {
+        rect,
+        radiusX: r,
+        radiusY: r,
+    }
+}
+
+impl Overlay {
+    /// Windowed title bar with its buttons, or the round close button in
+    /// the corner (fullscreen).
+    pub(super) unsafe fn caption(&self, c: &CaptionView) {
+        let o = c.opacity;
+        // SAFETY (whole function): inside BeginDraw/EndDraw.
+        unsafe {
+            if let Some(bar) = c.bar {
+                self.brush.SetColor(&rgba(TITLE_BG, TITLE_BG, TITLE_BG, o));
+                self.ctx.FillRectangle(&rf(bar), &self.brush);
+            }
+            if let Some((r, title)) = &c.title {
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.78 * o));
+                self.glyph_str(title, rf(*r), &self.formats.detail);
+            }
+            for b in &c.buttons {
+                let r = rf(b.rect);
+                if c.round {
+                    let (cx, cy) = b.rect.center();
+                    let rad = (r.right - r.left) / 2.0;
+                    let fill = if b.hot && b.close {
+                        rgba(CLOSE_RED.0, CLOSE_RED.1, CLOSE_RED.2, 0.95 * o)
+                    } else {
+                        rgba(0.0, 0.0, 0.0, if b.hot { 0.62 } else { 0.42 } * o)
+                    };
+                    self.brush.SetColor(&fill);
+                    self.ctx.FillEllipse(
+                        &D2D1_ELLIPSE {
+                            point: Vector2 {
+                                X: cx as f32,
+                                Y: cy as f32,
+                            },
+                            radiusX: rad,
+                            radiusY: rad,
+                        },
+                        &self.brush,
+                    );
+                    self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95 * o));
+                    self.glyph(b.glyph, r, &self.formats.icon);
+                    continue;
+                }
+                if b.hot || b.pressed {
+                    let fill = match (b.close, b.pressed) {
+                        (true, false) => rgba(CLOSE_RED.0, CLOSE_RED.1, CLOSE_RED.2, o),
+                        (true, true) => rgba(CLOSE_RED.0, CLOSE_RED.1, CLOSE_RED.2, 0.7 * o),
+                        (false, false) => rgba(1.0, 1.0, 1.0, 0.09 * o),
+                        (false, true) => rgba(1.0, 1.0, 1.0, 0.05 * o),
+                    };
+                    self.brush.SetColor(&fill);
+                    self.ctx.FillRectangle(&r, &self.brush);
+                }
+                let a = if b.hot { 1.0 } else { 0.85 };
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, a * o));
+                self.glyph(b.glyph, r, &self.formats.small_icon);
+            }
+        }
+    }
+
+    /// Checkerboard or solid swatch in `r`.
+    unsafe fn swatch(&self, r: D2D_RECT_F, gray: Option<f32>, s: f32) {
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            match gray {
+                Some(g) => {
+                    self.brush.SetColor(&rgba(g, g, g, 1.0));
+                    self.ctx.FillRectangle(&r, &self.brush);
+                }
+                None => {
+                    let n = 4;
+                    let cw = (r.right - r.left) / n as f32;
+                    let ch = (r.bottom - r.top) / n as f32;
+                    for i in 0..n {
+                        for j in 0..n {
+                            let v = if (i + j) % 2 == 0 { 1.0 } else { 0.8 };
+                            self.brush.SetColor(&rgba(v, v, v, 1.0));
+                            let x = r.left + i as f32 * cw;
+                            let y = r.top + j as f32 * ch;
+                            self.ctx.FillRectangle(
+                                &D2D_RECT_F {
+                                    left: x,
+                                    top: y,
+                                    right: x + cw,
+                                    bottom: y + ch,
+                                },
+                                &self.brush,
+                            );
+                        }
+                    }
+                }
+            }
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.35));
+            self.ctx
+                .DrawRectangle(&r, &self.brush, s, None::<&ID2D1StrokeStyle>);
+        }
+    }
+
+    /// Small menu card: swatch, label and a check mark on the selected item.
+    pub(super) unsafe fn menu(&self, m: &MenuView, s: f32) {
+        let r = rf(m.rect);
+        let radius = 8.0 * s;
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            for (grow, a) in [(6.0, 0.10), (3.0, 0.16), (1.0, 0.22)] {
+                let g = grow * s;
+                self.brush.SetColor(&rgba(0.0, 0.0, 0.0, a));
+                self.ctx.FillRoundedRectangle(
+                    &rounded(
+                        D2D_RECT_F {
+                            left: r.left - g,
+                            top: r.top - g + 2.0 * s,
+                            right: r.right + g,
+                            bottom: r.bottom + g + 2.0 * s,
+                        },
+                        radius + g,
+                    ),
+                    &self.brush,
+                );
+            }
+            self.brush.SetColor(&rgba(0.125, 0.125, 0.135, 0.98));
+            self.ctx
+                .FillRoundedRectangle(&rounded(r, radius), &self.brush);
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.10));
+            self.ctx.DrawRoundedRectangle(
+                &rounded(r, radius),
+                &self.brush,
+                s,
+                None::<&ID2D1StrokeStyle>,
+            );
+            for item in &m.items {
+                let ir = rf(item.rect);
+                if item.hot {
+                    self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.10));
+                    self.ctx
+                        .FillRoundedRectangle(&rounded(ir, 5.0 * s), &self.brush);
+                }
+                let cy = (ir.top + ir.bottom) / 2.0;
+                let sw = 16.0 * s;
+                let sx = ir.left + 10.0 * s;
+                self.swatch(
+                    D2D_RECT_F {
+                        left: sx,
+                        top: cy - sw / 2.0,
+                        right: sx + sw,
+                        bottom: cy + sw / 2.0,
+                    },
+                    item.swatch,
+                    s,
+                );
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.92));
+                self.glyph_str(
+                    &item.label,
+                    D2D_RECT_F {
+                        left: sx + sw + 10.0 * s,
+                        right: ir.right - 28.0 * s,
+                        ..ir
+                    },
+                    &self.formats.label,
+                );
+                if item.selected {
+                    self.brush
+                        .SetColor(&rgba(ACCENT.0, ACCENT.1, ACCENT.2, 1.0));
+                    self.glyph(
+                        '\u{E73E}',
+                        D2D_RECT_F {
+                            left: ir.right - 30.0 * s,
+                            right: ir.right - 4.0 * s,
+                            ..ir
+                        },
+                        &self.formats.small_icon,
+                    );
+                }
+            }
+        }
+    }
+
+    /// The straightening dial: value on top, degree ruler below with the
+    /// needle in the middle, "0°" reset button on the right.
+    pub(super) unsafe fn dial(&self, d: &DialView, s: f32) -> Result<()> {
+        let o = d.opacity;
+        let r = rf(d.rect);
+        let ruler = d.ruler;
+        let cx = (ruler.x0 + ruler.x1) / 2.0;
+        let half = ruler.width() / 2.0;
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.66 * o));
+            self.ctx
+                .FillRoundedRectangle(&rounded(r, 12.0 * s), &self.brush);
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.08 * o));
+            self.ctx.DrawRoundedRectangle(
+                &rounded(r, 12.0 * s),
+                &self.brush,
+                s,
+                None::<&ID2D1StrokeStyle>,
+            );
+
+            // Value.
+            let value = Rect {
+                y1: ruler.y0 + 26.0 * f64::from(s),
+                ..ruler
+            };
+            let (vr, vg, vb) = if d.angle == 0.0 {
+                (1.0, 1.0, 1.0)
+            } else {
+                ACCENT
+            };
+            self.brush.SetColor(&rgba(vr, vg, vb, 0.95 * o));
+            self.glyph_str(&d.label, rf(value), &self.formats.value);
+
+            // Ticks, fading towards the ends.
+            self.ctx
+                .PushAxisAlignedClip(&rf(ruler), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            let base = ruler.y1 - 9.0 * f64::from(s);
+            let span = half / d.px_per_deg;
+            let first = (d.angle - span).floor().max(-180.0) as i32;
+            let last = (d.angle + span).ceil().min(180.0) as i32;
+            for deg in first..=last {
+                let x = cx + (f64::from(deg) - d.angle) * d.px_per_deg;
+                let t = ((x - cx).abs() / half).min(1.0) as f32;
+                let fade = 1.0 - t * t;
+                let (len, a) = if deg % 10 == 0 {
+                    (13.0, 0.9)
+                } else if deg % 5 == 0 {
+                    (9.0, 0.6)
+                } else {
+                    (5.0, 0.4)
+                };
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, a * fade * o));
+                let x = x.round() as f32 + 0.5;
+                self.ctx.DrawLine(
+                    Vector2 {
+                        X: x,
+                        Y: base as f32 - len * s,
+                    },
+                    Vector2 {
+                        X: x,
+                        Y: base as f32,
+                    },
+                    &self.brush,
+                    s.max(1.0),
+                    None::<&ID2D1StrokeStyle>,
+                );
+            }
+            // Needle.
+            self.brush.SetColor(&rgba(ACCENT.0, ACCENT.1, ACCENT.2, o));
+            self.ctx.DrawLine(
+                Vector2 {
+                    X: cx as f32,
+                    Y: base as f32 - 18.0 * s,
+                },
+                Vector2 {
+                    X: cx as f32,
+                    Y: base as f32 + 4.0 * s,
+                },
+                &self.brush,
+                2.0 * s,
+                None::<&ID2D1StrokeStyle>,
+            );
+            self.ctx.PopAxisAlignedClip();
+
+            // Separator and reset.
+            let rr = rf(d.reset);
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.12 * o));
+            self.ctx.FillRectangle(
+                &D2D_RECT_F {
+                    left: rr.left,
+                    top: rr.top + 10.0 * s,
+                    right: rr.left + s,
+                    bottom: rr.bottom - 10.0 * s,
+                },
+                &self.brush,
+            );
+            let inner = D2D_RECT_F {
+                left: rr.left + 4.0 * s,
+                top: rr.top + 8.0 * s,
+                right: rr.right - 6.0 * s,
+                bottom: rr.bottom - 8.0 * s,
+            };
+            if d.reset_hot {
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.14 * o));
+                self.ctx
+                    .FillRoundedRectangle(&rounded(inner, 6.0 * s), &self.brush);
+            }
+            let a = if d.angle == 0.0 { 0.35 } else { 0.9 };
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, a * o));
+            self.glyph_str("0°", inner, &self.formats.value);
+        }
+        Ok(())
+    }
+}

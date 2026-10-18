@@ -4,6 +4,7 @@
 //! on worker threads in parallel with window creation; the UI thread then
 //! only binds its swap chain to the window through a [`Compositor`].
 
+mod chrome;
 mod compositor;
 mod device;
 mod overlay;
@@ -14,7 +15,8 @@ mod texture;
 pub use compositor::Compositor;
 pub use device::{Adapter, Gpu};
 pub use overlay::{
-    ButtonView, CardView, CellView, Icon, PanelView, SegmentView, TextStyle, TextView, Thumb, Ui,
+    ButtonView, CaptionButtonView, CaptionView, CardView, CellView, DialView, Icon, MenuItemView,
+    MenuView, PanelView, SegmentView, TextStyle, TextView, Thumb, Ui,
 };
 pub use renderer::{Background, DrawParams, Filter, Layer, Part};
 pub use texture::GpuImage;

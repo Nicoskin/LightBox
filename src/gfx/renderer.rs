@@ -36,7 +36,6 @@ pub enum Background {
     /// Grey/white checkerboard with cells of the given size in screen pixels.
     Checker(f32),
     /// Solid colour, premultiplied linear RGBA.
-    #[expect(dead_code, reason = "selectable from the toolbar in M3")]
     Solid([f32; 4]),
 }
 
@@ -47,6 +46,9 @@ pub struct Part<'a> {
     pub quad: Quad,
     /// Content rectangle inside the texture (offset xy, size zw).
     pub tex: [f32; 4],
+    /// Sides that are edges of the whole image (anti-aliased when the
+    /// layer is turned): 1 left, 2 top, 4 right, 8 bottom.
+    pub edges: u32,
 }
 
 /// One image drawn in a frame (two during a page turn).
@@ -58,6 +60,9 @@ pub struct Layer<'a> {
     pub opacity: f32,
     /// EXIF-style orientation 1..8 to display the texture with.
     pub orientation: u32,
+    /// Free rotation (cos, sin) about `pivot` (screen pixels).
+    pub rotation: [f32; 2],
+    pub pivot: [f32; 2],
 }
 
 /// Everything needed to draw one frame.
@@ -84,8 +89,11 @@ struct Constants {
     channel_mode: u32,
     grid: u32,
     opacity: f32,
-    pad: [u32; 2],
+    rot: [f32; 2],
     tex_rect: [f32; 4],
+    pivot: [f32; 2],
+    edges: u32,
+    pad: u32,
 }
 
 const _: () = assert!(std::mem::size_of::<Constants>().is_multiple_of(16));
@@ -212,6 +220,9 @@ impl Renderer {
                         bg_mode,
                         opacity: layer.opacity.clamp(0.0, 1.0),
                         tex_rect: part.tex,
+                        rot: layer.rotation,
+                        pivot: layer.pivot,
+                        edges: part.edges,
                         ..Default::default()
                     };
                     ctx.UpdateSubresource(

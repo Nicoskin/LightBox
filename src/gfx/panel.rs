@@ -20,7 +20,7 @@ use super::overlay::{
 };
 use crate::view::Rect;
 
-fn rf(r: Rect) -> D2D_RECT_F {
+pub(super) fn rf(r: Rect) -> D2D_RECT_F {
     D2D_RECT_F {
         left: r.x0 as f32,
         top: r.y0 as f32,
@@ -45,7 +45,18 @@ impl Overlay {
             line.y1 = line.y0 + f64::from(s.max(1.0));
             self.ctx.FillRectangle(&rf(line), &self.brush);
         }
-        self.cells(&p.cells, o, s)?;
+        if let Some(strip) = p.strip {
+            // Cells glide in and out at the strip's ends.
+            // SAFETY: inside BeginDraw/EndDraw; popped right after.
+            unsafe {
+                self.ctx
+                    .PushAxisAlignedClip(&rf(strip), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            }
+            let r = self.cells(&p.cells, o, s);
+            // SAFETY: matches the push above.
+            unsafe { self.ctx.PopAxisAlignedClip() };
+            r?;
+        }
         for b in &p.buttons {
             // SAFETY: inside BeginDraw/EndDraw (see `Overlay::draw`).
             unsafe { self.button(b, o, s) };
@@ -176,6 +187,43 @@ impl Overlay {
                         None::<&ID2D1StrokeStyle>,
                     );
                 }
+                Icon::Angle => {
+                    // "∠": a base line and a slanted arm with a small arc.
+                    let (x0, y0) = (cx - 8.0 * s, cy + 6.0 * s);
+                    let w = 1.6 * s;
+                    let none = None::<&ID2D1StrokeStyle>;
+                    let p = |x: f32, y: f32| Vector2 { X: x, Y: y };
+                    self.ctx
+                        .DrawLine(p(x0, y0), p(cx + 8.0 * s, y0), &self.brush, w, none);
+                    self.ctx.DrawLine(
+                        p(x0, y0),
+                        p(cx + 6.0 * s, cy - 7.0 * s),
+                        &self.brush,
+                        w,
+                        none,
+                    );
+                    self.ctx.DrawLine(
+                        p(cx + 1.0 * s, y0),
+                        p(cx - 0.5 * s, cy + 0.8 * s),
+                        &self.brush,
+                        w * 0.8,
+                        none,
+                    );
+                }
+                Icon::Swatch(g) => {
+                    let h = 7.0 * s;
+                    let r = D2D_RECT_F {
+                        left: cx - h,
+                        top: cy - h,
+                        right: cx + h,
+                        bottom: cy + h,
+                    };
+                    self.brush.SetColor(&rgba(g, g, g, o));
+                    self.ctx.FillRectangle(&r, &self.brush);
+                    self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.6 * o));
+                    self.ctx
+                        .DrawRectangle(&r, &self.brush, s, None::<&ID2D1StrokeStyle>);
+                }
                 Icon::Filmstrip => {
                     let (w, h, gap) = (5.0 * s, 8.0 * s, 1.5 * s);
                     for k in -1..=1 {
@@ -199,7 +247,7 @@ impl Overlay {
         }
     }
 
-    unsafe fn fill_shape(&self, r: D2D_RECT_F, round: bool) {
+    pub(super) unsafe fn fill_shape(&self, r: D2D_RECT_F, round: bool) {
         unsafe {
             if round {
                 let rx = (r.right - r.left) / 2.0;
@@ -228,7 +276,7 @@ impl Overlay {
         }
     }
 
-    unsafe fn glyph(&self, c: char, r: D2D_RECT_F, format: &IDWriteTextFormat) {
+    pub(super) unsafe fn glyph(&self, c: char, r: D2D_RECT_F, format: &IDWriteTextFormat) {
         let mut buf = [0u16; 2];
         let text = c.encode_utf16(&mut buf);
         unsafe {
@@ -243,7 +291,7 @@ impl Overlay {
         }
     }
 
-    unsafe fn glyph_str(&self, t: &str, r: D2D_RECT_F, format: &IDWriteTextFormat) {
+    pub(super) unsafe fn glyph_str(&self, t: &str, r: D2D_RECT_F, format: &IDWriteTextFormat) {
         let text: Vec<u16> = t.encode_utf16().collect();
         unsafe {
             self.ctx.DrawText(

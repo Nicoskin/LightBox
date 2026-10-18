@@ -1,12 +1,15 @@
-//! SVG / SVGZ rasterised with resvg. Vector art is rendered large enough to
-//! stay sharp when fitted to the screen and moderately zoomed.
+//! SVG / SVGZ rendered with resvg. The drawing is first rasterised large
+//! enough to look sharp when fitted to the screen; when zoomed in further,
+//! the app re-renders just the visible region at screen resolution
+//! ([`render_region`]), so outlines stay smooth at any zoom.
 
 use std::sync::{Arc, OnceLock};
 
 use resvg::tiny_skia::{Pixmap, Transform};
+pub use resvg::usvg::Tree;
 use resvg::usvg::{self, fontdb};
 
-use super::{DecodeError, Raw, RawImage, SizeHint};
+use super::{DecodeError, DecodedImage, Raw, RawImage, SizeHint};
 
 /// Longest side a drawing is rendered at, at most.
 const MAX_SIDE: f32 = 8192.0;
@@ -23,7 +26,8 @@ fn fonts() -> Arc<fontdb::Database> {
     }))
 }
 
-pub fn decode(data: &[u8], hint: Option<SizeHint>) -> Result<RawImage, DecodeError> {
+/// Parses an SVG / SVGZ document.
+pub fn parse(data: &[u8]) -> Result<usvg::Tree, DecodeError> {
     let opt = usvg::Options {
         fontdb: fonts(),
         ..Default::default()
@@ -31,10 +35,16 @@ pub fn decode(data: &[u8], hint: Option<SizeHint>) -> Result<RawImage, DecodeErr
     let tree =
         usvg::Tree::from_data(data, &opt).map_err(|e| DecodeError::Other(format!("SVG: {e}")))?;
     let size = tree.size();
-    let (sw, sh) = (size.width(), size.height());
-    if !(sw > 0.0 && sh > 0.0) {
+    if !(size.width() > 0.0 && size.height() > 0.0) {
         return Err(DecodeError::Unsupported);
     }
+    Ok(tree)
+}
+
+pub fn decode(data: &[u8], hint: Option<SizeHint>) -> Result<RawImage, DecodeError> {
+    let tree = parse(data)?;
+    let size = tree.size();
+    let (sw, sh) = (size.width(), size.height());
     // At least the screen box (or MIN_SIDE), at most MAX_SIDE.
     let target = hint.map_or(MIN_SIDE, |h| h.box_width.max(h.box_height) as f32);
     let longest = sw.max(sh);
@@ -43,8 +53,40 @@ pub fn decode(data: &[u8], hint: Option<SizeHint>) -> Result<RawImage, DecodeErr
         (sw * k).round().max(1.0) as u32,
         (sh * k).round().max(1.0) as u32,
     );
+    render(&tree, Transform::from_scale(k, k), w, h)
+}
+
+/// Renders `region` (x0, y0, x1, y1 in pixels of a `raster`-sized base
+/// rendering of the drawing) into an `out`-sized image.
+pub fn render_region(
+    tree: &usvg::Tree,
+    raster: (u32, u32),
+    region: [f64; 4],
+    out: (u32, u32),
+) -> Result<DecodedImage, DecodeError> {
+    // Raster pixels per SVG unit, then output pixels per raster pixel.
+    let base = f64::from(raster.0) / f64::from(tree.size().width());
+    let k = f64::from(out.0) / (region[2] - region[0]);
+    let t = Transform::from_row(
+        (base * k) as f32,
+        0.0,
+        0.0,
+        (base * k) as f32,
+        (-region[0] * k) as f32,
+        (-region[1] * k) as f32,
+    );
+    super::finish(render(tree, t, out.0, out.1)?, true)
+}
+
+/// Renders with `transform` into a `w` × `h` straight-alpha RGBA8 image.
+fn render(
+    tree: &usvg::Tree,
+    transform: Transform,
+    w: u32,
+    h: u32,
+) -> Result<RawImage, DecodeError> {
     let mut pixmap = Pixmap::new(w, h).ok_or(DecodeError::TooLarge(w, h))?;
-    resvg::render(&tree, Transform::from_scale(k, k), &mut pixmap.as_mut());
+    resvg::render(tree, transform, &mut pixmap.as_mut());
     // tiny-skia is premultiplied (in sRGB space): back to straight alpha.
     let mut rgba = pixmap.take();
     for p in rgba.as_chunks_mut::<4>().0 {
@@ -57,7 +99,6 @@ pub fn decode(data: &[u8], hint: Option<SizeHint>) -> Result<RawImage, DecodeErr
     }
     Ok(RawImage::new(w, h, Raw::Rgba8(rgba)))
 }
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -73,5 +114,32 @@ mod tests {
         let at = |x: u32, y: u32| &px[((y * img.width + x) * 4) as usize..][..4];
         assert_eq!(at(512, 512), &[255, 0, 0, 255]); // inside the circle
         assert_eq!(at(1500, 512)[3], 0); // transparent outside
+    }
+
+    #[test]
+    fn region_renders_sharp_edges() {
+        let svg = br##"<svg xmlns="http://www.w3.org/2000/svg" width="100" height="50">
+            <circle cx="25" cy="25" r="20" fill="#ff0000"/></svg>"##;
+        let tree = parse(svg).unwrap();
+        // 10 × 10 raster pixels around the circle's left edge (x = 5 units
+        // = 102.4 px in a 2048 px raster), rendered 100× larger.
+        let img = render_region(
+            &tree,
+            (2048, 1024),
+            [97.0, 507.0, 107.0, 517.0],
+            (1000, 1000),
+        )
+        .unwrap();
+        assert_eq!((img.width, img.height), (1000, 1000));
+        let crate::decode::Pixels::Srgb8(px) = &img.pixels else {
+            panic!()
+        };
+        let alpha = |x: u32| px[((500 * 1000 + x) * 4 + 3) as usize];
+        // Edge at 102.4 px → 540 px in the output; inside opaque, outside clear.
+        assert_eq!(alpha(10), 0);
+        assert_eq!(alpha(990), 255);
+        // Anti-aliasing spans about one output pixel, not 100.
+        let soft = (0..1000).filter(|&x| (1..255).contains(&alpha(x))).count();
+        assert!(soft <= 3, "{soft}");
     }
 }

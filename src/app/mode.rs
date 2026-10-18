@@ -13,8 +13,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_MENU};
 use windows::Win32::UI::WindowsAndMessaging::{
     HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT,
     HTTOPRIGHT, SC_MAXIMIZE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
-    WM_SIZE, WM_SIZING, WM_SYSCOMMAND, WMSZ_BOTTOM, WMSZ_BOTTOMLEFT, WMSZ_LEFT, WMSZ_RIGHT,
-    WMSZ_TOP, WMSZ_TOPLEFT, WMSZ_TOPRIGHT,
+    WM_SIZE, WM_SYSCOMMAND,
 };
 
 use super::{Anim, AnimKind, App, MODE_ANIM, Mode};
@@ -23,6 +22,7 @@ use super::{Anim, AnimKind, App, MODE_ANIM, Mode};
 const MIN_WINDOW_DIP: f64 = 160.0;
 /// Width of the dark frame around the photo in windowed mode, 96-DPI pixels.
 pub(super) const FRAME_DIP: f64 = 6.0;
+use crate::ui::caption;
 use crate::view::{self, Rect, View};
 use crate::win::monitor::Monitor;
 use crate::win::window;
@@ -86,7 +86,7 @@ impl App {
                 self.anim = Some(Anim {
                     kind: AnimKind::Mode {
                         from: now,
-                        to: target.offset(-ox, -oy).inset(mon.px(FRAME_DIP)),
+                        to: photo_area(target.offset(-ox, -oy), &mon),
                         dim: (self.dim, 0.0),
                         opacity: (1.0, 1.0),
                         enter_windowed: Some(target),
@@ -180,25 +180,6 @@ impl App {
         self.render()
     }
 
-    /// Windowed mode, new photo: resize the window to it, keeping the centre.
-    pub(super) fn fit_window_to_image(&mut self) -> Result<()> {
-        let Some(display) = self.display() else {
-            return Ok(());
-        };
-        let mon = Monitor::of_window(self.hwnd);
-        self.monitor = mon;
-        let work = to_rect(mon.work);
-        let size = window_size(display, &mon);
-        let center = to_rect(window::rect(self.hwnd)).center();
-        let target = view::place_within(size, center, work);
-        window::sync_to_compositor();
-        window::set_rect(self.hwnd, to_win32(target))?;
-        self.gpu.resize(
-            target.width().round() as u32,
-            target.height().round() as u32,
-        )
-    }
-
     /// Start-up in windowed mode (setting): the window takes the photo's
     /// size, centred in the work area, before the first frame is drawn.
     pub(super) fn start_windowed(&mut self) -> Result<()> {
@@ -245,6 +226,7 @@ impl App {
         } else {
             self.view = self.clamp(self.view);
         }
+        self.update_detail();
         self.render()
     }
 
@@ -275,45 +257,11 @@ impl App {
             (_, _, true, _) => HTTOP,
             (.., true) => HTBOTTOM,
             _ if self.over_panel((x, y)) => HTCLIENT,
+            _ if self.over_title_bar((x, y)) => HTCAPTION,
             _ if self.drag_moves_window() => HTCAPTION,
             _ => HTCLIENT,
         };
         LRESULT(code as isize)
-    }
-
-    /// Keeps the photo's aspect ratio while the user resizes the window.
-    fn on_sizing(&self, edge: u32, r: &mut RECT) {
-        let Some((dw, dh)) = self.display() else {
-            return;
-        };
-        // The photo inside the frame keeps its aspect ratio.
-        let aspect = dw / dh;
-        let f2 = 2.0 * self.monitor.px(FRAME_DIP);
-        let w = f64::from(r.right - r.left);
-        let h = f64::from(r.bottom - r.top);
-        let h_from_w = ((w - f2) / aspect + f2).round() as i32;
-        let w_from_h = ((h - f2) * aspect + f2).round() as i32;
-        match edge {
-            WMSZ_LEFT | WMSZ_RIGHT => r.bottom = r.top + h_from_w,
-            WMSZ_TOP | WMSZ_BOTTOM => r.right = r.left + w_from_h,
-            _ => {
-                // Corners: follow whichever side grew proportionally more.
-                let by_height = f64::from(w_from_h) > w;
-                let left = matches!(edge, WMSZ_TOPLEFT | WMSZ_BOTTOMLEFT);
-                let top = matches!(edge, WMSZ_TOPLEFT | WMSZ_TOPRIGHT);
-                if by_height {
-                    if left {
-                        r.left = r.right - w_from_h;
-                    } else {
-                        r.right = r.left + w_from_h;
-                    }
-                } else if top {
-                    r.top = r.bottom - h_from_w;
-                } else {
-                    r.bottom = r.top + h_from_w;
-                }
-            }
-        }
     }
 
     /// Window-geometry messages. `None` = not handled here.
@@ -329,12 +277,6 @@ impl App {
             WM_NCLBUTTONDBLCLK if windowed => {
                 self.go_fullscreen()?;
                 Some(LRESULT(0))
-            }
-            WM_SIZING if windowed => {
-                // SAFETY: for WM_SIZING, lParam points to the drag RECT.
-                let r = unsafe { &mut *(lparam.0 as *mut RECT) };
-                self.on_sizing(wparam.0 as u32, r);
-                Some(LRESULT(1))
             }
             WM_SIZE => {
                 let (w, h) = (lparam.0 & 0xffff, (lparam.0 >> 16) & 0xffff);
@@ -359,14 +301,28 @@ impl App {
 }
 
 /// Windowed-mode window size for a photo of `display` pixels: the photo at
-/// 100 % (or fitted into 90 % of the work area) plus the frame on each side.
+/// 100 % (or fitted into 90 % of the work area) plus the title bar and the
+/// frame. Chosen when the window opens; browsing keeps it.
 fn window_size(display: (f64, f64), mon: &Monitor) -> (f64, f64) {
-    let f2 = 2.0 * mon.px(FRAME_DIP);
+    let f = mon.px(FRAME_DIP);
+    let t = mon.px(caption::TITLE_H).round();
     let work = to_rect(mon.work);
     let photo = view::windowed_size(
         display,
-        (work.width() - f2, work.height() - f2),
+        (work.width() - 2.0 * f, work.height() - f - t),
         mon.px(MIN_WINDOW_DIP),
     );
-    (photo.0 + f2, photo.1 + f2)
+    (photo.0 + 2.0 * f, photo.1 + f + t)
+}
+
+/// Where the photo goes inside a window occupying `window`: below the
+/// title bar, inside the frame.
+pub(super) fn photo_area(window: Rect, mon: &Monitor) -> Rect {
+    let f = mon.px(FRAME_DIP);
+    Rect {
+        x0: window.x0 + f,
+        y0: window.y0 + mon.px(caption::TITLE_H).round(),
+        x1: window.x1 - f,
+        y1: window.y1 - f,
+    }
 }

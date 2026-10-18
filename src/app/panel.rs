@@ -7,8 +7,11 @@ use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 
 use super::{App, Mode, PANEL_HOLD_MS, PANEL_TIMER, WM_APP_THUMB, post};
 use crate::cache;
+use crate::gfx::Icon;
 use crate::gfx::{ButtonView, CardView, CellView, PanelView, SegmentView, TextStyle, TextView};
 use crate::orientation::Orientation;
+use crate::settings::AlphaBg;
+use crate::ui::caption::CaptionButton;
 use crate::ui::settings_card;
 use crate::ui::thumbs::Thumbnails;
 use crate::ui::toolbar::{self, Action, Layout};
@@ -21,13 +24,20 @@ pub enum Hot {
     Button(Action),
     /// Filmstrip cell: file index.
     Cell(usize),
+    /// Title bar / corner button.
+    Caption(CaptionButton),
+    /// Item of the transparency-background menu.
+    Menu(AlphaBg),
+    /// The straightening dial's ruler and its "0°" button.
+    DialRuler,
+    DialReset,
 }
 
 /// Thumbnails requested beyond the visible cells, each side.
 const THUMB_LOOKAHEAD: usize = 6;
 
 impl App {
-    fn panel_layout(&self) -> Layout {
+    pub(super) fn panel_layout(&self) -> Layout {
         let windowed = self.mode == Mode::Windowed;
         toolbar::layout(
             self.viewport(),
@@ -66,7 +76,7 @@ impl App {
         let wr = window::rect(self.hwnd);
         let p = (f64::from(c.x - wr.left), f64::from(c.y - wr.top));
         let inside = c.x >= wr.left && c.x < wr.right && c.y >= wr.top && c.y < wr.bottom;
-        if self.pressed.is_some() || (inside && self.panel_layout().contains(p)) {
+        if self.pressed.is_some() || self.menu_open || (inside && self.over_panel(p)) {
             self.show_panel();
         } else {
             self.hide_panel();
@@ -79,13 +89,27 @@ impl App {
         self.viewport().1 - l.strip.map_or(l.bar.y0, |s| s.y0)
     }
 
-    /// `true` if `p` is over the (visible) panel or strip.
+    /// `true` if `p` is over any visible control: the panel or strip, a
+    /// caption button, the dial or the pop-up menu.
     pub(super) fn over_panel(&self, p: (f64, f64)) -> bool {
-        self.panel_target > 0.5 && self.panel_layout().contains(p)
+        self.menu_hit(p).is_some()
+            || self.caption_hit(p).is_some()
+            || self.dial_hit(p).is_some()
+            || (self.panel_target > 0.5 && self.panel_layout().contains(p))
     }
 
-    /// Button or filmstrip cell under `p`.
+    /// Control (button, filmstrip cell, caption button, menu item, dial)
+    /// under `p`.
     pub(super) fn panel_hit(&self, p: (f64, f64)) -> Option<Hot> {
+        if let Some(item) = self.menu_hit(p) {
+            return item.map(Hot::Menu);
+        }
+        if let Some(b) = self.caption_hit(p) {
+            return Some(Hot::Caption(b));
+        }
+        if let Some(h) = self.dial_hit(p) {
+            return Some(h);
+        }
         if self.panel_target < 0.5 {
             return None;
         }
@@ -94,7 +118,7 @@ impl App {
             return Some(Hot::Button(a));
         }
         let strip = l.strip.filter(|s| s.contains(p))?;
-        toolbar::strip_cells(strip, self.ui_scale(), self.files.len(), self.index)
+        toolbar::strip_cells(strip, self.ui_scale(), self.files.len(), self.strip_pos)
             .into_iter()
             .find(|(_, r)| r.contains(p))
             .map(|(i, _)| Hot::Cell(i))
@@ -119,7 +143,11 @@ impl App {
             .iter()
             .map(|b| ButtonView {
                 rect: b.rect,
-                icon: b.icon,
+                // The transparency button shows the chosen background.
+                icon: match (b.action, self.settings.alpha_bg.gray()) {
+                    (Action::Checker, Some(g)) => Icon::Swatch(g),
+                    _ => b.icon,
+                },
                 round: b.round,
                 hot: self.hot == Some(Hot::Button(b.action)),
                 pressed: self.pressed == Some(Hot::Button(b.action)),
@@ -127,6 +155,7 @@ impl App {
                     Action::Checker => self.settings.checker,
                     Action::Smoothing => self.settings.smoothing,
                     Action::Filmstrip => self.settings.filmstrip,
+                    Action::Straighten => self.dial_open,
                     _ => false,
                 },
                 enabled: match b.action {
@@ -165,7 +194,7 @@ impl App {
         }
 
         let cells = l.strip.map_or_else(Vec::new, |strip| {
-            toolbar::strip_cells(strip, self.ui_scale(), self.files.len(), self.index)
+            toolbar::strip_cells(strip, self.ui_scale(), self.files.len(), self.strip_pos)
                 .into_iter()
                 .map(|(i, rect)| CellView {
                     rect,
@@ -219,9 +248,6 @@ impl App {
         } else {
             self.edits.insert(key, e);
         }
-        if self.mode == Mode::Windowed {
-            self.fit_window_to_image()?;
-        }
         if let Some(v) = self.fit_view() {
             self.view = v;
             self.fitted = true;
@@ -263,7 +289,7 @@ impl App {
             return;
         };
         let visible =
-            toolbar::strip_cells(strip, self.ui_scale(), self.files.len(), self.index).len();
+            toolbar::strip_cells(strip, self.ui_scale(), self.files.len(), self.index as f64).len();
         let reach = visible / 2 + THUMB_LOOKAHEAD;
         let n = self.files.len();
         let mut order = vec![self.index];

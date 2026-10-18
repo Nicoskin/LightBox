@@ -21,6 +21,8 @@ pub enum Action {
     ToggleMode,
     FlipH,
     FlipV,
+    /// Shows / hides the straightening dial.
+    Straighten,
     Save,
     SaveAs,
     Reset,
@@ -179,7 +181,11 @@ pub fn layout(
         row(centre_items, (vp.0 - w) / 2.0, cy, s, &mut out);
         if roomy {
             row(&zoom, pad, cy, s, &mut out);
-            let right = [Item::Button(ToggleMode, mode_icon, false)];
+            let right = [
+                Item::Button(Checker, Icon::Checker, false),
+                Item::Button(Straighten, Icon::Angle, false),
+                Item::Button(ToggleMode, mode_icon, false),
+            ];
             row(&right, vp.0 - pad - width(&right, s), cy, s, &mut out);
         }
         return out;
@@ -211,6 +217,7 @@ pub fn layout(
     let edit = [
         Item::Button(FlipH, Icon::Text("\u{21C6}"), false),
         Item::Button(FlipV, Icon::Text("\u{21C5}"), false),
+        Item::Button(Straighten, Icon::Angle, false),
         Item::Gap,
         Item::Button(Save, Icon::Glyph('\u{E74E}'), false),
         Item::Button(SaveAs, Icon::Glyph('\u{E792}'), false),
@@ -247,9 +254,11 @@ impl Layout {
     }
 }
 
-/// Thumbnail cells of the strip: the current file centred, neighbours to
-/// both sides while they fit. Returns `(file index, cell rect)`.
-pub fn strip_cells(strip: Rect, s: f64, count: usize, current: usize) -> Vec<(usize, Rect)> {
+/// Thumbnail cells of the strip around scroll position `pos` (a file index,
+/// fractional while the strip glides): file `pos` is centred and neighbours
+/// follow on both sides, including cells cut by the strip edges (the
+/// drawing clips them). Returns `(file index, cell rect)`.
+pub fn strip_cells(strip: Rect, s: f64, count: usize, pos: f64) -> Vec<(usize, Rect)> {
     if count == 0 {
         return Vec::new();
     }
@@ -257,23 +266,21 @@ pub fn strip_cells(strip: Rect, s: f64, count: usize, current: usize) -> Vec<(us
     let w = (h * 1.34).round();
     let step = w + 6.0 * s;
     let (cx, cy) = strip.center();
-    let half = ((strip.width() / 2.0 - w / 2.0) / step).floor().max(0.0) as isize;
+    let reach = (strip.width() / 2.0 + w / 2.0) / step;
+    let first = (pos - reach).floor().max(0.0) as usize;
+    let last = ((pos + reach).ceil().max(0.0) as usize).min(count - 1);
     let mut out = Vec::new();
-    for k in -half..=half {
-        let i = current as isize + k;
-        if i < 0 || i >= count as isize {
-            continue;
+    for i in first..=last {
+        let x = (cx + (i as f64 - pos) * step).round();
+        let r = Rect {
+            x0: x - w / 2.0,
+            y0: cy - h / 2.0,
+            x1: x + w / 2.0,
+            y1: cy + h / 2.0,
+        };
+        if r.x1 > strip.x0 && r.x0 < strip.x1 {
+            out.push((i, r));
         }
-        let x = cx + k as f64 * step;
-        out.push((
-            i as usize,
-            Rect {
-                x0: x - w / 2.0,
-                y0: cy - h / 2.0,
-                x1: x + w / 2.0,
-                y1: cy + h / 2.0,
-            },
-        ));
     }
     out
 }
@@ -308,7 +315,7 @@ mod tests {
     fn fullscreen_layout() {
         let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false);
         no_overlaps(&l);
-        assert_eq!(l.buttons.len(), 18);
+        assert_eq!(l.buttons.len(), 19);
         assert!(l.caption.is_some() && l.zoom_text.is_some());
         let strip = l.strip.unwrap();
         assert_eq!(strip.y1, l.bar.y0);
@@ -342,13 +349,18 @@ mod tests {
             x1: 1000.0,
             y1: 78.0,
         };
-        let cells = strip_cells(strip, 1.0, 100, 50);
+        let cells = strip_cells(strip, 1.0, 100, 50.0);
         let cur = cells.iter().find(|(i, _)| *i == 50).unwrap().1;
         assert!((cur.center().0 - 500.0).abs() < 1e-9);
-        assert!(cells.iter().all(|(_, r)| r.x0 >= 0.0 && r.x1 <= 1000.0));
+        assert!(cells.iter().all(|(_, r)| r.x1 > 0.0 && r.x0 < 1000.0));
+        // Half-way between two files the strip is half-way too.
+        let mid = strip_cells(strip, 1.0, 100, 50.5);
+        let a = mid.iter().find(|(i, _)| *i == 50).unwrap().1.center().0;
+        let b = mid.iter().find(|(i, _)| *i == 51).unwrap().1.center().0;
+        assert!(((a + b) / 2.0 - 500.0).abs() <= 1.0);
         // At the start of the folder nothing is drawn to the left.
-        let cells = strip_cells(strip, 1.0, 100, 0);
+        let cells = strip_cells(strip, 1.0, 100, 0.0);
         assert_eq!(cells[0].0, 0);
-        assert!(strip_cells(strip, 1.0, 0, 0).is_empty());
+        assert!(strip_cells(strip, 1.0, 0, 0.0).is_empty());
     }
 }
