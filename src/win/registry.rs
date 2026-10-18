@@ -6,7 +6,8 @@ use std::path::Path;
 use anyhow::{Result, bail};
 use windows::Win32::Foundation::{ERROR_FILE_NOT_FOUND, ERROR_SUCCESS, WIN32_ERROR};
 use windows::Win32::System::Registry::{
-    HKEY_CURRENT_USER, REG_SZ, RegDeleteKeyValueW, RegDeleteTreeW, RegSetKeyValueW,
+    HKEY, HKEY_CURRENT_USER, KEY_READ, REG_SZ, RegCloseKey, RegDeleteKeyValueW, RegDeleteKeyW,
+    RegDeleteTreeW, RegOpenKeyExW, RegQueryInfoKeyW, RegSetKeyValueW,
 };
 use windows::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify};
 use windows::core::HSTRING;
@@ -54,6 +55,45 @@ fn delete_value(key: &str, name: &str) -> Result<()> {
     let e =
         unsafe { RegDeleteKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(key), &HSTRING::from(name)) };
     check(e, key)
+}
+
+/// Deletes `key` if it holds nothing at all (no values, no subkeys): the
+/// empty `.extOpenWithProgids` keys left when ours was the only entry.
+fn delete_if_empty(key: &str) -> Result<()> {
+    let mut h = HKEY::default();
+    // SAFETY: the key is opened, queried and closed here.
+    unsafe {
+        if RegOpenKeyExW(
+            HKEY_CURRENT_USER,
+            &HSTRING::from(key),
+            None,
+            KEY_READ,
+            &mut h,
+        ) != ERROR_SUCCESS
+        {
+            return Ok(()); // not there
+        }
+        let (mut subkeys, mut values) = (0u32, 0u32);
+        let e = RegQueryInfoKeyW(
+            h,
+            None,
+            None,
+            None,
+            Some(&mut subkeys),
+            None,
+            None,
+            Some(&mut values),
+            None,
+            None,
+            None,
+            None,
+        );
+        let _ = RegCloseKey(h);
+        if e == ERROR_SUCCESS && subkeys == 0 && values == 0 {
+            check(RegDeleteKeyW(HKEY_CURRENT_USER, &HSTRING::from(key)), key)?;
+        }
+    }
+    Ok(())
 }
 
 fn prog_id() -> String {
@@ -110,7 +150,10 @@ pub fn register(exe: &Path) -> Result<()> {
 pub fn unregister(exe: &Path) -> Result<()> {
     let pid = prog_id();
     for ext in EXTENSIONS {
-        delete_value(&format!(r"{CLASSES}\.{ext}\OpenWithProgids"), &pid)?;
+        let owp = format!(r"{CLASSES}\.{ext}\OpenWithProgids");
+        delete_value(&owp, &pid)?;
+        delete_if_empty(&owp)?;
+        delete_if_empty(&format!(r"{CLASSES}\.{ext}"))?;
     }
     delete_tree(&format!(r"{CLASSES}\{pid}"))?;
     delete_tree(&format!(r"{CLASSES}\Applications\{}", exe_name(exe)))?;
