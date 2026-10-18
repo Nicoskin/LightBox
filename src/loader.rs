@@ -14,6 +14,8 @@ use crate::decode::{self, DecodedImage, SizeHint};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Quality {
+    /// The EXIF thumbnail: on screen in a millisecond, blurry.
+    Thumb,
     /// Reduced (DCT-scaled) image sized for the screen.
     Preview,
     /// Full resolution, for zooming in.
@@ -28,6 +30,7 @@ pub struct Request {
 
 pub struct Done {
     pub path: PathBuf,
+    pub quality: Quality,
     pub result: Result<Arc<DecodedImage>, String>,
 }
 
@@ -132,13 +135,13 @@ fn worker(shared: &Shared, tx: &Sender<Done>, notify: &(dyn Fn() + Send + Sync))
             }
         };
 
-        let hint = match req.quality {
-            Quality::Preview => Some(hint),
-            Quality::Full => None,
-        };
-        let result = decode::decode_file(&req.path, hint)
-            .map(Arc::new)
-            .map_err(|e| e.to_string());
+        let result = match req.quality {
+            Quality::Thumb => decode::decode_thumbnail(&req.path),
+            Quality::Preview => decode::decode_file(&req.path, Some(hint)),
+            Quality::Full => decode::decode_file(&req.path, None),
+        }
+        .map(Arc::new)
+        .map_err(|e| e.to_string());
 
         if let Ok(mut st) = shared.state.lock() {
             let k = (cache::key(&req.path), req.quality);
@@ -147,6 +150,7 @@ fn worker(shared: &Shared, tx: &Sender<Done>, notify: &(dyn Fn() + Send + Sync))
         if tx
             .send(Done {
                 path: req.path,
+                quality: req.quality,
                 result,
             })
             .is_err()

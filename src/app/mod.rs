@@ -28,7 +28,9 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use crate::cache::{self, Cache};
 use crate::decode::{DecodeError, DecodedImage};
-use crate::gfx::{Adapter, Background, Compositor, DrawParams, Filter, Gpu, GpuImage, Layer, Ui};
+use crate::gfx::{
+    Adapter, Background, Compositor, DrawParams, Filter, Gpu, GpuImage, Layer, Part, Ui,
+};
 use crate::loader::Loader;
 use crate::orientation::Orientation;
 use crate::settings::Settings;
@@ -40,7 +42,22 @@ use textures::Textures;
 /// Posted by the hardware-GPU init thread when its device is ready.
 pub const WM_APP_GPU_READY: u32 = WM_APP + 1;
 /// Posted by decoder threads after each finished decode.
-const WM_APP_DECODED: u32 = WM_APP + 2;
+pub const WM_APP_DECODED: u32 = WM_APP + 2;
+
+/// What the start-up decoder sends: maybe the EXIF thumbnail, then the result.
+pub enum Startup {
+    Thumb(DecodedImage),
+    Final(Result<DecodedImage, DecodeError>),
+}
+
+/// The file given on the command line and what is known about it so far.
+pub struct Opening {
+    pub path: PathBuf,
+    /// The start-up decode result, or the EXIF thumbnail standing in for it.
+    pub decoded: Result<DecodedImage, DecodeError>,
+    /// Set while the start-up decoder is still producing the preview.
+    pub initial: Option<Receiver<Startup>>,
+}
 /// Posted by the folder-scan thread.
 const WM_APP_LIBRARY: u32 = WM_APP + 3;
 
@@ -130,6 +147,8 @@ pub struct App {
     compositor: Compositor,
     /// Hardware device still being created while `gpu` is WARP.
     pending_hw: Option<PendingGpu>,
+    /// Start-up decoder, while the first frame shows the EXIF thumbnail.
+    initial: Option<Receiver<Startup>>,
     monitor: Monitor,
     mode: Mode,
 
@@ -204,17 +223,22 @@ impl App {
         hwnd: HWND,
         gpu: Gpu,
         pending_hw: Option<PendingGpu>,
-        path: PathBuf,
-        decoded: Result<DecodedImage, DecodeError>,
+        opening: Opening,
         monitor: Monitor,
         settings: Settings,
     ) -> Result<Self> {
+        let Opening {
+            path,
+            decoded,
+            initial,
+        } = opening;
         let compositor = Compositor::new(hwnd)?;
         let mut app = Self {
             hwnd,
             gpu,
             compositor,
             pending_hw,
+            initial,
             monitor,
             mode: Mode::Fullscreen,
             files: vec![path.clone()],
@@ -460,7 +484,8 @@ impl App {
         Some(self.view.image_rect(self.display()?, self.viewport()))
     }
 
-    /// One image layer: `view` placement at `opacity`.
+    /// One image layer: `view` placement at `opacity`. Huge images draw
+    /// their overview when zoomed out, otherwise only the visible tiles.
     fn layer<'a>(
         &self,
         key: &str,
@@ -469,11 +494,53 @@ impl App {
         opacity: f32,
     ) -> Option<Layer<'a>> {
         let vp = self.viewport();
-        let rect = view.image_rect(self.display_of(key, img), vp);
-        let quad = view::visible_quad(rect, vp)?;
+        let orient = self.orientation_of(key, img);
+        let disp = self.display_of(key, img);
+        let rect = view.image_rect(disp, vp);
+        let longest_on_screen = view.scale * disp.0.max(disp.1);
+        let mut parts = Vec::new();
+        match &img.overview {
+            Some((t, ow, oh)) if longest_on_screen <= f64::from(*ow.max(oh)) => {
+                parts.extend(view::visible_quad(rect, vp).map(|quad| Part {
+                    srv: &t.srv,
+                    quad,
+                    tex: t.uv,
+                }));
+            }
+            _ => {
+                let stored = (f64::from(img.width), f64::from(img.height));
+                let (tdw, _) = orient.apply_size(img.width, img.height);
+                // Screen pixels per texture pixel.
+                let k = view.scale * disp.0 / f64::from(tdw);
+                for t in &img.tiles {
+                    let r = orient.stored_rect_to_display(
+                        [
+                            f64::from(t.x0),
+                            f64::from(t.y0),
+                            f64::from(t.x0 + t.w),
+                            f64::from(t.y0 + t.h),
+                        ],
+                        stored,
+                    );
+                    let screen = Rect {
+                        x0: rect.x0 + r[0] * k,
+                        y0: rect.y0 + r[1] * k,
+                        x1: rect.x0 + r[2] * k,
+                        y1: rect.y0 + r[3] * k,
+                    };
+                    parts.extend(view::visible_quad(screen, vp).map(|quad| Part {
+                        srv: &t.srv,
+                        quad,
+                        tex: t.uv,
+                    }));
+                }
+            }
+        }
+        if parts.is_empty() {
+            return None;
+        }
         Some(Layer {
-            image: img,
-            quad,
+            parts,
             origin: [rect.x0 as f32, rect.y0 as f32],
             // Skip the background pass entirely for opaque images.
             background: if img.has_alpha && self.settings.checker {
@@ -482,7 +549,7 @@ impl App {
                 Background::None
             },
             opacity,
-            orientation: u32::from(self.orientation_of(key, img).exif()),
+            orientation: u32::from(orient.exif()),
         })
     }
 
@@ -870,7 +937,7 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
 
 /// Posts `msg` to a window identified by its raw handle (callable from any
 /// thread; a stale handle just fails).
-fn post(hwnd: isize, msg: u32) {
+pub fn post(hwnd: isize, msg: u32) {
     // SAFETY: PostMessageW has no memory-safety preconditions.
     unsafe {
         let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(

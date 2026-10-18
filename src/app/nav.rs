@@ -40,6 +40,10 @@ impl App {
         self.rescan_folder();
         self.start_thumbs();
         self.start_writer();
+        // The preview may have finished before the window could be notified.
+        if let Err(e) = self.on_decoded() {
+            tracing::error!("{e:#}");
+        }
         self.show_panel();
         self.update_title();
         self.schedule();
@@ -88,7 +92,20 @@ impl App {
 
     pub(super) fn on_decoded(&mut self) -> Result<()> {
         let mut redraw = false;
+        // The start-up preview that follows the EXIF thumbnail.
+        if let Some(rx) = &self.initial
+            && let Ok(super::Startup::Final(result)) = rx.try_recv()
+        {
+            self.initial = None;
+            let current = self.current.clone();
+            self.store_result(&current, result.map(Arc::new).map_err(|e| e.to_string()));
+            redraw |= self.show_current()?;
+        }
         while let Some(done) = self.loader.as_ref().and_then(Loader::try_recv) {
+            // No EXIF thumbnail is not an error: the preview is on its way.
+            if done.quality == Quality::Thumb && done.result.is_err() {
+                continue;
+            }
             let key = cache::key(&done.path);
             // A rewritten file came back: its pixels now include the saved
             // rotation, so the remaining edit shrinks accordingly.
@@ -310,7 +327,21 @@ impl App {
         };
         let mut wanted = Vec::new();
         let cur = &self.current;
-        if !self.cache.satisfies(cur, false) {
+        // Nothing to show yet for this file: its EXIF thumbnail first (not
+        // while it is already on screen, e.g. reloading after a save).
+        let on_screen = self
+            .shown
+            .as_ref()
+            .is_some_and(|(k, _)| *k == cache::key(cur));
+        // (The start-up decoder is still producing the current preview.)
+        let starting = self.initial.is_some();
+        if self.cache.image(cur).is_none() && !on_screen && !starting {
+            wanted.push(Request {
+                path: cur.clone(),
+                quality: Quality::Thumb,
+            });
+        }
+        if !self.cache.satisfies(cur, false) && !starting {
             wanted.push(Request {
                 path: cur.clone(),
                 quality: Quality::Preview,

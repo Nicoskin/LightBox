@@ -25,7 +25,8 @@ use windows::Win32::UI::Shell::{
 use windows::core::HSTRING;
 
 use crate::cache;
-use crate::decode::{self, SizeHint};
+use crate::decode::{self, SizeHint, scale};
+use crate::encode;
 use crate::gfx::Thumb;
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
@@ -227,73 +228,27 @@ unsafe fn bitmap_pixels(hbmp: HBITMAP) -> Option<Thumb> {
     })
 }
 
-/// Fallback: decode a reduced image ourselves and shrink it.
+/// Fallback: decode a reduced image ourselves, shrink and orient it.
 fn decoded_thumbnail(path: &Path, size: u32) -> Option<Thumb> {
     let hint = SizeHint {
         box_width: size,
         box_height: size,
     };
     let img = decode::decode_file(path, Some(hint)).ok()?;
-    let (sw, sh) = (img.width, img.height);
-    let k = (f64::from(size) / f64::from(sw.max(sh))).min(1.0);
-    let tw = ((f64::from(sw) * k).round() as u32).max(1);
-    let th = ((f64::from(sh) * k).round() as u32).max(1);
-    let rgba = downscale(&img.pixels, sw, sh, tw, th);
+    let (tw, th) = scale::fit_size(img.width, img.height, size);
+    let small = scale::rgba8(&img.to_straight_rgba8(), img.width, img.height, tw, th);
+    let (rgba, w, h) = encode::orient_pixels(&small, tw as usize, th as usize, 4, img.orientation);
+    // D2D wants premultiplied BGRA.
     let mut bgra = rgba;
     for p in bgra.as_chunks_mut::<4>().0 {
-        p.swap(0, 2);
+        let a = u32::from(p[3]);
+        let pm = |c: u8| ((u32::from(c) * a + 127) / 255) as u8;
+        *p = [pm(p[2]), pm(p[1]), pm(p[0]), p[3]];
     }
-    // EXIF orientation is not applied here; the shell path (the usual one)
-    // handles it.
     Some(Thumb {
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
-        width: tw,
-        height: th,
+        width: w as u32,
+        height: h as u32,
         bgra,
     })
-}
-
-/// Box-filter downscale of RGBA8 (`tw ≤ sw`, `th ≤ sh`).
-pub fn downscale(src: &[u8], sw: u32, sh: u32, tw: u32, th: u32) -> Vec<u8> {
-    let mut out = vec![0u8; (tw * th * 4) as usize];
-    for ty in 0..th {
-        let y0 = ty * sh / th;
-        let y1 = ((ty + 1) * sh / th).max(y0 + 1).min(sh);
-        for tx in 0..tw {
-            let x0 = tx * sw / tw;
-            let x1 = ((tx + 1) * sw / tw).max(x0 + 1).min(sw);
-            let mut acc = [0u32; 4];
-            for y in y0..y1 {
-                let row = (y * sw) as usize * 4;
-                for x in x0..x1 {
-                    let i = row + x as usize * 4;
-                    for c in 0..4 {
-                        acc[c] += u32::from(src[i + c]);
-                    }
-                }
-            }
-            let n = (y1 - y0) * (x1 - x0);
-            let o = ((ty * tw + tx) * 4) as usize;
-            for c in 0..4 {
-                out[o + c] = ((acc[c] + n / 2) / n) as u8;
-            }
-        }
-    }
-    out
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn downscale_averages_blocks() {
-        // 2×2 → 1×1: average of four pixels.
-        let src = [
-            0, 0, 0, 255, 255, 255, 255, 255, 0, 0, 0, 255, 255, 255, 255, 255,
-        ];
-        assert_eq!(downscale(&src, 2, 2, 1, 1), vec![128, 128, 128, 255]);
-        // Identity size.
-        assert_eq!(downscale(&src, 2, 2, 2, 2), src.to_vec());
-    }
 }

@@ -49,6 +49,29 @@ impl Orientation {
         if self.swaps_axes() { (h, w) } else { (w, h) }
     }
 
+    /// Rectangle `[x0, y0, x1, y1]` in stored pixels → the same area in
+    /// display pixels, for an image of `stored` size.
+    pub fn stored_rect_to_display(self, r: [f64; 4], stored: (f64, f64)) -> [f64; 4] {
+        let (dw, dh) = if self.swaps_axes() {
+            (stored.1, stored.0)
+        } else {
+            stored
+        };
+        let map = |sx: f64, sy: f64| match self.0 {
+            2 => (dw - sx, sy),
+            3 => (dw - sx, dh - sy),
+            4 => (sx, dh - sy),
+            5 => (sy, sx),
+            6 => (dw - sy, sx),
+            7 => (dw - sy, dh - sx),
+            8 => (sy, dh - sx),
+            _ => (sx, sy),
+        };
+        let (a, b) = map(r[0], r[1]);
+        let (c, d) = map(r[2], r[3]);
+        [a.min(c), b.min(d), a.max(c), b.max(d)]
+    }
+
     /// Display UV → stored UV (same table as `orient()` in image.hlsl).
     fn map(self, (x, y): (i8, i8)) -> (i8, i8) {
         match self.0 {
@@ -123,6 +146,21 @@ mod tests {
                 o.then(Orientation::ROTATE_CW).then(Orientation::ROTATE_CW),
                 o.then(Orientation::FLIP_H).then(Orientation::FLIP_V)
             );
+        }
+    }
+
+    #[test]
+    fn stored_rects_map_like_pixels() {
+        // The stored top-left pixel of a 4×3 image, displayed with each
+        // orientation, lands where orient_pixels puts it.
+        for code in 1..=8u32 {
+            let o = Orientation::from_exif(code);
+            let (px, dw, _) =
+                crate::encode::orient_pixels(&(0..12u8).collect::<Vec<_>>(), 4, 3, 1, o);
+            let at = px.iter().position(|&v| v == 0).unwrap();
+            let (x, y) = ((at % dw) as f64, (at / dw) as f64);
+            let r = o.stored_rect_to_display([0.0, 0.0, 1.0, 1.0], (4.0, 3.0));
+            assert_eq!(r, [x, y, x + 1.0, y + 1.0], "code {code}");
         }
     }
 

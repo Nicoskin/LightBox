@@ -16,6 +16,23 @@ pub fn jpeg_orientation(data: &[u8]) -> Orientation {
         .map_or_else(Orientation::default, Orientation::from_exif)
 }
 
+/// The JPEG thumbnail embedded in a JPEG's EXIF block (IFD1), if any.
+pub fn exif_thumbnail(data: &[u8]) -> Option<Vec<u8>> {
+    let exif = Reader::new()
+        .read_from_container(&mut Cursor::new(data))
+        .ok()?;
+    let off = exif
+        .get_field(Tag::JPEGInterchangeFormat, In::THUMBNAIL)?
+        .value
+        .get_uint(0)? as usize;
+    let len = exif
+        .get_field(Tag::JPEGInterchangeFormatLength, In::THUMBNAIL)?
+        .value
+        .get_uint(0)? as usize;
+    let t = exif.buf().get(off..off.checked_add(len)?)?;
+    t.starts_with(&[0xFF, 0xD8]).then(|| t.to_vec())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

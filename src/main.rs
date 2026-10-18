@@ -11,6 +11,7 @@
 mod app;
 mod bench;
 mod cache;
+mod color;
 mod decode;
 mod edit;
 mod encode;
@@ -100,9 +101,27 @@ fn run(args: &Args) -> Result<()> {
         box_width: mw,
         box_height: mh,
     };
-    let decoder = thread::Builder::new()
+    let hwnd_slot = Arc::new(AtomicIsize::new(0));
+    let (dec_tx, dec_rx) = mpsc::channel();
+    let dec_slot = Arc::clone(&hwnd_slot);
+    thread::Builder::new()
         .name("decode".into())
-        .spawn(move || decode::decode_file(&decode_path, Some(hint)))
+        .spawn(move || {
+            let result = std::fs::read(&decode_path).map_err(decode::DecodeError::from);
+            bench::mark("file read");
+            let result = result.and_then(|data| {
+                // The EXIF thumbnail first: a picture within milliseconds.
+                if let Some(t) = decode::decode_thumbnail_bytes(&data) {
+                    let _ = dec_tx.send(app::Startup::Thumb(t));
+                }
+                decode::decode_data(&data, &decode_path, Some(hint))
+            });
+            let _ = dec_tx.send(app::Startup::Final(result));
+            let h = dec_slot.load(Ordering::Acquire);
+            if h != 0 {
+                app::post(h, app::WM_APP_DECODED);
+            }
+        })
         .context("spawn decoder")?;
 
     // 2. GPU stacks in parallel with decoding: first WARP (ready in ~10 ms),
@@ -110,7 +129,6 @@ fn run(args: &Args) -> Result<()> {
     //    purpose: concurrent D3D11CreateDevice calls serialise inside the
     //    runtime, which would delay WARP until the hardware device is done.
     let (gpu_tx, gpu_rx) = mpsc::channel();
-    let hwnd_slot = Arc::new(AtomicIsize::new(0));
     let slot = Arc::clone(&hwnd_slot);
     thread::Builder::new()
         .name("gpu-init".into())
@@ -149,9 +167,16 @@ fn run(args: &Args) -> Result<()> {
     win::window::show(hwnd);
     bench::mark("window shown");
 
-    let decoded = decoder
-        .join()
-        .map_err(|_| anyhow::anyhow!("decoder thread panicked"))?;
+    // The decoded preview if it is ready, otherwise the EXIF thumbnail (the
+    // preview then follows through WM_APP_DECODED).
+    let (decoded, initial) = match dec_rx.recv() {
+        Ok(app::Startup::Thumb(t)) => match dec_rx.try_recv() {
+            Ok(app::Startup::Final(r)) => (r, None),
+            _ => (Ok(t), Some(dec_rx)),
+        },
+        Ok(app::Startup::Final(r)) => (r, None),
+        Err(_) => anyhow::bail!("decoder thread died"),
+    };
 
     // Draw with the hardware device if it is already there, otherwise WARP.
     let warp = gpu_rx.recv().context("GPU init thread died")?;
@@ -167,7 +192,18 @@ fn run(args: &Args) -> Result<()> {
     bench::mark("joined");
 
     let settings = settings::Settings::load();
-    let mut app = app::App::new(hwnd, gpu, pending_hw, path, decoded, monitor, settings)?;
+    let mut app = app::App::new(
+        hwnd,
+        gpu,
+        pending_hw,
+        app::Opening {
+            path,
+            decoded,
+            initial,
+        },
+        monitor,
+        settings,
+    )?;
     app.first_frame()?;
     // Activation (focus, text services) is slow; do it once the photo is up.
     win::window::activate(hwnd);

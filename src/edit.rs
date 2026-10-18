@@ -250,10 +250,11 @@ fn export(
     quality: u8,
 ) -> Result<(), WriteError> {
     let data = fs::read(src)?;
-    let img = decode::decode_for_export(&data)?;
+    let img = decode::decode_for_export(&data, src)?;
     let display = img.orientation.then(edit);
+    let straight = img.to_straight_rgba8();
     let (px, w, h) = encode::orient_pixels(
-        &img.pixels,
+        &straight,
         img.width as usize,
         img.height as usize,
         4,

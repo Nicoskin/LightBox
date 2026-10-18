@@ -37,6 +37,14 @@ serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
 miniz_oxide = "0.8.9"
 crc32fast = "1.5.2"
+image = { version = "0.25.10", default-features = false, features = ["bmp", "dds", "exr", "gif", "hdr", "ico", "pnm", "qoi", "tga", "tiff", "webp"] }
+lcms2 = "6.2.0"
+rav1d = "1.1.0"
+avif-parse = "2.1.0"
+resvg = "0.48.1"
+psd = "0.3.5"
+half = "2.7.1"
+bytemuck = "1.25.2"
 
 [dependencies.windows]
 version = "0.62.2"
@@ -52,8 +60,11 @@ features = [
     "Win32_Graphics_Dxgi",
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
+    "Win32_Graphics_Imaging",
     "Win32_Storage_FileSystem",
     "Win32_System_Com",
+    "Win32_System_Com_StructuredStorage",
+    "Win32_System_Variant",
     "Win32_System_Console",
     "Win32_System_LibraryLoader",
     "Win32_System_SystemInformation",

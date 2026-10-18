@@ -16,5 +16,5 @@ pub use device::{Adapter, Gpu};
 pub use overlay::{
     ButtonView, CardView, CellView, Icon, PanelView, SegmentView, TextStyle, TextView, Thumb, Ui,
 };
-pub use renderer::{Background, DrawParams, Filter, Layer};
+pub use renderer::{Background, DrawParams, Filter, Layer, Part};
 pub use texture::GpuImage;

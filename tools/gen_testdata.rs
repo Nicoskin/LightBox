@@ -199,6 +199,266 @@ fn insert_exif_orientation(jpeg: &[u8], o: u16) -> Vec<u8> {
     out
 }
 
+/// APP1 "Exif" segment: IFD0 { Orientation = 1 } → IFD1 { thumbnail }.
+fn exif_with_thumbnail(thumb: &[u8]) -> Vec<u8> {
+    let entry = |t: &mut Vec<u8>, tag: u16, ty: u16, v: u32| {
+        t.extend_from_slice(&tag.to_le_bytes());
+        t.extend_from_slice(&ty.to_le_bytes());
+        t.extend_from_slice(&1u32.to_le_bytes());
+        t.extend_from_slice(&v.to_le_bytes());
+    };
+    let mut t = b"II*\0".to_vec();
+    t.extend_from_slice(&8u32.to_le_bytes());
+    // IFD0 at 8 (18 bytes), IFD1 at 26 (30 bytes), thumbnail at 56.
+    t.extend_from_slice(&1u16.to_le_bytes());
+    entry(&mut t, 0x0112, 3, 1);
+    t.extend_from_slice(&26u32.to_le_bytes());
+    t.extend_from_slice(&2u16.to_le_bytes());
+    entry(&mut t, 0x0201, 4, 56);
+    entry(&mut t, 0x0202, 4, thumb.len() as u32);
+    t.extend_from_slice(&0u32.to_le_bytes());
+    t.extend_from_slice(thumb);
+    let mut seg = vec![0xFF, 0xE1];
+    seg.extend_from_slice(&((t.len() + 8) as u16).to_be_bytes());
+    seg.extend_from_slice(b"Exif\0\0");
+    seg.extend_from_slice(&t);
+    seg
+}
+
+/// APP2 ICC_PROFILE segment (single chunk).
+fn icc_segment(icc: &[u8]) -> Vec<u8> {
+    let mut seg = vec![0xFF, 0xE2];
+    seg.extend_from_slice(&((icc.len() + 16) as u16).to_be_bytes());
+    seg.extend_from_slice(b"ICC_PROFILE\0");
+    seg.extend_from_slice(&[1, 1]);
+    seg.extend_from_slice(icc);
+    seg
+}
+
+/// Inserts a marker segment right after SOI.
+fn insert_segment(jpeg: &[u8], seg: &[u8]) -> Vec<u8> {
+    let mut out = jpeg[..2].to_vec();
+    out.extend_from_slice(seg);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
+fn jpeg_bytes(w: usize, h: usize, px: &[u8], format: PixelFormat, quality: i32) -> Vec<u8> {
+    let mut c = Compressor::new().expect("compressor");
+    c.set_quality(quality).expect("quality");
+    c.compress_to_vec(Image {
+        pixels: px,
+        width: w,
+        pitch: w * format.size(),
+        height: h,
+        format,
+    })
+    .expect("compress")
+}
+
+fn save(img: &image::DynamicImage, path: &Path) {
+    img.save(path)
+        .unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+}
+
+/// Every additional format: one small file each.
+fn formats(dir: &Path) {
+    use image::{DynamicImage, ImageBuffer, Rgb, Rgba};
+
+    // JPEG with an EXIF thumbnail (progressive loading).
+    println!("photo_24mp_exifthumb.jpg…");
+    let (w, h) = (6000, 4000);
+    let rgb = photo_rgb(w, h, 4);
+    let main = jpeg_bytes(w, h, &rgb, PixelFormat::RGB, 92);
+    let full = ImageBuffer::<Rgb<u8>, _>::from_raw(w as u32, h as u32, rgb).expect("buffer");
+    let small = image::imageops::thumbnail(&full, 240, 160);
+    let thumb = jpeg_bytes(240, 160, small.as_raw(), PixelFormat::RGB, 80);
+    fs::write(
+        dir.join("photo_24mp_exifthumb.jpg"),
+        insert_segment(&main, &exif_with_thumbnail(&thumb)),
+    )
+    .expect("write");
+
+    let rgba = DynamicImage::ImageRgba8(ImageBuffer::from_fn(640, 400, |x, y| {
+        Rgba([(x * 255 / 640) as u8, (y * 255 / 400) as u8, 160, 255])
+    }));
+
+    // JPEG with a wide-gamut (Adobe RGB-like) profile: saturated green must
+    // map to a different sRGB green.
+    let xy = |x, y| lcms2::CIExyY { x, y, Y: 1.0 };
+    let curve = lcms2::ToneCurve::new(2.2);
+    let adobe = lcms2::Profile::new_rgb(
+        &xy(0.3127, 0.3290),
+        &lcms2::CIExyYTRIPLE {
+            Red: xy(0.64, 0.33),
+            Green: xy(0.21, 0.71),
+            Blue: xy(0.15, 0.06),
+        },
+        &[&curve, &curve, &curve],
+    )
+    .expect("profile")
+    .icc()
+    .expect("icc");
+    let green: Vec<u8> = (0..320 * 200).flat_map(|_| [30, 220, 40]).collect();
+    let jpg = jpeg_bytes(320, 200, &green, PixelFormat::RGB, 95);
+    fs::write(
+        dir.join("adobe_rgb.jpg"),
+        insert_segment(&jpg, &icc_segment(&adobe)),
+    )
+    .expect("write");
+
+    // CMYK JPEG without a profile (simple conversion). libjpeg writes an
+    // Adobe marker, so readers expect inverted ink values (Photoshop style).
+    let cmyk: Vec<u8> = (0..320 * 200)
+        .flat_map(|i| [((i % 320) * 255 / 320) as u8, 40, 200, 20].map(|v| 255 - v))
+        .collect();
+    fs::write(
+        dir.join("cmyk.jpg"),
+        jpeg_bytes(320, 200, &cmyk, PixelFormat::CMYK, 95),
+    )
+    .expect("write");
+
+    // 16-bit PNG and TIFF: smooth gradients (banding test).
+    let g16 = DynamicImage::ImageRgba16(ImageBuffer::from_fn(1024, 256, |x, y| {
+        let v = (x * 65535 / 1023) as u16;
+        Rgba([v, v / 2, 65535 - v, if y < 128 { 65535 } else { 40000 }])
+    }));
+    save(&g16, &dir.join("gradient_16bit.png"));
+    save(&g16, &dir.join("gradient_16bit.tif"));
+
+    // PNG with A1111 / ComfyUI generation metadata.
+    {
+        let file = fs::File::create(dir.join("comfyui.png")).expect("create");
+        let mut e = png::Encoder::new(BufWriter::new(file), 64, 64);
+        e.set_color(png::ColorType::Rgb);
+        e.set_depth(png::BitDepth::Eight);
+        e.add_text_chunk(
+            "parameters".into(),
+            "a lighthouse at dusk, oil painting\nNegative prompt: blurry\n\
+             Steps: 30, Sampler: DPM++ 2M, CFG scale: 7, Seed: 1234, Model: sdxl"
+                .into(),
+        )
+        .expect("text");
+        e.add_text_chunk(
+            "prompt".into(),
+            r#"{"3":{"class_type":"KSampler","inputs":{"seed":1234}}}"#.into(),
+        )
+        .expect("text");
+        e.add_text_chunk("workflow".into(), r#"{"nodes":[],"links":[]}"#.into())
+            .expect("text");
+        let mut wr = e.write_header().expect("header");
+        wr.write_image_data(&vec![120u8; 64 * 64 * 3])
+            .expect("data");
+    }
+
+    // Simple formats via the image crate.
+    for (name, img) in [
+        ("sample.bmp", rgba.clone()),
+        ("sample.tga", rgba.clone()),
+        ("sample.qoi", rgba.clone()),
+        ("sample.tif", rgba.clone()),
+        ("sample.webp", rgba.clone()),
+        ("sample.ppm", DynamicImage::ImageRgb8(rgba.to_rgb8())),
+        (
+            "sample.ico",
+            rgba.resize_exact(256, 256, image::imageops::FilterType::Triangle),
+        ),
+    ] {
+        save(&img, &dir.join(name));
+    }
+    // 0..8× over white: needs tone mapping.
+    let hdr = DynamicImage::ImageRgb32F(ImageBuffer::from_fn(512, 256, |x, _| {
+        let e = 8.0 * x as f32 / 512.0;
+        Rgb([e, e * 0.8, e * 0.6])
+    }));
+    save(&hdr, &dir.join("sample.hdr"));
+    save(
+        &DynamicImage::ImageRgba32F(hdr.to_rgba32f()),
+        &dir.join("sample.exr"),
+    );
+
+    // Animated GIF (first frame for now; playback in M7).
+    {
+        use image::codecs::gif::{GifEncoder, Repeat};
+        use image::{Delay, Frame};
+        let file = fs::File::create(dir.join("animated.gif")).expect("create");
+        let mut enc = GifEncoder::new(file);
+        enc.set_repeat(Repeat::Infinite).expect("repeat");
+        for i in 0..8u32 {
+            let frame = ImageBuffer::from_fn(200, 120, |x, y| {
+                if (x / 25 + y / 30 + i) % 2 == 0 {
+                    Rgba([255, 80, 40, 255])
+                } else {
+                    Rgba([20, 40, 200, 255])
+                }
+            });
+            enc.encode_frame(Frame::from_parts(
+                frame,
+                0,
+                0,
+                Delay::from_numer_denom_ms(100, 1),
+            ))
+            .expect("frame");
+        }
+    }
+
+    fs::write(
+        dir.join("sample.svg"),
+        r##"<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" viewBox="0 0 400 300">
+  <rect width="400" height="300" fill="#1d3557"/>
+  <circle cx="200" cy="150" r="110" fill="#e63946" fill-opacity="0.85"/>
+  <path d="M60 260 L200 60 L340 260 Z" fill="none" stroke="#f1faee" stroke-width="10"/>
+  <text x="200" y="285" font-family="Segoe UI" font-size="22" fill="#f1faee" text-anchor="middle">Lightbox SVG</text>
+</svg>"##,
+    )
+    .expect("write");
+
+    // AVIF via ffmpeg (libaom), if it is installed.
+    let ok = std::process::Command::new("ffmpeg")
+        .args(["-y", "-loglevel", "error", "-i"])
+        .arg(dir.join("alpha_gradient.png"))
+        .args(["-c:v", "libaom-av1", "-still-picture", "1", "-crf", "30"])
+        .arg(dir.join("sample.avif"))
+        .status()
+        .is_ok_and(|s| s.success());
+    println!(
+        "sample.avif: {}",
+        if ok { "ok" } else { "skipped (no ffmpeg)" }
+    );
+}
+
+/// 30 000 × 20 000 PNG for tiling, streamed row by row.
+fn huge_png(path: &Path) {
+    let (w, h) = (30_000u32, 20_000u32);
+    let file = fs::File::create(path).expect("create");
+    let mut e = png::Encoder::new(BufWriter::new(file), w, h);
+    e.set_color(png::ColorType::Rgb);
+    e.set_depth(png::BitDepth::Eight);
+    e.set_compression(png::Compression::Fast);
+    let mut wr = e
+        .write_header()
+        .expect("header")
+        .into_stream_writer()
+        .expect("stream");
+    let mut row = vec![0u8; w as usize * 3];
+    for y in 0..h {
+        for x in 0..w {
+            let i = x as usize * 3;
+            // A white grid every 1000 px; cells coloured by their position.
+            let line = x % 1000 < 6 || y % 1000 < 6;
+            row[i] = if line { 255 } else { (x / 1000 * 8) as u8 };
+            row[i + 1] = if line { 255 } else { (y / 1000 * 12) as u8 };
+            row[i + 2] = if line {
+                255
+            } else {
+                ((x ^ y) & 0x3F) as u8 + 60
+            };
+        }
+        std::io::Write::write_all(&mut wr, &row).expect("row");
+    }
+    wr.finish().expect("finish");
+}
+
 fn main() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
     fs::create_dir_all(&dir).expect("mkdir testdata");
@@ -282,6 +542,13 @@ fn main() {
         dir.join("png_with_jpg_ext.jpg"),
     )
     .expect("copy");
+
+    formats(&dir);
+    let huge = dir.join("huge_30000x20000.png");
+    if !huge.exists() {
+        println!("huge_30000x20000.png (takes a while)…");
+        huge_png(&huge);
+    }
 
     println!("done: {}", dir.display());
 }

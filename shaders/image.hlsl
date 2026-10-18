@@ -20,6 +20,7 @@ cbuffer Params : register(b0)
     uint   grid;           // reserved: pixel grid
     float  opacity;        // layer opacity (fades, page turns)
     uint2  pad;
+    float4 tex_rect;       // content part of the texture: offset xy, size zw (tiles)
 };
 
 Texture2D<float4> image : register(t0);
@@ -56,7 +57,7 @@ VSOut VSMain(uint id : SV_VertexID)
 
     VSOut o;
     o.pos = float4(p.x / viewport.x * 2.0 - 1.0, 1.0 - p.y / viewport.y * 2.0, 0.0, 1.0);
-    o.uv = orient(d, orientation);
+    o.uv = tex_rect.xy + orient(d, orientation) * tex_rect.zw;
     return o;
 }
 

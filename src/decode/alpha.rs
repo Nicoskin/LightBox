@@ -58,6 +58,103 @@ pub fn premultiply_in_place(rgba: &mut [u8]) -> bool {
     true
 }
 
+/// Inverse of [`premultiply_in_place`]: straight-alpha sRGB RGBA8.
+pub fn unpremultiply(rgba: &[u8]) -> Vec<u8> {
+    let mut out = rgba.to_vec();
+    for p in out.as_chunks_mut::<4>().0 {
+        let a = f32::from(p[3]) / 255.0;
+        if p[3] != 255 && a > 0.0 {
+            for c in &mut p[..3] {
+                let l = srgb_to_linear(f32::from(*c) / 255.0) / a;
+                *c = (linear_to_srgb(l.min(1.0)) * 255.0 + 0.5) as u8;
+            }
+        }
+    }
+    out
+}
+
+/// sRGB-encoded 16-bit value → linear, as a 65536-entry table.
+fn lut16() -> &'static [f32] {
+    static LUT: OnceLock<Vec<f32>> = OnceLock::new();
+    LUT.get_or_init(|| {
+        (0..65536u32)
+            .map(|v| srgb_to_linear(v as f32 / 65535.0))
+            .collect()
+    })
+}
+
+/// RGBA16 (gamma-encoded, straight) → premultiplied linear half floats.
+pub fn rgba16_to_linear_f16(v: &[u16]) -> (super::Pixels, bool) {
+    let lut = lut16();
+    let mut has_alpha = false;
+    let mut out = Vec::with_capacity(v.len());
+    for p in v.as_chunks::<4>().0 {
+        let a = f32::from(p[3]) / 65535.0;
+        has_alpha |= p[3] != 65535;
+        for &c in &p[..3] {
+            out.push(half::f16::from_f32(lut[usize::from(c)] * a).to_bits());
+        }
+        out.push(half::f16::from_f32(a).to_bits());
+    }
+    (super::Pixels::Linear16F(out), has_alpha)
+}
+
+/// Tone curve for HDR (ACES filmic fit, Narkowicz 2015): linear in,
+/// linear 0..1 out.
+fn tonemap(x: f32) -> f32 {
+    let x = x.max(0.0) * 0.8;
+    ((x * (2.51 * x + 0.03)) / (x * (2.43 * x + 0.59) + 0.14)).clamp(0.0, 1.0)
+}
+
+/// Linear RGBA32F (HDR) → tone-mapped, premultiplied linear half floats.
+pub fn hdr_to_linear_f16(v: &[f32]) -> (super::Pixels, bool) {
+    let mut has_alpha = false;
+    let mut out = Vec::with_capacity(v.len());
+    for p in v.as_chunks::<4>().0 {
+        let a = p[3].clamp(0.0, 1.0);
+        has_alpha |= a < 1.0;
+        for &c in &p[..3] {
+            out.push(half::f16::from_f32(tonemap(c) * a).to_bits());
+        }
+        out.push(half::f16::from_f32(a).to_bits());
+    }
+    (super::Pixels::Linear16F(out), has_alpha)
+}
+
+/// Linear RGBA32F (HDR) → tone-mapped straight sRGB RGBA8.
+pub fn hdr_to_srgb8(v: &[f32]) -> Vec<u8> {
+    v.as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let e = |c: f32| (linear_to_srgb(tonemap(c)) * 255.0 + 0.5) as u8;
+            [
+                e(p[0]),
+                e(p[1]),
+                e(p[2]),
+                (p[3].clamp(0.0, 1.0) * 255.0 + 0.5) as u8,
+            ]
+        })
+        .collect()
+}
+
+/// Premultiplied linear half floats → straight sRGB RGBA8.
+pub fn f16_to_straight_srgb8(v: &[u16]) -> Vec<u8> {
+    v.as_chunks::<4>()
+        .0
+        .iter()
+        .flat_map(|p| {
+            let f = |x: u16| half::f16::from_bits(x).to_f32();
+            let a = f(p[3]).clamp(0.0, 1.0);
+            let e = |x: u16| {
+                let l = if a > 0.0 { f(x) / a } else { 0.0 };
+                (linear_to_srgb(l.clamp(0.0, 1.0)) * 255.0 + 0.5) as u8
+            };
+            [e(p[0]), e(p[1]), e(p[2]), (a * 255.0 + 0.5) as u8]
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

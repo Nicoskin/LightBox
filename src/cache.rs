@@ -62,14 +62,21 @@ impl Cache {
     /// `true` if nothing more needs decoding for `path` at this quality.
     pub fn satisfies(&self, path: &Path, full: bool) -> bool {
         match self.items.get(&key(path)).map(|i| &i.slot) {
-            Some(Slot::Image(img)) => !full || img.is_full(),
+            Some(Slot::Image(img)) => {
+                if full {
+                    img.is_full()
+                } else {
+                    !img.thumbnail
+                }
+            }
             Some(Slot::Failed(_)) => true,
             None => false,
         }
     }
 
-    /// Stores a decode result. A full-resolution image is never replaced by
-    /// a preview. Evicts least-recently-used entries outside `keep`.
+    /// Stores a decode result. A full-resolution image is never replaced by a
+    /// preview, and an EXIF thumbnail never replaces a decoded image. Evicts
+    /// least-recently-used entries outside `keep`.
     pub fn insert(&mut self, path: &Path, slot: Slot, keep: &[&Path]) {
         let k = key(path);
         if let (
@@ -79,8 +86,7 @@ impl Cache {
             }),
             Slot::Image(new),
         ) = (self.items.get(&k), &slot)
-            && old.is_full()
-            && !new.is_full()
+            && ((old.is_full() && !new.is_full()) || new.thumbnail)
         {
             return;
         }
@@ -150,11 +156,13 @@ mod tests {
         Slot::Image(Arc::new(DecodedImage {
             width: w,
             height: 1,
-            pixels: vec![0; w as usize * 4],
+            pixels: crate::decode::Pixels::Srgb8(vec![0; w as usize * 4]),
             source_width: full_w,
             source_height: 1,
             has_alpha: false,
             orientation: Orientation::default(),
+            overview: None,
+            thumbnail: false,
         }))
     }
 

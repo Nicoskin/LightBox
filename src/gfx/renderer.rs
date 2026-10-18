@@ -8,10 +8,9 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_RASTERIZER_DESC, D3D11_RENDER_TARGET_BLEND_DESC, D3D11_SAMPLER_DESC,
     D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT, ID3D11BlendState,
     ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11RasterizerState,
-    ID3D11RenderTargetView, ID3D11SamplerState, ID3D11VertexShader,
+    ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView, ID3D11VertexShader,
 };
 
-use super::GpuImage;
 use crate::view::Quad;
 
 static VS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/image_vs.cso"));
@@ -41,11 +40,18 @@ pub enum Background {
     Solid([f32; 4]),
 }
 
+/// One textured piece of a layer: a whole image or one tile of a huge one.
+pub struct Part<'a> {
+    pub srv: &'a ID3D11ShaderResourceView,
+    /// Visible part on screen and its UV range (display orientation).
+    pub quad: Quad,
+    /// Content rectangle inside the texture (offset xy, size zw).
+    pub tex: [f32; 4],
+}
+
 /// One image drawn in a frame (two during a page turn).
 pub struct Layer<'a> {
-    pub image: &'a GpuImage,
-    /// Visible part of the image on screen.
-    pub quad: Quad,
+    pub parts: Vec<Part<'a>>,
     /// Top-left of the whole (unclipped) image on screen; anchors the checkerboard.
     pub origin: [f32; 2],
     pub background: Background,
@@ -79,6 +85,7 @@ struct Constants {
     grid: u32,
     opacity: f32,
     pad: [u32; 2],
+    tex_rect: [f32; 4],
 }
 
 const _: () = assert!(std::mem::size_of::<Constants>().is_multiple_of(16));
@@ -193,28 +200,31 @@ impl Renderer {
                     Background::Checker(size) => (1, [0.0; 4], size.max(1.0)),
                     Background::Solid(c) => (2, c, 8.0),
                 };
-                let constants = Constants {
-                    dst_rect: layer.quad.dst,
-                    uv_rect: layer.quad.uv,
-                    bg_color,
-                    viewport: [w as f32, h as f32],
-                    checker_origin: layer.origin,
-                    checker_size: checker,
-                    orientation: layer.orientation,
-                    bg_mode,
-                    opacity: layer.opacity.clamp(0.0, 1.0),
-                    ..Default::default()
-                };
-                ctx.UpdateSubresource(
-                    &self.cbuffer,
-                    0,
-                    None,
-                    std::ptr::from_ref(&constants).cast(),
-                    0,
-                    0,
-                );
-                ctx.PSSetShaderResources(0, Some(&[Some(layer.image.srv.clone())]));
-                ctx.Draw(4, 0);
+                for part in &layer.parts {
+                    let constants = Constants {
+                        dst_rect: part.quad.dst,
+                        uv_rect: part.quad.uv,
+                        bg_color,
+                        viewport: [w as f32, h as f32],
+                        checker_origin: layer.origin,
+                        checker_size: checker,
+                        orientation: layer.orientation,
+                        bg_mode,
+                        opacity: layer.opacity.clamp(0.0, 1.0),
+                        tex_rect: part.tex,
+                        ..Default::default()
+                    };
+                    ctx.UpdateSubresource(
+                        &self.cbuffer,
+                        0,
+                        None,
+                        std::ptr::from_ref(&constants).cast(),
+                        0,
+                        0,
+                    );
+                    ctx.PSSetShaderResources(0, Some(&[Some(part.srv.clone())]));
+                    ctx.Draw(4, 0);
+                }
             }
         }
         Ok(())
