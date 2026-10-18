@@ -3,6 +3,7 @@
 
 pub mod caption;
 pub mod dial;
+pub mod info;
 pub mod popup;
 pub mod settings_card;
 pub mod thumbs;

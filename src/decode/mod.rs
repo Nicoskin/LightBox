@@ -9,6 +9,7 @@
 //! "overview" for images too large for a single GPU texture.
 
 mod alpha;
+pub use alpha::{f16_to_straight_srgb8, unpremultiply};
 mod avif;
 mod generic;
 mod jpeg;
@@ -114,6 +115,20 @@ pub struct DecodedImage {
     pub overview: Option<Box<DecodedImage>>,
     /// A tiny stand-in (the EXIF thumbnail) shown until the preview decodes.
     pub thumbnail: bool,
+    pub info: SourceInfo,
+}
+
+/// What the source file holds (inspector).
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct SourceInfo {
+    /// "JPEG", "PNG", "WebP"…
+    pub format: String,
+    /// Bits per channel as decoded (8, 16 or 32).
+    pub bits: u8,
+    /// Floating-point samples (HDR / EXR).
+    pub float: bool,
+    /// Embedded colour profile, by name.
+    pub icc: Option<String>,
 }
 
 impl DecodedImage {
@@ -131,6 +146,20 @@ impl DecodedImage {
     pub fn display_size(&self) -> (u32, u32) {
         self.orientation
             .apply_size(self.source_width, self.source_height)
+    }
+
+    /// One pixel as straight-alpha sRGB RGBA8 (colour picker). `x`, `y` in
+    /// stored pixels of this image.
+    pub fn pixel(&self, x: u32, y: u32) -> Option<[u8; 4]> {
+        if x >= self.width || y >= self.height {
+            return None;
+        }
+        let i = (y as usize * self.width as usize + x as usize) * 4;
+        let v = match &self.pixels {
+            Pixels::Srgb8(v) => alpha::unpremultiply(v.get(i..i + 4)?),
+            Pixels::Linear16F(v) => alpha::f16_to_straight_srgb8(v.get(i..i + 4)?),
+        };
+        v.try_into().ok()
     }
 
     /// Straight-alpha sRGB RGBA8 copy (for export and thumbnails).
@@ -181,6 +210,16 @@ fn finish(mut img: RawImage, premultiply: bool) -> Result<DecodedImage, DecodeEr
     if u64::from(w) * u64::from(h) > MAX_PIXELS {
         return Err(DecodeError::TooLarge(w, h));
     }
+    let info = SourceInfo {
+        format: String::new(),
+        bits: match &img.data {
+            Raw::Rgba8(_) => 8,
+            Raw::Rgba16(_) => 16,
+            Raw::RgbaF32(_) => 32,
+        },
+        float: matches!(img.data, Raw::RgbaF32(_)),
+        icc: img.icc.as_deref().and_then(color::profile_name),
+    };
     if let Some(icc) = &img.icc {
         color::to_srgb(icc, &mut img.data);
     }
@@ -215,6 +254,7 @@ fn finish(mut img: RawImage, premultiply: bool) -> Result<DecodedImage, DecodeEr
         orientation: img.orientation,
         overview: None,
         thumbnail: false,
+        info,
     };
     if premultiply && w.max(h) > MAX_TEXTURE_SIDE {
         out.overview = Some(Box::new(scale::overview(&out, OVERVIEW_SIDE)));
@@ -255,7 +295,10 @@ pub fn decode_data(
     path: &Path,
     hint: Option<SizeHint>,
 ) -> Result<DecodedImage, DecodeError> {
-    finish(decode_raw(data, &ext_of(path), hint, Some(path))?, true)
+    let ext = ext_of(path);
+    let mut img = finish(decode_raw(data, &ext, hint, Some(path))?, true)?;
+    img.info.format = format_name(sniff(data, &ext));
+    Ok(img)
 }
 
 /// Instant low-resolution stand-in: the EXIF thumbnail of a JPEG, shown at
@@ -326,6 +369,24 @@ fn decode_raw(
         (Ok(img), _) => Ok(img),
         (Err(e), Some(p)) => wic::decode(p).map_err(|_| e),
         (Err(e), None) => Err(e),
+    }
+}
+
+/// Display name of a sniffed format.
+fn format_name(f: Format) -> String {
+    match f {
+        Format::Jpeg => "JPEG".into(),
+        Format::Png => "PNG".into(),
+        Format::Avif => "AVIF".into(),
+        Format::Heic => "HEIC".into(),
+        Format::Svg => "SVG".into(),
+        Format::Psd => "PSD".into(),
+        Format::Raw => "RAW (встроенное превью)".into(),
+        Format::Image(i) => i
+            .extensions_str()
+            .first()
+            .map_or_else(|| format!("{i:?}"), |e| e.to_uppercase()),
+        Format::Unknown => "WIC".into(),
     }
 }
 

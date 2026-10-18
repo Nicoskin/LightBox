@@ -16,6 +16,7 @@ mod decode;
 mod edit;
 mod encode;
 mod gfx;
+mod inspect;
 mod library;
 mod loader;
 mod metadata;

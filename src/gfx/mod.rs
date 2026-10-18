@@ -7,6 +7,7 @@
 mod chrome;
 mod compositor;
 mod device;
+mod inspector;
 mod overlay;
 mod panel;
 mod renderer;
@@ -15,8 +16,8 @@ mod texture;
 pub use compositor::Compositor;
 pub use device::{Adapter, Gpu};
 pub use overlay::{
-    ButtonView, CaptionButtonView, CaptionView, CardView, CellView, DialView, Icon, MenuItemView,
-    MenuView, PanelView, SegmentView, TextStyle, TextView, Thumb, Ui,
+    ButtonView, CaptionButtonView, CaptionView, CardView, CellView, DialView, HistogramView, Icon,
+    InfoView, MenuItemView, MenuView, PanelView, SegmentView, TextStyle, TextView, Thumb, Ui,
 };
 pub use renderer::{Background, DrawParams, Filter, Layer, Part};
 pub use texture::GpuImage;

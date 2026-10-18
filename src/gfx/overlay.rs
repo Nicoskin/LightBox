@@ -18,9 +18,10 @@ use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 use windows::Win32::Graphics::DirectWrite::{
     DWRITE_FACTORY_TYPE_SHARED, DWRITE_FONT_STRETCH_NORMAL, DWRITE_FONT_STYLE_NORMAL,
     DWRITE_FONT_WEIGHT, DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_WEIGHT_SEMI_BOLD,
-    DWRITE_MEASURING_MODE_NATURAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT,
-    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS,
-    DWRITE_WORD_WRAPPING_NO_WRAP, DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
+    DWRITE_MEASURING_MODE_NATURAL, DWRITE_PARAGRAPH_ALIGNMENT_CENTER,
+    DWRITE_PARAGRAPH_ALIGNMENT_NEAR, DWRITE_TEXT_ALIGNMENT, DWRITE_TEXT_ALIGNMENT_CENTER,
+    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_TEXT_METRICS, DWRITE_WORD_WRAPPING_NO_WRAP,
+    DWRITE_WORD_WRAPPING_WRAP, DWriteCreateFactory, IDWriteFactory, IDWriteTextFormat,
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGISurface, IDXGISwapChain1};
@@ -55,6 +56,10 @@ pub struct Ui {
     pub menu: Option<MenuView>,
     /// Straightening dial.
     pub dial: Option<DialView>,
+    /// Info panel (I).
+    pub info: Option<InfoView>,
+    /// Histogram overlay (H).
+    pub histogram: Option<HistogramView>,
 }
 
 impl Ui {
@@ -67,6 +72,8 @@ impl Ui {
             && self.caption.is_none()
             && self.menu.is_none()
             && self.dial.is_none()
+            && self.info.is_none()
+            && self.histogram.is_none()
     }
 }
 
@@ -157,6 +164,8 @@ pub struct PanelView {
     pub buttons: Vec<ButtonView>,
     pub texts: Vec<TextView>,
     pub cells: Vec<CellView>,
+    /// Colour swatch of the pixel under the cursor (straight sRGB).
+    pub swatch: Option<(Rect, [u8; 4])>,
 }
 
 pub(super) struct Formats {
@@ -171,6 +180,8 @@ pub(super) struct Formats {
     pub(super) heading: IDWriteTextFormat,
     pub(super) label: IDWriteTextFormat,
     pub(super) option: IDWriteTextFormat,
+    /// Left-aligned, top-aligned, wrapping (prompts).
+    pub(super) wrap: IDWriteTextFormat,
     scale: f32,
 }
 
@@ -269,6 +280,12 @@ impl Overlay {
             }
             if let Some(dial) = &ui.dial {
                 self.dial(dial, ui.scale)?;
+            }
+            if let Some(h) = &ui.histogram {
+                self.histogram(h, ui.scale);
+            }
+            if let Some(info) = &ui.info {
+                self.info(info, ui.scale);
             }
             if let Some(menu) = &ui.menu {
                 self.menu(menu, ui.scale);
@@ -414,6 +431,15 @@ impl Formats {
             heading: make(ui, DWRITE_FONT_WEIGHT_SEMI_BOLD, 18.0, left)?,
             label: make(ui, DWRITE_FONT_WEIGHT_NORMAL, 13.5, left)?,
             option: make(ui, DWRITE_FONT_WEIGHT_NORMAL, 13.0, center)?,
+            wrap: {
+                let f = make(ui, DWRITE_FONT_WEIGHT_NORMAL, 12.5, left)?;
+                // SAFETY: plain COM setters on a fresh format.
+                unsafe {
+                    f.SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_NEAR)?;
+                    f.SetWordWrapping(DWRITE_WORD_WRAPPING_WRAP)?;
+                }
+                f
+            },
             scale: s,
         })
     }
@@ -487,4 +513,24 @@ pub struct DialView {
     pub px_per_deg: f64,
     pub reset_hot: bool,
     pub opacity: f32,
+}
+
+/// Info panel: rows of label / value, headings, wrapped text blocks and
+/// buttons.
+pub struct InfoView {
+    pub card: Rect,
+    pub title: (Rect, String),
+    /// Label rect, label, value rect, value.
+    pub rows: Vec<(Rect, String, Rect, String)>,
+    pub headings: Vec<(Rect, String)>,
+    /// Wrapped text in a box (clipped).
+    pub blocks: Vec<(Rect, String)>,
+    /// Rect, label, hot.
+    pub buttons: Vec<(Rect, String, bool)>,
+}
+
+/// Histogram overlay.
+pub struct HistogramView {
+    pub rect: Rect,
+    pub hist: Rc<crate::inspect::Histogram>,
 }

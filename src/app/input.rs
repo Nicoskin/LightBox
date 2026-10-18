@@ -92,6 +92,7 @@ impl App {
                     let hot = self.panel_hit(p);
                     self.set_hot(hot)?;
                     self.menu_hover(p)?;
+                    self.update_probe(p)?;
                 }
                 self.on_drag(p)?;
                 Ok(Some(LRESULT(0)))
@@ -117,7 +118,11 @@ impl App {
                     }
                     self.render()?;
                 } else if drag.is_some_and(|d| !d.moved) {
-                    self.on_click(p)?;
+                    if key_down(VK_CONTROL.0) {
+                        self.copy_color(p)?;
+                    } else {
+                        self.on_click(p)?;
+                    }
                 }
                 Ok(Some(LRESULT(0)))
             }
@@ -194,6 +199,7 @@ impl App {
             Hot::Menu(bg) => self.choose_background(bg),
             Hot::DialReset => self.set_angle(0.0),
             Hot::DialRuler => Ok(()),
+            Hot::Info(b) => self.info_action(b),
         }
     }
 
@@ -244,6 +250,7 @@ impl App {
             }
             k if ctrl && k == ch(b'Z') => self.undo_save()?,
             k if k == VK_ESCAPE.0 && self.menu_open => self.close_menu()?,
+            k if k == VK_ESCAPE.0 && self.info_state.open => self.toggle_info()?,
             k if k == VK_ESCAPE.0 && self.dial_open => self.toggle_dial()?,
             k if k == VK_ESCAPE.0 => {
                 // SAFETY: posting to our own window.
@@ -256,6 +263,10 @@ impl App {
             k if k == VK_ADD.0 || k == VK_OEM_PLUS.0 => self.zoom_by(ZOOM_STEP, center)?,
             k if k == VK_SUBTRACT.0 || k == VK_OEM_MINUS.0 => {
                 self.zoom_by(1.0 / ZOOM_STEP, center)?;
+            }
+            // Shift+1..4: one channel; Shift+0: all channels.
+            k if shift && (ch(b'0')..=ch(b'4')).contains(&k) => {
+                self.set_channel(u32::from(k - ch(b'0')))?;
             }
             k if k == ch(b'0') || k == VK_NUMPAD0.0 => self.zoom_fit()?,
             k if k == ch(b'1') || k == VK_NUMPAD1.0 => self.zoom_to(1.0, center)?,
@@ -272,6 +283,9 @@ impl App {
             k if k == ch(b'F') => self.toggle_filmstrip()?,
             k if k == ch(b'T') => self.run_action(Action::Checker)?,
             k if k == ch(b'N') => self.run_action(Action::Smoothing)?,
+            k if k == ch(b'G') => self.toggle_grid()?,
+            k if k == ch(b'H') => self.toggle_histogram()?,
+            k if k == ch(b'I') => self.toggle_info()?,
             // [ and ]: turn by 1° (Shift: 0.1°).
             k if k == VK_OEM_4.0 || k == VK_OEM_6.0 => {
                 let step = if shift { 0.1 } else { 1.0 };

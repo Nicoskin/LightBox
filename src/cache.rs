@@ -163,6 +163,7 @@ mod tests {
             orientation: Orientation::default(),
             overview: None,
             thumbnail: false,
+            info: Default::default(),
         }))
     }
 

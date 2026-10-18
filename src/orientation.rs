@@ -72,6 +72,21 @@ impl Orientation {
         [a.min(c), b.min(d), a.max(c), b.max(d)]
     }
 
+    /// Display point → stored point, both normalised to 0..1 (same table as
+    /// `orient()` in image.hlsl).
+    pub fn display_to_stored(self, (x, y): (f64, f64)) -> (f64, f64) {
+        match self.0 {
+            2 => (1.0 - x, y),
+            3 => (1.0 - x, 1.0 - y),
+            4 => (x, 1.0 - y),
+            5 => (y, x),
+            6 => (y, 1.0 - x),
+            7 => (1.0 - y, 1.0 - x),
+            8 => (1.0 - y, x),
+            _ => (x, y),
+        }
+    }
+
     /// Display UV → stored UV (same table as `orient()` in image.hlsl).
     fn map(self, (x, y): (i8, i8)) -> (i8, i8) {
         match self.0 {
@@ -145,6 +160,27 @@ mod tests {
             assert_eq!(
                 o.then(Orientation::ROTATE_CW).then(Orientation::ROTATE_CW),
                 o.then(Orientation::FLIP_H).then(Orientation::FLIP_V)
+            );
+        }
+    }
+
+    #[test]
+    fn display_points_map_back_to_stored() {
+        let stored = (6.0, 4.0);
+        for e in 1..=8 {
+            let o = Orientation::from_exif(e);
+            // The stored pixel (1, 2) and where it is displayed.
+            let r = o.stored_rect_to_display([1.0, 2.0, 2.0, 3.0], stored);
+            let (dw, dh) = if o.swaps_axes() {
+                (4.0, 6.0)
+            } else {
+                (6.0, 4.0)
+            };
+            let c = ((r[0] + r[2]) / 2.0 / dw, (r[1] + r[3]) / 2.0 / dh);
+            let (u, v) = o.display_to_stored(c);
+            assert!(
+                (u * 6.0 - 1.5).abs() < 1e-9 && (v * 4.0 - 2.5).abs() < 1e-9,
+                "{e}"
             );
         }
     }

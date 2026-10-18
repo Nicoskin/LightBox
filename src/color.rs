@@ -35,6 +35,14 @@ use crate::decode::Raw;
 
 /// `true` for profiles that are sRGB already: the transform would be an
 /// (expensive) identity.
+/// Human-readable name of an ICC profile ("Adobe RGB (1998)").
+pub fn profile_name(icc: &[u8]) -> Option<String> {
+    let p = Profile::new_icc(icc).ok()?;
+    p.info(InfoType::Description, Locale::none())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+}
+
 fn is_srgb(p: &Profile) -> bool {
     p.info(InfoType::Description, Locale::none())
         .is_some_and(|d| d.to_ascii_lowercase().contains("srgb"))

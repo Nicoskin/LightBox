@@ -63,6 +63,10 @@ pub struct Layer<'a> {
     /// Free rotation (cos, sin) about `pivot` (screen pixels).
     pub rotation: [f32; 2],
     pub pivot: [f32; 2],
+    /// 0 = colour, 1..3 = R, G, B as grey, 4 = alpha mask.
+    pub channel: u32,
+    /// Outline every texel (pixel inspector at high zoom).
+    pub grid: bool,
 }
 
 /// Everything needed to draw one frame.
@@ -221,6 +225,8 @@ impl Renderer {
                         opacity: layer.opacity.clamp(0.0, 1.0),
                         tex_rect: part.tex,
                         rot: layer.rotation,
+                        channel_mode: layer.channel,
+                        grid: u32::from(layer.grid),
                         pivot: layer.pivot,
                         edges: part.edges,
                         ..Default::default()

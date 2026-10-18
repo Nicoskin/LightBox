@@ -121,6 +121,8 @@ pub struct Settings {
     pub checker: bool,
     pub alpha_bg: AlphaBg,
     pub smoothing: bool,
+    /// Outline pixels at 800 % and more.
+    pub pixel_grid: bool,
     pub wheel: Wheel,
     /// Zoom, mode and filmstrip animations.
     pub animations: bool,
@@ -146,6 +148,7 @@ impl Default for Settings {
             checker: true,
             alpha_bg: AlphaBg::Checker,
             smoothing: true,
+            pixel_grid: true,
             wheel: Wheel::Zoom,
             animations: true,
             turn_animation: true,

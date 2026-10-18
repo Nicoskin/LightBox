@@ -65,6 +65,17 @@ impl Overlay {
             // SAFETY: as above.
             unsafe { self.text(t, o) };
         }
+        if let Some((r, c)) = p.swatch {
+            let f = |v: u8| f32::from(v) / 255.0;
+            // SAFETY: inside BeginDraw/EndDraw.
+            unsafe {
+                self.brush.SetColor(&rgba(f(c[0]), f(c[1]), f(c[2]), o));
+                self.ctx.FillRectangle(&rf(r), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.5 * o));
+                self.ctx
+                    .DrawRectangle(&rf(r), &self.brush, s, None::<&ID2D1StrokeStyle>);
+            }
+        }
         Ok(())
     }
 

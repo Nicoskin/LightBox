@@ -6,6 +6,7 @@
 
 mod chrome;
 mod input;
+mod inspector;
 mod mode;
 mod nav;
 mod panel;
@@ -68,6 +69,8 @@ const WM_APP_LIBRARY: u32 = WM_APP + 3;
 const WINDOW_BG: [f32; 4] = [0.0242, 0.0242, 0.0242, 1.0];
 /// Gap between a fitted image and the screen edge, in 96-DPI pixels.
 const FIT_MARGIN_DIP: f64 = 24.0;
+/// Pixel grid from this many screen pixels per image pixel (800 %).
+const GRID_MIN_SCALE: f64 = 8.0;
 /// Checkerboard cell size, in 96-DPI pixels.
 const CHECKER_DIP: f64 = 8.0;
 /// Animation lengths, milliseconds (all off with `animations = false`).
@@ -95,6 +98,8 @@ const WM_APP_THUMB: u32 = WM_APP + 4;
 const WM_APP_SAVED: u32 = WM_APP + 5;
 /// Posted by the vector thread with a sharper rendering of an SVG.
 const WM_APP_VECTOR: u32 = WM_APP + 6;
+/// Posted by the info thread with a file's metadata.
+const WM_APP_INFO: u32 = WM_APP + 7;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -224,6 +229,12 @@ pub struct App {
     dial_open: bool,
     angle: f64,
     dial_drag: Option<(f64, f64)>,
+    /// Channel view: 0 = colour, 1..3 = R, G, B, 4 = alpha (Shift+1..4).
+    channel: u32,
+    /// Pixel under the cursor (colour readout).
+    probe: Option<inspector::Probe>,
+    info_state: inspector::InfoState,
+    hist_state: inspector::HistState,
     /// SVG: renders the visible region at screen resolution, and the
     /// latest such rendering.
     vector: Option<vector::VectorWorker>,
@@ -305,6 +316,10 @@ impl App {
             dial_open: false,
             angle: 0.0,
             dial_drag: None,
+            channel: 0,
+            probe: None,
+            info_state: inspector::InfoState::default(),
+            hist_state: inspector::HistState::default(),
             vector: None,
             detail: None,
             drag: None,
@@ -547,6 +562,14 @@ impl App {
         // SVG zoomed in: the sharp re-rendering of the visible region.
         let detail =
             detail.and_then(|t| Some((t.tiles.first()?, self.detail_part(key, img, view)?)));
+        // Pixel grid: full-resolution pixels at 800 % and more (not for the
+        // vector rendering of an SVG).
+        let texel_scale =
+            view.scale * disp.0 / f64::from(orient.apply_size(img.width, img.height).0);
+        let grid = self.settings.pixel_grid
+            && img.full
+            && detail.is_none()
+            && texel_scale >= GRID_MIN_SCALE - 1e-9;
         match &img.overview {
             _ if detail.is_some() => {
                 parts.extend(detail.map(|(tile, (quad, edges))| Part {
@@ -622,6 +645,8 @@ impl App {
             orientation: u32::from(orient.exif()),
             rotation: [cos as f32, sin as f32],
             pivot: [(vp.0 / 2.0) as f32, (vp.1 / 2.0) as f32],
+            channel: self.channel,
+            grid,
         })
     }
 
@@ -634,6 +659,7 @@ impl App {
     }
 
     fn render(&mut self) -> Result<()> {
+        self.refresh_inspector();
         let shown = self.shown.clone();
         let detail = self.detail_tex();
         let mut layers = Vec::with_capacity(2);
@@ -695,6 +721,8 @@ impl App {
             caption: self.caption_view(),
             menu: self.menu_view(),
             dial: self.dial_view(),
+            info: self.info_view(),
+            histogram: self.histogram_view(),
         };
         self.gpu.draw(&params, &ui)
     }
@@ -970,6 +998,10 @@ impl App {
             }
             WM_APP_VECTOR => {
                 self.on_vector()?;
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_INFO => {
+                self.on_info()?;
                 Ok(Some(LRESULT(0)))
             }
             WM_CLOSE => {

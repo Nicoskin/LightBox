@@ -93,6 +93,7 @@ pub fn overview(img: &DecodedImage, side: u32) -> DecodedImage {
         orientation: img.orientation,
         overview: None,
         thumbnail: false,
+        info: img.info.clone(),
     }
 }
 

@@ -48,6 +48,11 @@ impl App {
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
                 .unwrap_or_default();
+            // The colour readout follows the name while hovering the picture.
+            let name = match &self.probe {
+                Some(p) => format!("{name}      {}", p.text()),
+                None => name,
+            };
             (r, name)
         });
         Some(CaptionView {

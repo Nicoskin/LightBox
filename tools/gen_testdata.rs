@@ -341,7 +341,8 @@ fn formats(dir: &Path) {
         .expect("text");
         e.add_text_chunk(
             "prompt".into(),
-            r#"{"3":{"class_type":"KSampler","inputs":{"seed":1234}}}"#.into(),
+            r#"{"3":{"class_type":"KSampler","inputs":{"seed":1234,"steps":30,"cfg":7,"sampler_name":"dpmpp_2m","scheduler":"karras","denoise":1,"positive":["6",0],"negative":["7",0],"model":["4",0]}},"4":{"class_type":"CheckpointLoaderSimple","inputs":{"ckpt_name":"sdxl_base_1.0.safetensors"}},"6":{"class_type":"CLIPTextEncode","inputs":{"text":"a lighthouse at dusk, oil painting, dramatic clouds, crashing waves","clip":["4",1]}},"7":{"class_type":"CLIPTextEncode","inputs":{"text":"blurry, low quality","clip":["4",1]}}}"#
+                .into(),
         )
         .expect("text");
         e.add_text_chunk("workflow".into(), r#"{"nodes":[],"links":[]}"#.into())
@@ -349,6 +350,71 @@ fn formats(dir: &Path) {
         let mut wr = e.write_header().expect("header");
         wr.write_image_data(&vec![120u8; 64 * 64 * 3])
             .expect("data");
+    }
+
+    // AI metadata: A1111 parameters only.
+    {
+        let file = fs::File::create(dir.join("a1111.png")).expect("create");
+        let mut e = png::Encoder::new(BufWriter::new(file), 96, 64);
+        e.set_color(png::ColorType::Rgb);
+        e.set_depth(png::BitDepth::Eight);
+        e.add_text_chunk(
+            "parameters".into(),
+            "masterpiece, a cozy wooden cabin in a snowy pine forest at night, warm light in the windows, aurora borealis, highly detailed, 35mm photo\n\
+             Negative prompt: lowres, blurry, watermark, text, oversaturated\n\
+             Steps: 28, Sampler: DPM++ 2M Karras, CFG scale: 6.5, Seed: 3141592653, Size: 1024x1024, Model: juggernautXL_v9, Lora hashes: \"cabin: 1a2b, snow: 3c4d\""
+                .into(),
+        )
+        .expect("text");
+        let mut wr = e.write_header().expect("header");
+        wr.write_image_data(&vec![90u8; 96 * 64 * 3]).expect("data");
+    }
+
+    // JPEG with camera EXIF (info panel).
+    {
+        use exif::{Field, In, Rational, Tag, Value};
+        let ascii = |s: &str| Value::Ascii(vec![s.as_bytes().to_vec()]);
+        let r = |num: u32, denom: u32| Rational { num, denom };
+        let fields = [
+            (Tag::Make, ascii("Canon")),
+            (Tag::Model, ascii("Canon EOS R6")),
+            (Tag::Orientation, Value::Short(vec![1])),
+            (Tag::LensModel, ascii("RF24-105mm F4 L IS USM")),
+            (Tag::ExposureTime, Value::Rational(vec![r(1, 250)])),
+            (Tag::FNumber, Value::Rational(vec![r(8, 1)])),
+            (Tag::PhotographicSensitivity, Value::Short(vec![200])),
+            (Tag::FocalLength, Value::Rational(vec![r(50, 1)])),
+            (Tag::DateTimeOriginal, ascii("2026:07:14 18:32:05")),
+            (Tag::GPSLatitudeRef, ascii("N")),
+            (
+                Tag::GPSLatitude,
+                Value::Rational(vec![r(55, 1), r(45, 1), r(2088, 100)]),
+            ),
+            (Tag::GPSLongitudeRef, ascii("E")),
+            (
+                Tag::GPSLongitude,
+                Value::Rational(vec![r(37, 1), r(37, 1), r(2028, 100)]),
+            ),
+        ]
+        .map(|(tag, value)| Field {
+            tag,
+            ifd_num: In::PRIMARY,
+            value,
+        });
+        let mut w = exif::experimental::Writer::new();
+        for f in &fields {
+            w.push_field(f);
+        }
+        let mut tiff = std::io::Cursor::new(Vec::new());
+        w.write(&mut tiff, false).expect("exif");
+        let tiff = tiff.into_inner();
+        let mut seg = vec![0xFF, 0xE1];
+        seg.extend_from_slice(&((tiff.len() + 8) as u16).to_be_bytes());
+        seg.extend_from_slice(b"Exif\0\0");
+        seg.extend_from_slice(&tiff);
+        let (w, h) = (1200, 800);
+        let jpg = jpeg_bytes(w, h, &photo_rgb(w, h, 4), PixelFormat::RGB, 90);
+        fs::write(dir.join("camera_exif.jpg"), insert_segment(&jpg, &seg)).expect("write");
     }
 
     // Simple formats via the image crate.

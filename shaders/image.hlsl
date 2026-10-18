@@ -17,8 +17,8 @@ cbuffer Params : register(b0)
     float  checker_size;   // checker cell size, screen pixels
     uint   orientation;    // EXIF orientation 1..8
     uint   bg_mode;        // 0 = none, 1 = checkerboard, 2 = solid colour
-    uint   channel_mode;   // 0 = RGBA (reserved: 1..4 = R, G, B, A)
-    uint   grid;           // reserved: pixel grid
+    uint   channel_mode;   // 0 = RGBA, 1..3 = R, G, B as grey, 4 = alpha as a mask
+    uint   grid;           // 1 = outline every texel (pixel inspector)
     float  opacity;        // layer opacity (fades, page turns)
     float2 rot;            // rotation about `pivot`: (cos, sin); (1, 0) = none
     float4 tex_rect;       // content part of the texture: offset xy, size zw (tiles)
@@ -69,6 +69,22 @@ VSOut VSMain(uint id : SV_VertexID)
     return o;
 }
 
+// Pixel grid: darkens (or, on dark pixels, lightens) a one-pixel line along
+// texel boundaries.
+float4 grid_line(float2 uv, float4 c)
+{
+    if (grid == 0)
+        return c;
+    float w, h;
+    image.GetDimensions(w, h);
+    float2 t = uv * float2(w, h);
+    float2 d = abs(frac(t + 0.5) - 0.5) / max(fwidth(t), 1e-6);
+    float line_a = saturate(1.0 - min(d.x, d.y)) * 0.55;
+    float lum = dot(c.rgb, float3(0.2126, 0.7152, 0.0722));
+    float4 ink = lum > 0.18 ? float4(0.0, 0.0, 0.0, 1.0) : float4(0.55, 0.55, 0.55, 1.0);
+    return lerp(c, ink, line_a);
+}
+
 // Distance in screen pixels from the pixel centre to where `v` reaches 0.
 float edge_px(float v, float dx, float dy)
 {
@@ -78,6 +94,20 @@ float edge_px(float v, float dx, float dy)
 float4 PSMain(VSOut i) : SV_Target
 {
     float4 c = image.Sample(samp, i.uv); // premultiplied, linear
+
+    if (channel_mode == 4)
+    {
+        // Alpha as an opaque black / white mask (alpha is not gamma-encoded:
+        // show its value as an sRGB level).
+        float v = pow(c.a, 2.2);
+        c = float4(v, v, v, 1.0);
+    }
+    else if (channel_mode != 0)
+    {
+        float3 s = c.a > 0.0 ? c.rgb / c.a : 0.0;
+        float v = channel_mode == 1 ? s.r : (channel_mode == 2 ? s.g : s.b);
+        c = float4(v, v, v, 1.0) * c.a;
+    }
 
     // A turned image has slanted edges: fade the outermost pixel row.
     float cover = 1.0;
@@ -91,7 +121,7 @@ float4 PSMain(VSOut i) : SV_Target
     }
 
     if (bg_mode == 0)
-        return c * opacity * cover; // transparent areas show the backdrop
+        return grid_line(i.uv, c) * opacity * cover; // transparent areas show the backdrop
 
     float4 bg = bg_color;
     if (bg_mode == 1)
@@ -101,5 +131,5 @@ float4 PSMain(VSOut i) : SV_Target
         float v = ((cell.x + cell.y) & 1) ? 0.6038 : 1.0;
         bg = float4(v, v, v, 1.0);
     }
-    return (c + bg * (1.0 - c.a)) * opacity * cover;
+    return grid_line(i.uv, c + bg * (1.0 - c.a)) * opacity * cover;
 }

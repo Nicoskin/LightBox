@@ -12,6 +12,7 @@ use crate::gfx::{ButtonView, CardView, CellView, PanelView, SegmentView, TextSty
 use crate::orientation::Orientation;
 use crate::settings::AlphaBg;
 use crate::ui::caption::CaptionButton;
+use crate::ui::info::InfoButton;
 use crate::ui::settings_card;
 use crate::ui::thumbs::Thumbnails;
 use crate::ui::toolbar::{self, Action, Layout};
@@ -31,6 +32,8 @@ pub enum Hot {
     /// The straightening dial's ruler and its "0°" button.
     DialRuler,
     DialReset,
+    /// Button of the info panel.
+    Info(InfoButton),
 }
 
 /// Thumbnails requested beyond the visible cells, each side.
@@ -95,6 +98,7 @@ impl App {
         self.menu_hit(p).is_some()
             || self.caption_hit(p).is_some()
             || self.dial_hit(p).is_some()
+            || self.info_hit(p).is_some()
             || (self.panel_target > 0.5 && self.panel_layout().contains(p))
     }
 
@@ -109,6 +113,9 @@ impl App {
         }
         if let Some(h) = self.dial_hit(p) {
             return Some(h);
+        }
+        if let Some(b) = self.info_hit(p) {
+            return b.map(Hot::Info);
         }
         if self.panel_target < 0.5 {
             return None;
@@ -167,6 +174,7 @@ impl App {
             .collect();
 
         let mut texts = Vec::new();
+        let mut swatch = None;
         if let Some(r) = l.zoom_text {
             texts.push(TextView {
                 rect: r,
@@ -186,11 +194,36 @@ impl App {
                 text: name,
                 style: TextStyle::Caption,
             });
-            texts.push(TextView {
-                rect: Rect { y0: mid + 2.0, ..r },
-                text: self.details(),
-                style: TextStyle::Detail,
-            });
+            // The pixel under the cursor replaces the details while hovering.
+            let detail = Rect { y0: mid + 2.0, ..r };
+            match &self.probe {
+                Some(pr) => {
+                    let sw = 11.0 * self.ui_scale();
+                    let cy = (detail.y0 + detail.y1) / 2.0 - 2.0;
+                    swatch = Some((
+                        Rect {
+                            x0: detail.x0,
+                            y0: (cy - sw / 2.0).round(),
+                            x1: detail.x0 + sw,
+                            y1: (cy + sw / 2.0).round(),
+                        },
+                        pr.rgba,
+                    ));
+                    texts.push(TextView {
+                        rect: Rect {
+                            x0: detail.x0 + sw + 6.0 * self.ui_scale(),
+                            ..detail
+                        },
+                        text: pr.text(),
+                        style: TextStyle::Detail,
+                    });
+                }
+                None => texts.push(TextView {
+                    rect: detail,
+                    text: self.details(),
+                    style: TextStyle::Detail,
+                }),
+            }
         }
 
         let cells = l.strip.map_or_else(Vec::new, |strip| {
@@ -212,6 +245,7 @@ impl App {
             buttons,
             texts,
             cells,
+            swatch,
         })
     }
 
