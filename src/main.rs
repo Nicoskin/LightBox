@@ -15,8 +15,10 @@ mod color;
 mod decode;
 mod edit;
 mod encode;
+mod fileops;
 mod gfx;
 mod inspect;
+mod ipc;
 mod library;
 mod loader;
 mod metadata;
@@ -40,11 +42,26 @@ use windows::core::{HSTRING, w};
 use crate::decode::SizeHint;
 use crate::win::monitor::Monitor;
 
+/// Product name: window class, settings folder, pipe and registry keys.
+pub const APP_NAME: &str = "Lightbox";
+
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Command {
+    /// Show the image given (the default).
+    View,
+    /// `--register` / `--unregister`: file types for "Open with" (HKCU).
+    Register,
+    Unregister,
+    /// `--background`: start in the tray without a window (resident mode).
+    Background,
+}
+
 struct Args {
     path: Option<PathBuf>,
+    command: Command,
     bench: bool,
     /// Exit right after the first frame (for repeated timing runs).
     bench_exit: bool,
@@ -54,6 +71,7 @@ impl Args {
     fn parse() -> Self {
         let mut args = Args {
             path: None,
+            command: Command::View,
             bench: false,
             bench_exit: false,
         };
@@ -64,6 +82,9 @@ impl Args {
                     args.bench = true;
                     args.bench_exit = true;
                 }
+                Some("--register") => args.command = Command::Register,
+                Some("--unregister") => args.command = Command::Unregister,
+                Some("--background") => args.command = Command::Background,
                 _ if args.path.is_none() => args.path = Some(PathBuf::from(a)),
                 _ => {}
             }
@@ -77,7 +98,23 @@ fn main() {
     bench::init(args.bench);
     init_logging();
 
-    if let Err(e) = run(&args) {
+    let exe = std::env::current_exe().unwrap_or_default();
+    let result = match args.command {
+        Command::Register => win::registry::register(&exe),
+        Command::Unregister => win::registry::unregister(&exe),
+        // Already running: nothing to do.
+        Command::Background if ipc::is_running() => Ok(()),
+        Command::Background => run_background(),
+        Command::View => {
+            // A running viewer takes the file: no second window.
+            let handed = !args.bench
+                && args.path.as_deref().is_some_and(|p| {
+                    ipc::send_to_running(&std::path::absolute(p).unwrap_or(p.into()))
+                });
+            if handed { Ok(()) } else { run(&args) }
+        }
+    };
+    if let Err(e) = result {
         tracing::error!("{e:#}");
         let text = HSTRING::from(format!("{e:#}"));
         // SAFETY: plain message box without an owner.
@@ -228,7 +265,7 @@ fn run(args: &Args) -> Result<()> {
     app.install();
 
     win::window::run_message_loop(app::frame);
-    Ok(())
+    finish()
 }
 
 /// Logging is off unless `LIGHTBOX_LOG` is set (e.g. `info`, `debug`);
@@ -253,4 +290,48 @@ fn init_logging() {
             .with_writer(std::sync::Mutex::new(file))
             .init();
     }
+}
+
+/// Resident start (`--background`, at sign-in): window, GPU and app are
+/// ready but hidden until a file arrives through the pipe or the tray.
+fn run_background() -> Result<()> {
+    let monitor = Monitor::under_cursor();
+    let (mw, mh) = monitor.size();
+    let gpu = gfx::Gpu::new(gfx::Adapter::Hardware, mw, mh)
+        .or_else(|_| gfx::Gpu::new(gfx::Adapter::Warp, mw, mh))?;
+    let hwnd = win::window::create(monitor.rect, APP_NAME, Some(app::wndproc))?;
+    let mut app = app::App::new(
+        hwnd,
+        gpu,
+        None,
+        app::Opening {
+            path: PathBuf::new(),
+            decoded: Err(decode::DecodeError::Unsupported),
+            initial: None,
+        },
+        monitor,
+        settings::Settings::load(),
+    )?;
+    app.start_hidden()?;
+    app.start_background();
+    app.install();
+    win::window::run_message_loop(app::frame);
+    finish()
+}
+
+/// Ends the process right after the window has closed. Pending writes are
+/// already finished (WM_CLOSE waits for them); tearing down the GPU device
+/// and the worker threads would only keep a dead process around for a
+/// second, during which a new launch could hand its file to it.
+fn finish() -> ! {
+    tracing::debug!("exit");
+    // ExitProcess would spend ~1.5 s unloading the graphics driver; the
+    // files and settings are written and the clipboard belongs to the
+    // system, so nothing is lost by skipping it.
+    // SAFETY: terminates this process.
+    unsafe {
+        use windows::Win32::System::Threading::{GetCurrentProcess, TerminateProcess};
+        let _ = TerminateProcess(GetCurrentProcess(), 0);
+    }
+    std::process::exit(0)
 }

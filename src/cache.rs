@@ -134,6 +134,12 @@ impl Cache {
         }
     }
 
+    /// Drops everything (the viewer went to the tray).
+    pub fn clear(&mut self) {
+        self.items.clear();
+        self.used = 0;
+    }
+
     #[cfg(test)]
     fn used(&self) -> usize {
         self.used

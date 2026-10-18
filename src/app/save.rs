@@ -24,7 +24,7 @@ impl App {
         self.writer = Some(Writer::new(move || post(hwnd, WM_APP_SAVED)));
     }
 
-    fn file_name(path: &Path) -> String {
+    pub(super) fn file_name(path: &Path) -> String {
         path.file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default()
@@ -269,6 +269,7 @@ impl App {
                 }
             }
         }
+        self.run_after_save();
         self.schedule();
         self.request_thumbs();
         self.render()

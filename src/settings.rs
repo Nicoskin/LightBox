@@ -100,6 +100,23 @@ pub enum SaveMode {
     Manual,
 }
 
+/// What F1..F9 do with the current photo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum FolderAction {
+    #[default]
+    Copy,
+    Move,
+}
+
+/// A quick folder: F`key` sends the photo there.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct QuickFolder {
+    pub key: u8,
+    pub path: PathBuf,
+    pub action: FolderAction,
+}
+
 /// What to do with a JPEG whose size is not a multiple of the MCU, where a
 /// lossless rotation is not possible exactly.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -137,6 +154,18 @@ pub struct Settings {
     pub imperfect_jpeg: Option<ImperfectJpeg>,
     /// JPEG quality for "Save as".
     pub jpeg_quality: u8,
+    /// Ask before moving a photo to the recycle bin.
+    pub confirm_delete: bool,
+    /// Stay in the tray after closing (instant re-opening).
+    pub resident: bool,
+    /// Start in the tray when Windows starts (resident mode).
+    pub autostart: bool,
+    /// In the tray: Space in Explorer previews the selected image.
+    pub quick_look: bool,
+    /// External editor (`None`: the system "Edit" command).
+    pub editor: Option<PathBuf>,
+    /// F1..F9 folders (kept last: arrays of tables follow plain keys).
+    pub quick_folders: Vec<QuickFolder>,
 }
 
 impl Default for Settings {
@@ -157,6 +186,12 @@ impl Default for Settings {
             keep_file_dates: true,
             imperfect_jpeg: None,
             jpeg_quality: 92,
+            confirm_delete: true,
+            resident: false,
+            autostart: false,
+            quick_look: true,
+            editor: None,
+            quick_folders: Vec::new(),
         }
     }
 }
@@ -229,6 +264,12 @@ mod tests {
             filmstrip: false,
             thumb_size: ThumbSize::Large,
             imperfect_jpeg: Some(ImperfectJpeg::Trim),
+            editor: Some(PathBuf::from("C:/Tools/editor.exe")),
+            quick_folders: vec![QuickFolder {
+                key: 3,
+                path: PathBuf::from("D:/Photos/Best"),
+                action: FolderAction::Move,
+            }],
             ..Settings::default()
         };
         let text = toml::to_string_pretty(&s).unwrap();

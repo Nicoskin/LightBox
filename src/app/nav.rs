@@ -38,6 +38,11 @@ impl App {
         self.rescan_folder();
         self.start_thumbs();
         self.start_writer();
+        self.start_fileops();
+        self.start_ipc();
+        if self.settings.resident {
+            self.apply_resident();
+        }
         // The preview may have finished before the window could be notified.
         if let Err(e) = self.on_decoded() {
             tracing::error!("{e:#}");
@@ -49,6 +54,9 @@ impl App {
 
     /// Lists the current folder on a background thread (WM_APP_LIBRARY).
     pub(super) fn rescan_folder(&mut self) {
+        if self.current.as_os_str().is_empty() {
+            return; // started in the tray without a file
+        }
         let hwnd = self.hwnd.0 as isize;
         let current = self.current.clone();
         let dir = current
@@ -121,6 +129,20 @@ impl App {
             } else if let Some(img) = ok {
                 self.preupload(&done.path, &img)?;
             }
+        }
+        // Resident: the window appears once the requested image is ready.
+        if self.pending_show
+            && self
+                .shown
+                .as_ref()
+                .is_some_and(|(k, _)| *k == cache::key(&self.current))
+        {
+            self.reveal()?;
+            redraw = false;
+        }
+        if self.pending_show && self.error.is_some() {
+            self.reveal()?; // show why it cannot be opened
+            redraw = false;
         }
         if redraw {
             self.render()?;

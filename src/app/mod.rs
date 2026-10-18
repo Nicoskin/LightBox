@@ -5,12 +5,14 @@
 //! - `mode`: fullscreen ↔ windowed switching and window geometry.
 
 mod chrome;
+mod files;
 mod input;
 mod inspector;
 mod mode;
 mod nav;
 mod panel;
 mod save;
+mod system;
 mod textures;
 mod vector;
 
@@ -100,6 +102,14 @@ const WM_APP_SAVED: u32 = WM_APP + 5;
 const WM_APP_VECTOR: u32 = WM_APP + 6;
 /// Posted by the info thread with a file's metadata.
 const WM_APP_INFO: u32 = WM_APP + 7;
+/// Posted by the file thread after each operation.
+const WM_APP_FILEOP: u32 = WM_APP + 8;
+/// Posted by the pipe thread: a new launch handed over a file.
+const WM_APP_OPEN: u32 = WM_APP + 9;
+/// Posted by the keyboard hook: Space in Explorer (wParam: its window).
+const WM_APP_QUICKLOOK: u32 = WM_APP + 10;
+/// Tray icon events (lParam: the mouse message).
+const WM_APP_TRAY: u32 = WM_APP + 11;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -235,6 +245,25 @@ pub struct App {
     probe: Option<inspector::Probe>,
     info_state: inspector::InfoState,
     hist_state: inspector::HistState,
+    /// Recycle bin, copy / move, clipboard, shell commands.
+    fileops: Option<crate::fileops::FileOps>,
+    /// Copy / move waiting for the rotation of the photo to be written.
+    after_save: Option<crate::fileops::Job>,
+    /// Files handed over by new launches.
+    open_rx: Option<Receiver<PathBuf>>,
+    /// Resident: the window is hidden (in the tray), or waits to be shown
+    /// until the requested image is decoded.
+    hidden: bool,
+    pending_show: bool,
+    /// Opened by Space in Explorer (Space closes it again).
+    quicklook: bool,
+    /// Tray icon present; a real exit is under way.
+    tray: bool,
+    quitting: bool,
+    /// Thread running the QuickLook keyboard hook.
+    hook_thread: Option<u32>,
+    /// Registered "TaskbarCreated" message.
+    taskbar_msg: u32,
     /// SVG: renders the visible region at screen resolution, and the
     /// latest such rendering.
     vector: Option<vector::VectorWorker>,
@@ -320,6 +349,16 @@ impl App {
             probe: None,
             info_state: inspector::InfoState::default(),
             hist_state: inspector::HistState::default(),
+            fileops: None,
+            after_save: None,
+            open_rx: None,
+            hidden: false,
+            pending_show: false,
+            quicklook: false,
+            tray: false,
+            quitting: false,
+            hook_thread: None,
+            taskbar_msg: system::taskbar_created_message(),
             vector: None,
             detail: None,
             drag: None,
@@ -1004,7 +1043,29 @@ impl App {
                 self.on_info()?;
                 Ok(Some(LRESULT(0)))
             }
+            WM_APP_FILEOP => {
+                self.on_fileop()?;
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_OPEN => {
+                self.on_open()?;
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_QUICKLOOK => {
+                self.on_quick_look(HWND(wparam.0 as *mut _))?;
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_TRAY => {
+                self.on_tray((lparam.0 & 0xffff) as u32)?;
+                Ok(Some(LRESULT(0)))
+            }
+            m if m == self.taskbar_msg && m != 0 => {
+                self.on_taskbar_created();
+                Ok(Some(LRESULT(0)))
+            }
+            WM_CLOSE if self.hide_instead_of_close() => Ok(Some(LRESULT(0))),
             WM_CLOSE => {
+                self.remove_tray();
                 // Write a pending rotation and wait for all writes to finish.
                 self.leave_current();
                 if let Some(w) = &mut self.writer {

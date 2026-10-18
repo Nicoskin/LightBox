@@ -5,9 +5,10 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetDoubleClickTime, GetKeyState, ReleaseCapture, SetCapture, VK_ADD, VK_CONTROL, VK_END,
-    VK_ESCAPE, VK_F11, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0, VK_NUMPAD1, VK_OEM_4, VK_OEM_6,
-    VK_OEM_MINUS, VK_OEM_PLUS, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SUBTRACT,
+    GetDoubleClickTime, GetKeyState, ReleaseCapture, SetCapture, VK_ADD, VK_CONTROL, VK_DELETE,
+    VK_END, VK_ESCAPE, VK_F1, VK_F9, VK_F11, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0, VK_NUMPAD1,
+    VK_OEM_4, VK_OEM_6, VK_OEM_MINUS, VK_OEM_PLUS, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT,
+    VK_SPACE, VK_SUBTRACT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     PostMessageW, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CLOSE, WM_KEYDOWN, WM_LBUTTONDBLCLK,
@@ -145,9 +146,13 @@ impl App {
                 Ok(Some(LRESULT(0)))
             }
             WM_RBUTTONUP => {
-                // Right click on the transparency button: choose the background.
-                if self.panel_hit(client_point(lparam)) == Some(Hot::Button(Action::Checker)) {
+                // On the transparency button: choose the background; on the
+                // picture: the context menu.
+                let p = client_point(lparam);
+                if self.panel_hit(p) == Some(Hot::Button(Action::Checker)) {
                     self.open_menu()?;
+                } else if !self.over_panel(p) {
+                    self.context_menu()?;
                 }
                 Ok(Some(LRESULT(0)))
             }
@@ -249,6 +254,26 @@ impl App {
                 }
             }
             k if ctrl && k == ch(b'Z') => self.undo_save()?,
+            k if ctrl && k == ch(b'C') => {
+                if shift {
+                    self.copy_path()?;
+                } else {
+                    self.copy_image()?;
+                }
+            }
+            k if k == VK_DELETE.0 => self.delete_current()?,
+            // F1..F9: quick folders (Ctrl: the other action, Shift: assign).
+            k if (VK_F1.0..=VK_F9.0).contains(&k) => {
+                let n = (k - VK_F1.0 + 1) as u8;
+                if shift {
+                    self.assign_folder(n)?;
+                } else {
+                    self.quick_folder(n, ctrl)?;
+                }
+            }
+            k if k == ch(b'E') => self.open_in_editor(),
+            // Space closes a QuickLook preview (as in Explorer).
+            k if k == VK_SPACE.0 && self.quicklook => self.close_window(),
             k if k == VK_ESCAPE.0 && self.menu_open => self.close_menu()?,
             k if k == VK_ESCAPE.0 && self.info_state.open => self.toggle_info()?,
             k if k == VK_ESCAPE.0 && self.dial_open => self.toggle_dial()?,

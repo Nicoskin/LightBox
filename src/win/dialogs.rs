@@ -12,8 +12,8 @@ use windows::Win32::UI::Controls::{
 };
 use windows::Win32::UI::Shell::Common::COMDLG_FILTERSPEC;
 use windows::Win32::UI::Shell::{
-    FileSaveDialog, IFileDialogCustomize, IFileSaveDialog, IShellItem, SHCreateItemFromParsingName,
-    SIGDN_FILESYSPATH,
+    FOS_FORCEFILESYSTEM, FOS_PICKFOLDERS, FileOpenDialog, FileSaveDialog, IFileDialogCustomize,
+    IFileOpenDialog, IFileSaveDialog, IShellItem, SHCreateItemFromParsingName, SIGDN_FILESYSPATH,
 };
 use windows::core::{BOOL, HSTRING, Interface as _, PCWSTR, w};
 
@@ -140,5 +140,53 @@ pub fn save_as(
             .and_then(|i| QUALITIES.get(i as usize).copied())
             .unwrap_or(quality);
         Some((path, format, q))
+    }
+}
+
+/// "Open" dialog. With `folders`, picks a folder; otherwise a file, with
+/// `filter` (name, "*.a;*.b") offered. `title` is the dialog caption.
+pub fn open(
+    hwnd: Option<HWND>,
+    title: &str,
+    folders: bool,
+    filter: Option<(&str, &str)>,
+    start: Option<&Path>,
+) -> Option<PathBuf> {
+    // SAFETY: COM calls on the calling thread; strings outlive the calls;
+    // the returned path is freed with CoTaskMemFree.
+    unsafe {
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let dlg: IFileOpenDialog =
+            CoCreateInstance(&FileOpenDialog, None, CLSCTX_INPROC_SERVER).ok()?;
+        let _ = dlg.SetTitle(&HSTRING::from(title));
+        if folders {
+            let opts = dlg.GetOptions().ok()?;
+            dlg.SetOptions(opts | FOS_PICKFOLDERS | FOS_FORCEFILESYSTEM)
+                .ok()?;
+        }
+        let (name, spec) = filter.map_or((HSTRING::new(), HSTRING::new()), |(n, s)| {
+            (HSTRING::from(n), HSTRING::from(s))
+        });
+        if filter.is_some() {
+            let types = [COMDLG_FILTERSPEC {
+                pszName: PCWSTR(name.as_ptr()),
+                pszSpec: PCWSTR(spec.as_ptr()),
+            }];
+            let _ = dlg.SetFileTypes(&types);
+        }
+        if let Some(folder) = start
+            && let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(
+                &HSTRING::from(folder.as_os_str()),
+                None,
+            )
+        {
+            let _ = dlg.SetFolder(&item);
+        }
+        dlg.Show(hwnd).ok()?;
+        let item = dlg.GetResult().ok()?;
+        let p = item.GetDisplayName(SIGDN_FILESYSPATH).ok()?;
+        let path = PathBuf::from(p.to_string().ok()?);
+        CoTaskMemFree(Some(p.0 as *const _));
+        Some(path)
     }
 }

@@ -70,6 +70,16 @@ pub fn create(rect: RECT, title: &str, wndproc: WNDPROC) -> Result<HWND> {
     }
 }
 
+/// The application icon at the small (tray / title) size.
+pub fn small_icon() -> HICON {
+    // SAFETY: own module handle; no preconditions.
+    unsafe {
+        GetModuleHandleW(None)
+            .map(|m| load_icon(m.into(), GetSystemMetrics(SM_CXSMICON)))
+            .unwrap_or_default()
+    }
+}
+
 /// The application icon (resource 1, see lightbox.rc) at `size` px.
 fn load_icon(instance: HINSTANCE, size: i32) -> HICON {
     // SAFETY: resource ordinal 1 in our own module; shared icons need no

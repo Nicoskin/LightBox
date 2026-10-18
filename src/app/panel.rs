@@ -449,6 +449,42 @@ impl App {
             Choice::Dim(_) if self.mode == Mode::Fullscreen && self.anim.is_none() => {
                 self.dim = self.settings.dim();
             }
+            // Starting with Windows only makes sense in the tray, and the
+            // tray without it is still useful: they go off together only.
+            Choice::Resident(on) => {
+                if !on && self.settings.autostart {
+                    self.settings.autostart = false;
+                    self.set_autostart(false);
+                    self.settings.save();
+                }
+                self.apply_resident();
+            }
+            Choice::Autostart(on) => {
+                self.set_autostart(on);
+                if on && !self.settings.resident {
+                    self.settings.resident = true;
+                    self.settings.save();
+                    self.apply_resident();
+                }
+            }
+            Choice::QuickLook(_) => self.apply_quick_look(),
+            Choice::Editor(true) => {
+                let start = self
+                    .settings
+                    .editor
+                    .as_deref()
+                    .and_then(std::path::Path::parent);
+                if let Some(exe) = crate::win::dialogs::open(
+                    Some(self.hwnd),
+                    "Программа для редактирования",
+                    false,
+                    Some(("Программы", "*.exe")),
+                    start,
+                ) {
+                    self.settings.editor = Some(exe);
+                    self.settings.save();
+                }
+            }
             _ => {}
         }
         self.render()

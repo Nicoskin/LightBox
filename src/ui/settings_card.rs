@@ -17,6 +17,12 @@ pub enum Choice {
     Animations(bool),
     TurnAnimation(bool),
     Dim(u8),
+    Resident(bool),
+    QuickLook(bool),
+    Autostart(bool),
+    ConfirmDelete(bool),
+    /// `true`: choose an editor (the app opens a dialog); `false`: system.
+    Editor(bool),
 }
 
 pub struct Row {
@@ -94,6 +100,29 @@ pub fn rows() -> Vec<Row> {
             label: "Затемнение фона",
             choices: vec![(Dim(60), "60 %"), (Dim(80), "80 %"), (Dim(92), "92 %")],
         },
+        Row {
+            label: "Подтверждать удаление",
+            choices: vec![(ConfirmDelete(true), "Да"), (ConfirmDelete(false), "Нет")],
+        },
+        Row {
+            label: "Редактор (E)",
+            choices: vec![(Editor(false), "Системный"), (Editor(true), "Выбрать…")],
+        },
+        Row {
+            label: "После закрытия",
+            choices: vec![
+                (Resident(false), "Выходить"),
+                (Resident(true), "Остаться в трее"),
+            ],
+        },
+        Row {
+            label: "Пробел в проводнике",
+            choices: vec![(QuickLook(true), "Просмотр"), (QuickLook(false), "Выкл")],
+        },
+        Row {
+            label: "Запуск с Windows",
+            choices: vec![(Autostart(true), "В трее"), (Autostart(false), "Нет")],
+        },
     ]
 }
 
@@ -109,6 +138,11 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         Choice::Animations(v) => s.animations == v,
         Choice::TurnAnimation(v) => s.turn_animation == v,
         Choice::Dim(v) => s.dim_percent == v,
+        Choice::Resident(v) => s.resident == v,
+        Choice::QuickLook(v) => s.quick_look == v,
+        Choice::Autostart(v) => s.autostart == v,
+        Choice::ConfirmDelete(v) => s.confirm_delete == v,
+        Choice::Editor(v) => s.editor.is_some() == v,
     }
 }
 
@@ -124,6 +158,13 @@ pub fn apply(s: &mut Settings, c: Choice) {
         Choice::Animations(v) => s.animations = v,
         Choice::TurnAnimation(v) => s.turn_animation = v,
         Choice::Dim(v) => s.dim_percent = v,
+        Choice::Resident(v) => s.resident = v,
+        Choice::QuickLook(v) => s.quick_look = v,
+        Choice::Autostart(v) => s.autostart = v,
+        Choice::ConfirmDelete(v) => s.confirm_delete = v,
+        Choice::Editor(false) => s.editor = None,
+        // Chosen in a file dialog by the app.
+        Choice::Editor(true) => {}
     }
 }
 
@@ -258,6 +299,9 @@ mod tests {
         let mut s = Settings::default();
         for row in rows() {
             for (c, _) in row.choices {
+                if c == Choice::Editor(true) {
+                    continue; // needs a file dialog
+                }
                 apply(&mut s, c);
                 assert!(is_selected(&s, c), "{c:?}");
             }
