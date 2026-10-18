@@ -13,7 +13,6 @@ pub struct Monitor {
     /// Whole monitor, including the taskbar.
     pub rect: RECT,
     /// Work area (without the taskbar).
-    #[expect(dead_code, reason = "windowed mode sizing in M1")]
     pub work: RECT,
     pub dpi: u32,
 }

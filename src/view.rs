@@ -21,14 +21,79 @@ impl Rect {
     pub fn height(&self) -> f64 {
         self.y1 - self.y0
     }
+    pub fn center(&self) -> (f64, f64) {
+        ((self.x0 + self.x1) / 2.0, (self.y0 + self.y1) / 2.0)
+    }
+    pub fn contains(&self, p: (f64, f64)) -> bool {
+        p.0 >= self.x0 && p.0 < self.x1 && p.1 >= self.y0 && p.1 < self.y1
+    }
+    pub fn offset(&self, dx: f64, dy: f64) -> Self {
+        Self {
+            x0: self.x0 + dx,
+            y0: self.y0 + dy,
+            x1: self.x1 + dx,
+            y1: self.y1 + dy,
+        }
+    }
+    pub fn lerp(&self, to: &Rect, t: f64) -> Self {
+        let l = |a: f64, b: f64| a + (b - a) * t;
+        Self {
+            x0: l(self.x0, to.x0),
+            y0: l(self.y0, to.y0),
+            x1: l(self.x1, to.x1),
+            y1: l(self.y1, to.y1),
+        }
+    }
 }
+
+/// Zoom limits: 1 % … 50 000 %.
+pub const MIN_SCALE: f64 = 0.01;
+pub const MAX_SCALE: f64 = 500.0;
 
 /// Scale that fits `img` into `area`, never enlarging past 100 %.
 pub fn fit_scale(img_w: f64, img_h: f64, area_w: f64, area_h: f64) -> f64 {
+    fill_scale(img_w, img_h, area_w, area_h).min(1.0)
+}
+
+/// Scale that fits `img` into `area`, enlarging if needed.
+pub fn fill_scale(img_w: f64, img_h: f64, area_w: f64, area_h: f64) -> f64 {
     if img_w <= 0.0 || img_h <= 0.0 || area_w <= 0.0 || area_h <= 0.0 {
         return 1.0;
     }
-    (area_w / img_w).min(area_h / img_h).min(1.0)
+    (area_w / img_w).min(area_h / img_h)
+}
+
+/// Size of the window in windowed mode for an image of `img` pixels on a
+/// monitor work area of `work`: 100 % if it fits, otherwise fitted into
+/// 90 % of the work area, keeping the aspect ratio. Tiny images are
+/// enlarged so that the longer side is at least `min` (a usable window).
+pub fn windowed_size(img: (f64, f64), work: (f64, f64), min: f64) -> (f64, f64) {
+    let mut s = if img.0 <= work.0 && img.1 <= work.1 {
+        1.0
+    } else {
+        fill_scale(img.0, img.1, work.0 * 0.9, work.1 * 0.9)
+    };
+    if img.0.max(img.1) * s < min {
+        s = min / img.0.max(img.1);
+    }
+    ((img.0 * s).round().max(1.0), (img.1 * s).round().max(1.0))
+}
+
+/// Places a `size` rectangle centred on `center`, shifted to stay inside
+/// `bounds` (if it is larger than `bounds`, its top-left corner wins).
+pub fn place_within(size: (f64, f64), center: (f64, f64), bounds: Rect) -> Rect {
+    let clamp = |c: f64, len: f64, lo: f64, hi: f64| {
+        let start = (c - len / 2.0).round();
+        start.min(hi - len).max(lo)
+    };
+    let x0 = clamp(center.0, size.0, bounds.x0, bounds.x1);
+    let y0 = clamp(center.1, size.1, bounds.y0, bounds.y1);
+    Rect {
+        x0,
+        y0,
+        x1: x0 + size.0,
+        y1: y0 + size.1,
+    }
 }
 
 /// Current view: zoom factor and the image point shown at the viewport centre.
@@ -41,9 +106,11 @@ pub struct View {
 }
 
 impl View {
-    /// View that fits the image into the viewport with a margin on each side.
-    pub fn fit(img: (f64, f64), viewport: (f64, f64), margin: f64) -> Self {
-        let s = fit_scale(
+    /// View that fits the image into the viewport with a margin on each side,
+    /// enlarging small images only with `upscale`.
+    pub fn fit(img: (f64, f64), viewport: (f64, f64), margin: f64, upscale: bool) -> Self {
+        let f = if upscale { fill_scale } else { fit_scale };
+        let s = f(
             img.0,
             img.1,
             viewport.0 - 2.0 * margin,
@@ -52,6 +119,106 @@ impl View {
         Self {
             scale: s,
             center: (img.0 / 2.0, img.1 / 2.0),
+        }
+    }
+
+    /// View showing the whole image exactly inside screen rectangle `r`.
+    pub fn placed(img: (f64, f64), r: Rect, viewport: (f64, f64)) -> Self {
+        let scale = r.width() / img.0;
+        Self {
+            scale,
+            center: (
+                (viewport.0 / 2.0 - r.x0) / scale,
+                (viewport.1 / 2.0 - r.y0) / scale,
+            ),
+        }
+    }
+
+    /// Image point under screen position `p`.
+    pub fn image_point(&self, p: (f64, f64), viewport: (f64, f64)) -> (f64, f64) {
+        (
+            self.center.0 + (p.0 - viewport.0 / 2.0) / self.scale,
+            self.center.1 + (p.1 - viewport.1 / 2.0) / self.scale,
+        )
+    }
+
+    /// Zooms to `scale` keeping the image point under `anchor` (screen) fixed.
+    pub fn zoom_at(&self, scale: f64, anchor: (f64, f64), viewport: (f64, f64)) -> Self {
+        let scale = scale.clamp(MIN_SCALE, MAX_SCALE);
+        let p = self.image_point(anchor, viewport);
+        Self {
+            scale,
+            center: (
+                p.0 - (anchor.0 - viewport.0 / 2.0) / scale,
+                p.1 - (anchor.1 - viewport.1 / 2.0) / scale,
+            ),
+        }
+    }
+
+    /// Moves the image by `(dx, dy)` screen pixels.
+    pub fn pan(&self, dx: f64, dy: f64) -> Self {
+        Self {
+            scale: self.scale,
+            center: (
+                self.center.0 - dx / self.scale,
+                self.center.1 - dy / self.scale,
+            ),
+        }
+    }
+
+    /// Keeps the image on screen: an axis that fits is centred, an axis
+    /// larger than the viewport may not reveal empty space at its edges.
+    pub fn clamped(&self, img: (f64, f64), viewport: (f64, f64)) -> Self {
+        let axis = |c: f64, len: f64, vp: f64| {
+            let half = vp / 2.0 / self.scale;
+            if len * self.scale <= vp {
+                len / 2.0
+            } else {
+                c.clamp(half, len - half)
+            }
+        };
+        Self {
+            scale: self.scale,
+            center: (
+                axis(self.center.0, img.0, viewport.0),
+                axis(self.center.1, img.1, viewport.1),
+            ),
+        }
+    }
+
+    /// Animation step between two views; `t` in 0..1. The scale moves
+    /// geometrically (perceptually even zoom). With an `anchor`, the image
+    /// point under it stays put, as with [`Self::zoom_at`].
+    pub fn interpolate(
+        &self,
+        to: &View,
+        t: f64,
+        anchor: Option<(f64, f64)>,
+        viewport: (f64, f64),
+    ) -> View {
+        let scale = self.scale * (to.scale / self.scale).powf(t);
+        let lin = |a: f64, b: f64| a + (b - a) * t;
+        match anchor {
+            Some(a) => {
+                let anchored = |v: &View, s: f64| v.zoom_at(s, a, viewport).center;
+                let c = anchored(self, scale);
+                // Blend in the correction made by clamping the target.
+                let end = anchored(self, to.scale);
+                View {
+                    scale,
+                    center: (
+                        c.0 + (to.center.0 - end.0) * t,
+                        c.1 + (to.center.1 - end.1) * t,
+                    ),
+                }
+            }
+            None => View {
+                scale,
+                center: (
+                    lin(self.center.0, to.center.0),
+                    lin(self.center.1, to.center.1),
+                ),
+            },
         }
     }
 
@@ -107,13 +274,123 @@ mod tests {
     #[test]
     fn fit_never_upscales() {
         assert_eq!(fit_scale(100.0, 50.0, 1920.0, 1080.0), 1.0);
+        assert_eq!(fill_scale(100.0, 50.0, 1920.0, 1080.0), 19.2);
         assert_eq!(fit_scale(6000.0, 4000.0, 1920.0, 1080.0), 0.27);
         assert_eq!(fit_scale(4000.0, 6000.0, 1920.0, 1080.0), 0.18);
     }
 
     #[test]
+    fn zoom_keeps_anchor_fixed() {
+        let img = (4000.0, 3000.0);
+        let vp = (1000.0, 800.0);
+        let v = View::fit(img, vp, 0.0, false);
+        let anchor = (123.0, 456.0);
+        let p = v.image_point(anchor, vp);
+        let z = v.zoom_at(v.scale * 7.3, anchor, vp);
+        let q = z.image_point(anchor, vp);
+        assert!((p.0 - q.0).abs() < 1e-9 && (p.1 - q.1).abs() < 1e-9);
+        assert_eq!(v.zoom_at(1e9, anchor, vp).scale, MAX_SCALE);
+        assert_eq!(v.zoom_at(0.0, anchor, vp).scale, MIN_SCALE);
+    }
+
+    #[test]
+    fn interpolation_endpoints_and_anchor() {
+        let img = (4000.0, 3000.0);
+        let vp = (1000.0, 800.0);
+        let a = View::fit(img, vp, 0.0, false);
+        let anchor = (300.0, 200.0);
+        let b = a.zoom_at(2.0, anchor, vp);
+        let p = a.image_point(anchor, vp);
+        for t in [0.0, 0.3, 0.7, 1.0] {
+            let v = a.interpolate(&b, t, Some(anchor), vp);
+            let q = v.image_point(anchor, vp);
+            assert!(
+                (p.0 - q.0).abs() < 1e-6 && (p.1 - q.1).abs() < 1e-6,
+                "t={t}"
+            );
+        }
+        let end = a.interpolate(&b, 1.0, None, vp);
+        assert!((end.scale - b.scale).abs() < 1e-12);
+        assert!((end.center.0 - b.center.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn clamp_centres_small_and_limits_large() {
+        let vp = (1000.0, 800.0);
+        let small = View {
+            scale: 0.1,
+            center: (0.0, 0.0),
+        }
+        .clamped((4000.0, 3000.0), vp);
+        assert_eq!(small.center, (2000.0, 1500.0));
+        let big = View {
+            scale: 1.0,
+            center: (-500.0, 99_999.0),
+        }
+        .clamped((4000.0, 3000.0), vp);
+        assert_eq!(big.center, (500.0, 2600.0));
+    }
+
+    #[test]
+    fn pan_moves_image_with_cursor() {
+        let v = View {
+            scale: 2.0,
+            center: (100.0, 100.0),
+        };
+        let vp = (400.0, 400.0);
+        let before = v.image_rect((1000.0, 1000.0), vp);
+        let after = v.pan(10.0, -4.0).image_rect((1000.0, 1000.0), vp);
+        assert_eq!(after.x0 - before.x0, 10.0);
+        assert_eq!(after.y0 - before.y0, -4.0);
+    }
+
+    #[test]
+    fn placed_maps_to_rect() {
+        let img = (600.0, 400.0);
+        let vp = (1920.0, 1080.0);
+        let r = Rect {
+            x0: 100.0,
+            y0: 50.0,
+            x1: 400.0,
+            y1: 250.0,
+        };
+        let got = View::placed(img, r, vp).image_rect(img, vp);
+        assert!((got.x0 - r.x0).abs() < 1e-9 && (got.y1 - r.y1).abs() < 1e-9);
+    }
+
+    #[test]
+    fn windowed_size_rules() {
+        let work = (2560.0, 1400.0);
+        assert_eq!(windowed_size((800.0, 600.0), work, 160.0), (800.0, 600.0));
+        // Too tall: fit into 90 % of the work area (1260 px high).
+        assert_eq!(
+            windowed_size((4000.0, 6000.0), work, 160.0),
+            (840.0, 1260.0)
+        );
+        assert_eq!(
+            windowed_size((6000.0, 4000.0), work, 160.0),
+            (1890.0, 1260.0)
+        );
+        assert_eq!(windowed_size((16.0, 8.0), work, 160.0), (160.0, 80.0));
+    }
+
+    #[test]
+    fn place_within_bounds() {
+        let b = Rect {
+            x0: 0.0,
+            y0: 0.0,
+            x1: 1000.0,
+            y1: 800.0,
+        };
+        let r = place_within((200.0, 100.0), (500.0, 400.0), b);
+        assert_eq!((r.x0, r.y0), (400.0, 350.0));
+        let r = place_within((200.0, 100.0), (980.0, 10.0), b);
+        assert_eq!((r.x0, r.y0, r.x1, r.y1), (800.0, 0.0, 1000.0, 100.0));
+    }
+
+    #[test]
     fn fit_is_centered() {
-        let v = View::fit((6000.0, 4000.0), (1920.0, 1080.0), 0.0);
+        let v = View::fit((6000.0, 4000.0), (1920.0, 1080.0), 0.0, false);
         let r = v.image_rect((6000.0, 4000.0), (1920.0, 1080.0));
         assert_eq!(r.y0, 0.0);
         assert_eq!(r.y1, 1080.0);

@@ -10,8 +10,13 @@
 
 mod app;
 mod bench;
+mod cache;
 mod decode;
 mod gfx;
+mod library;
+mod loader;
+mod metadata;
+mod orientation;
 mod view;
 mod win;
 
@@ -76,9 +81,11 @@ fn main() {
 }
 
 fn run(args: &Args) -> Result<()> {
-    let Some(path) = args.path.clone() else {
+    let Some(arg) = args.path.clone() else {
         anyhow::bail!("Usage: lightbox <image file>");
     };
+    let path = std::path::absolute(&arg).unwrap_or(arg);
+    let decode_path = path.clone();
 
     // The photo opens on the monitor under the mouse cursor.
     let monitor = Monitor::under_cursor();
@@ -91,7 +98,7 @@ fn run(args: &Args) -> Result<()> {
     };
     let decoder = thread::Builder::new()
         .name("decode".into())
-        .spawn(move || decode::decode_file(&path, Some(hint)))
+        .spawn(move || decode::decode_file(&decode_path, Some(hint)))
         .context("spawn decoder")?;
 
     // 2. GPU stacks in parallel with decoding: first WARP (ready in ~10 ms),
@@ -155,7 +162,7 @@ fn run(args: &Args) -> Result<()> {
     };
     bench::mark("joined");
 
-    let mut app = app::App::new(hwnd, gpu, pending_hw, decoded, monitor)?;
+    let mut app = app::App::new(hwnd, gpu, pending_hw, path, decoded, monitor)?;
     app.first_frame()?;
     // Activation (focus, text services) is slow; do it once the photo is up.
     win::window::activate(hwnd);
@@ -174,9 +181,11 @@ fn run(args: &Args) -> Result<()> {
     if args.bench_exit {
         return Ok(());
     }
+    app.start_background();
+    app.restart_anim_clock();
     app.install();
 
-    win::window::run_message_loop();
+    win::window::run_message_loop(app::frame);
     Ok(())
 }
 

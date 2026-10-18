@@ -113,6 +113,92 @@ fn alpha_rgba(w: usize, h: usize) -> Vec<u8> {
     px
 }
 
+/// Display UV → stored UV for EXIF orientation `o` (same as the shader).
+fn orient_uv(o: u16, x: f32, y: f32) -> (f32, f32) {
+    match o {
+        2 => (1.0 - x, y),
+        3 => (1.0 - x, 1.0 - y),
+        4 => (x, 1.0 - y),
+        5 => (y, x),
+        6 => (y, 1.0 - x),
+        7 => (1.0 - y, 1.0 - x),
+        8 => (1.0 - y, x),
+        _ => (x, y),
+    }
+}
+
+/// Upright test card: a big "F" (asymmetric in every direction) and a
+/// coloured bar along the top edge.
+fn letter_f(w: usize, h: usize) -> Vec<u8> {
+    let mut px = vec![235u8; w * h * 3];
+    let mut fill = |x0: usize, y0: usize, x1: usize, y1: usize, c: [u8; 3]| {
+        for y in y0..y1 {
+            for x in x0..x1 {
+                px[(y * w + x) * 3..][..3].copy_from_slice(&c);
+            }
+        }
+    };
+    fill(0, 0, w, h / 12, [220, 40, 40]); // red top bar
+    fill(w / 4, h / 5, w / 4 + w / 10, h * 9 / 10, [20, 20, 20]); // stem
+    fill(w / 4, h / 5, w * 3 / 4, h / 5 + h / 8, [20, 20, 20]); // top arm
+    fill(w / 4, h / 2, w * 3 / 5, h / 2 + h / 8, [20, 20, 20]); // middle arm
+    px
+}
+
+/// JPEG whose pixels are stored transformed so that applying EXIF
+/// orientation `o` shows the upright card.
+fn oriented_jpeg(o: u16) -> Vec<u8> {
+    let (dw, dh) = (600usize, 400usize);
+    let display = letter_f(dw, dh);
+    let (sw, sh) = if o >= 5 { (dh, dw) } else { (dw, dh) };
+    let mut stored = vec![0u8; sw * sh * 3];
+    for dy in 0..dh {
+        for dx in 0..dw {
+            let (u, v) = orient_uv(
+                o,
+                (dx as f32 + 0.5) / dw as f32,
+                (dy as f32 + 0.5) / dh as f32,
+            );
+            let (sx, sy) = ((u * sw as f32) as usize, (v * sh as f32) as usize);
+            stored[(sy * sw + sx) * 3..][..3].copy_from_slice(&display[(dy * dw + dx) * 3..][..3]);
+        }
+    }
+    let mut c = Compressor::new().expect("compressor");
+    c.set_quality(90).expect("quality");
+    let jpeg = c
+        .compress_to_vec(Image {
+            pixels: stored.as_slice(),
+            width: sw,
+            pitch: sw * 3,
+            height: sh,
+            format: PixelFormat::RGB,
+        })
+        .expect("compress");
+    insert_exif_orientation(&jpeg, o)
+}
+
+/// Inserts an APP1 Exif segment with only the Orientation tag after SOI.
+fn insert_exif_orientation(jpeg: &[u8], o: u16) -> Vec<u8> {
+    let mut tiff = Vec::new();
+    tiff.extend_from_slice(b"MM\0*");
+    tiff.extend_from_slice(&8u32.to_be_bytes());
+    tiff.extend_from_slice(&1u16.to_be_bytes());
+    tiff.extend_from_slice(&0x0112u16.to_be_bytes());
+    tiff.extend_from_slice(&3u16.to_be_bytes());
+    tiff.extend_from_slice(&1u32.to_be_bytes());
+    tiff.extend_from_slice(&o.to_be_bytes());
+    tiff.extend_from_slice(&[0, 0]);
+    tiff.extend_from_slice(&0u32.to_be_bytes());
+    let mut app1 = b"Exif\0\0".to_vec();
+    app1.extend_from_slice(&tiff);
+    let mut out = jpeg[..2].to_vec();
+    out.extend_from_slice(&[0xFF, 0xE1]);
+    out.extend_from_slice(&((app1.len() + 2) as u16).to_be_bytes());
+    out.extend_from_slice(&app1);
+    out.extend_from_slice(&jpeg[2..]);
+    out
+}
+
 fn main() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
     fs::create_dir_all(&dir).expect("mkdir testdata");
@@ -176,6 +262,12 @@ fn main() {
         png::ColorType::Rgba,
         &art,
     );
+
+    // All 8 EXIF orientations: each must display as the same upright "F".
+    println!("orientation_1..8.jpg…");
+    for o in 1..=8u16 {
+        fs::write(dir.join(format!("orientation_{o}.jpg")), oriented_jpeg(o)).expect("write");
+    }
 
     // Broken and mislabelled files.
     let jpeg = fs::read(dir.join("photo_24mp.jpg")).expect("read back");

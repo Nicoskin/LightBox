@@ -7,8 +7,20 @@ mod png;
 
 use std::path::Path;
 
+use crate::orientation::Orientation;
+
 /// Largest texture side supported by D3D11 feature level 11.
 pub const MAX_TEXTURE_SIDE: u32 = 16384;
+
+/// File extensions listed when browsing a folder (lower case).
+pub const EXTENSIONS: &[&str] = &["jpg", "jpeg", "jpe", "jfif", "png"];
+
+/// `true` if the file name has one of the supported [`EXTENSIONS`].
+pub fn is_supported(path: &Path) -> bool {
+    path.extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| EXTENSIONS.iter().any(|x| x.eq_ignore_ascii_case(e)))
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum DecodeError {
@@ -35,9 +47,29 @@ pub struct DecodedImage {
     pub source_width: u32,
     pub source_height: u32,
     pub has_alpha: bool,
+    /// How the pixels must be transformed for display (EXIF orientation).
+    pub orientation: Orientation,
 }
 
 impl DecodedImage {
+    /// `true` if this is the full-resolution image (not a reduced preview).
+    /// Images larger than the texture limit count as full at the largest
+    /// size that fits (tiling comes in M4).
+    pub fn is_full(&self) -> bool {
+        self.width == self.source_width || self.width.max(self.height) * 2 > MAX_TEXTURE_SIDE
+    }
+
+    /// Bytes of pixel memory, for cache accounting.
+    pub fn bytes(&self) -> usize {
+        self.pixels.len()
+    }
+
+    /// Full-resolution size in display orientation.
+    pub fn display_size(&self) -> (u32, u32) {
+        self.orientation
+            .apply_size(self.source_width, self.source_height)
+    }
+
     /// Builds an image from straight-alpha sRGB RGBA8, premultiplying if needed.
     fn from_straight_rgba(
         width: u32,
@@ -57,6 +89,7 @@ impl DecodedImage {
             source_width: source.0,
             source_height: source.1,
             has_alpha,
+            orientation: Orientation::default(),
         })
     }
 }
@@ -80,6 +113,8 @@ impl SizeHint {
     }
 }
 
+/// Decodes a file. With a `hint`, a cheaper reduced preview may be returned;
+/// without one, the full resolution (capped at the texture limit).
 pub fn decode_file(path: &Path, hint: Option<SizeHint>) -> Result<DecodedImage, DecodeError> {
     let data = std::fs::read(path)?;
     crate::bench::mark("file read");
@@ -88,7 +123,11 @@ pub fn decode_file(path: &Path, hint: Option<SizeHint>) -> Result<DecodedImage, 
 
 pub fn decode_bytes(data: &[u8], hint: Option<SizeHint>) -> Result<DecodedImage, DecodeError> {
     match sniff(data) {
-        Format::Jpeg => jpeg::decode(data, hint),
+        Format::Jpeg => {
+            let mut img = jpeg::decode(data, hint)?;
+            img.orientation = crate::metadata::jpeg_orientation(data);
+            Ok(img)
+        }
         Format::Png => png::decode(data),
         Format::Unknown => Err(DecodeError::Unsupported),
     }

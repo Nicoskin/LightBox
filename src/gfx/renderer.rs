@@ -7,11 +7,11 @@ use windows::Win32::Graphics::Direct3D11::{
     D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_FLOAT32_MAX,
     D3D11_RASTERIZER_DESC, D3D11_RENDER_TARGET_BLEND_DESC, D3D11_SAMPLER_DESC,
     D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT, ID3D11BlendState,
-    ID3D11Buffer, ID3D11Device, ID3D11PixelShader, ID3D11RasterizerState, ID3D11SamplerState,
-    ID3D11VertexShader,
+    ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11RasterizerState,
+    ID3D11RenderTargetView, ID3D11SamplerState, ID3D11VertexShader,
 };
 
-use super::{Gpu, GpuImage};
+use super::GpuImage;
 use crate::view::Quad;
 
 static VS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/image_vs.cso"));
@@ -41,15 +41,23 @@ pub enum Background {
     Solid([f32; 4]),
 }
 
+/// One image drawn in a frame (two during a page turn).
+pub struct Layer<'a> {
+    pub image: &'a GpuImage,
+    /// Visible part of the image on screen.
+    pub quad: Quad,
+    /// Top-left of the whole (unclipped) image on screen; anchors the checkerboard.
+    pub origin: [f32; 2],
+    pub background: Background,
+    pub opacity: f32,
+}
+
 /// Everything needed to draw one frame.
 pub struct DrawParams<'a> {
     /// Backdrop colour, premultiplied linear RGBA (e.g. 80 % black).
     pub clear: [f32; 4],
-    pub image: Option<(&'a GpuImage, Quad)>,
-    /// Top-left of the whole (unclipped) image on screen; anchors the checkerboard.
-    pub image_origin: [f32; 2],
-    pub orientation: u32,
-    pub background: Background,
+    /// Drawn back to front.
+    pub layers: &'a [Layer<'a>],
     pub filter: Filter,
 }
 
@@ -67,7 +75,8 @@ struct Constants {
     bg_mode: u32,
     channel_mode: u32,
     grid: u32,
-    pad: [u32; 3],
+    opacity: f32,
+    pad: [u32; 2],
 }
 
 const _: () = assert!(std::mem::size_of::<Constants>().is_multiple_of(16));
@@ -138,43 +147,20 @@ impl Renderer {
         }
     }
 
-    pub fn draw(&self, gpu: &Gpu, p: &DrawParams) -> Result<()> {
-        let rtv = gpu.rtv().context("no render target")?;
-        let (w, h) = gpu.size();
-        let ctx = &gpu.context;
+    pub fn draw(
+        &self,
+        ctx: &ID3D11DeviceContext,
+        rtv: &ID3D11RenderTargetView,
+        (w, h): (u32, u32),
+        p: &DrawParams,
+    ) -> Result<()> {
         // SAFETY: all resources are owned by `gpu`/`self` and outlive the calls.
         unsafe {
             ctx.OMSetRenderTargets(Some(&[Some(rtv.clone())]), None);
             ctx.ClearRenderTargetView(rtv, &p.clear);
-
-            let Some((img, quad)) = p.image else {
+            if p.layers.is_empty() {
                 return Ok(());
-            };
-
-            let (bg_mode, bg_color, checker) = match p.background {
-                Background::None => (0, [0.0; 4], 8.0),
-                Background::Checker(size) => (1, [0.0; 4], size.max(1.0)),
-                Background::Solid(c) => (2, c, 8.0),
-            };
-            let constants = Constants {
-                dst_rect: quad.dst,
-                uv_rect: quad.uv,
-                bg_color,
-                viewport: [w as f32, h as f32],
-                checker_origin: p.image_origin,
-                checker_size: checker,
-                orientation: p.orientation,
-                bg_mode,
-                ..Default::default()
-            };
-            ctx.UpdateSubresource(
-                &self.cbuffer,
-                0,
-                None,
-                std::ptr::from_ref(&constants).cast(),
-                0,
-                0,
-            );
+            }
 
             ctx.RSSetViewports(Some(&[D3D11_VIEWPORT {
                 TopLeftX: 0.0,
@@ -192,14 +178,42 @@ impl Renderer {
             ctx.VSSetConstantBuffers(0, Some(&[Some(self.cbuffer.clone())]));
             ctx.PSSetShader(&self.ps, None);
             ctx.PSSetConstantBuffers(0, Some(&[Some(self.cbuffer.clone())]));
-            ctx.PSSetShaderResources(0, Some(&[Some(img.srv.clone())]));
             let sampler = match p.filter {
                 Filter::Smooth => &self.smooth,
                 Filter::Pixelated => &self.pixelated,
                 Filter::Nearest => &self.nearest,
             };
             ctx.PSSetSamplers(0, Some(&[Some(sampler.clone())]));
-            ctx.Draw(4, 0);
+
+            for layer in p.layers {
+                let (bg_mode, bg_color, checker) = match layer.background {
+                    Background::None => (0, [0.0; 4], 8.0),
+                    Background::Checker(size) => (1, [0.0; 4], size.max(1.0)),
+                    Background::Solid(c) => (2, c, 8.0),
+                };
+                let constants = Constants {
+                    dst_rect: layer.quad.dst,
+                    uv_rect: layer.quad.uv,
+                    bg_color,
+                    viewport: [w as f32, h as f32],
+                    checker_origin: layer.origin,
+                    checker_size: checker,
+                    orientation: u32::from(layer.image.orientation.exif()),
+                    bg_mode,
+                    opacity: layer.opacity.clamp(0.0, 1.0),
+                    ..Default::default()
+                };
+                ctx.UpdateSubresource(
+                    &self.cbuffer,
+                    0,
+                    None,
+                    std::ptr::from_ref(&constants).cast(),
+                    0,
+                    0,
+                );
+                ctx.PSSetShaderResources(0, Some(&[Some(layer.image.srv.clone())]));
+                ctx.Draw(4, 0);
+            }
         }
         Ok(())
     }

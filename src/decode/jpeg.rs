@@ -2,7 +2,7 @@
 
 use turbojpeg::{Colorspace, Decompressor, Image, PixelFormat, ScalingFactor};
 
-use super::{DecodeError, DecodedImage, SizeHint};
+use super::{DecodeError, DecodedImage, MAX_TEXTURE_SIDE, SizeHint};
 
 /// Power-of-two factors have SIMD IDCT paths; the others are much slower.
 const FACTORS: [ScalingFactor; 4] = [
@@ -13,9 +13,15 @@ const FACTORS: [ScalingFactor; 4] = [
 ];
 
 /// Picks the smallest factor that still does not need upscaling to fill `hint`.
+/// Without a hint: full size, or the largest factor that fits a texture.
 fn pick_factor(width: usize, height: usize, hint: Option<SizeHint>) -> ScalingFactor {
     let Some(h) = hint else {
-        return ScalingFactor::ONE;
+        let max = MAX_TEXTURE_SIDE as usize;
+        return FACTORS
+            .into_iter()
+            .rev()
+            .find(|f| f.scale(width) <= max && f.scale(height) <= max)
+            .unwrap_or(ScalingFactor::ONE_EIGHTH);
     };
     let need = h.min_scale(width as u32, height as u32);
     FACTORS
@@ -111,5 +117,8 @@ mod tests {
             ScalingFactor::ONE
         );
         assert_eq!(pick_factor(100, 100, hint(1920, 1080)), ScalingFactor::ONE);
+        // Full resolution, capped at the texture limit.
+        assert_eq!(pick_factor(30_000, 20_000, None), ScalingFactor::ONE_HALF);
+        assert_eq!(pick_factor(16_384, 100, None), ScalingFactor::ONE);
     }
 }

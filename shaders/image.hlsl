@@ -18,7 +18,8 @@ cbuffer Params : register(b0)
     uint   bg_mode;        // 0 = none, 1 = checkerboard, 2 = solid colour
     uint   channel_mode;   // 0 = RGBA (reserved: 1..4 = R, G, B, A)
     uint   grid;           // reserved: pixel grid
-    uint3  pad;
+    float  opacity;        // layer opacity (fades, page turns)
+    uint2  pad;
 };
 
 Texture2D<float4> image : register(t0);
@@ -64,7 +65,7 @@ float4 PSMain(VSOut i) : SV_Target
     float4 c = image.Sample(samp, i.uv); // premultiplied, linear
 
     if (bg_mode == 0)
-        return c; // transparent areas show the dimmed backdrop
+        return c * opacity; // transparent areas show the dimmed backdrop
 
     float4 bg = bg_color;
     if (bg_mode == 1)
@@ -74,5 +75,5 @@ float4 PSMain(VSOut i) : SV_Target
         float v = ((cell.x + cell.y) & 1) ? 0.6038 : 1.0;
         bg = float4(v, v, v, 1.0);
     }
-    return c + bg * (1.0 - c.a);
+    return (c + bg * (1.0 - c.a)) * opacity;
 }

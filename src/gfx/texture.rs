@@ -7,11 +7,22 @@ use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_R8G8B8A8_UNORM_SRGB, DX
 
 use super::Gpu;
 use crate::decode::DecodedImage;
+use crate::orientation::Orientation;
 
-/// An image uploaded to the GPU with a full mip chain.
+/// An image uploaded to the GPU with a full mip chain, plus what is needed
+/// to display it without the CPU copy.
 pub struct GpuImage {
     _texture: ID3D11Texture2D,
     pub srv: ID3D11ShaderResourceView,
+    /// Texture size (as stored, before orientation).
+    pub width: u32,
+    pub height: u32,
+    /// Full-resolution size in display orientation.
+    pub display: (f64, f64),
+    pub orientation: Orientation,
+    pub has_alpha: bool,
+    /// `false` for a reduced preview.
+    pub full: bool,
 }
 
 impl GpuImage {
@@ -34,6 +45,7 @@ impl GpuImage {
         };
         let expected = img.width as usize * img.height as usize * 4;
         anyhow::ensure!(img.pixels.len() == expected, "pixel buffer size mismatch");
+        let (dw, dh) = img.display_size();
 
         // SAFETY: descriptor and pixel buffer are valid for the duration of
         // the calls; UpdateSubresource copies the data before returning.
@@ -59,7 +71,19 @@ impl GpuImage {
             Ok(Self {
                 _texture: texture,
                 srv,
+                width: img.width,
+                height: img.height,
+                display: (f64::from(dw), f64::from(dh)),
+                orientation: img.orientation,
+                has_alpha: img.has_alpha,
+                full: img.is_full(),
             })
         }
+    }
+
+    /// Texture size in display orientation.
+    pub fn display_texels(&self) -> (f64, f64) {
+        let (w, h) = self.orientation.apply_size(self.width, self.height);
+        (f64::from(w), f64::from(h))
     }
 }

@@ -22,7 +22,8 @@ use windows::Win32::Graphics::Dxgi::{
 };
 use windows::core::Interface as _;
 
-use super::renderer::Renderer;
+use super::overlay::{Overlay, Ui};
+use super::renderer::{DrawParams, Renderer};
 
 /// Which Direct3D implementation backs a [`Gpu`].
 ///
@@ -42,7 +43,9 @@ pub struct Gpu {
     pub device: ID3D11Device,
     pub context: ID3D11DeviceContext,
     pub swap_chain: IDXGISwapChain1,
-    pub renderer: Renderer,
+    renderer: Renderer,
+    /// Direct2D overlay, created on first use.
+    overlay: Option<Overlay>,
     adapter: Adapter,
     rtv: Option<ID3D11RenderTargetView>,
     size: (u32, u32),
@@ -77,6 +80,7 @@ impl Gpu {
             context,
             swap_chain,
             renderer,
+            overlay: None,
             adapter,
             rtv: None,
             size: (width.max(1), height.max(1)),
@@ -93,10 +97,6 @@ impl Gpu {
         self.size
     }
 
-    pub fn rtv(&self) -> Option<&ID3D11RenderTargetView> {
-        self.rtv.as_ref()
-    }
-
     /// Resizes the back buffers (e.g. after a display or DPI change).
     pub fn resize(&mut self, width: u32, height: u32) -> Result<()> {
         let size = (width.max(1), height.max(1));
@@ -104,6 +104,9 @@ impl Gpu {
             return Ok(());
         }
         self.rtv = None;
+        if let Some(o) = &mut self.overlay {
+            o.release_target();
+        }
         // SAFETY: the context must not hold references to the back buffer.
         unsafe {
             self.context.OMSetRenderTargets(None, None);
@@ -120,7 +123,18 @@ impl Gpu {
         self.create_rtv()
     }
 
-    pub fn present(&self) -> Result<()> {
+    /// Draws a complete frame (image, then UI overlay) and presents it.
+    pub fn draw(&mut self, p: &DrawParams, ui: &Ui) -> Result<()> {
+        let rtv = self.rtv.as_ref().context("no render target")?;
+        self.renderer.draw(&self.context, rtv, self.size, p)?;
+        if !ui.is_empty() {
+            if self.overlay.is_none() {
+                self.overlay = Some(Overlay::new(&self.device, ui.scale)?);
+            }
+            if let Some(o) = &mut self.overlay {
+                o.draw(&self.swap_chain, ui)?;
+            }
+        }
         // SAFETY: valid swap chain.
         unsafe { self.swap_chain.Present(1, DXGI_PRESENT(0)).ok()? };
         Ok(())
