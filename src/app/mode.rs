@@ -76,7 +76,7 @@ impl App {
         };
         let mon = self.monitor;
         let work = to_rect(mon.work);
-        let size = window_size(display, &mon);
+        let size = window_size(display, &mon, self.window_frac());
         let now = self.view.image_rect(display, self.viewport());
         let (ox, oy) = (f64::from(mon.rect.left), f64::from(mon.rect.top));
         let center = now.offset(ox, oy).center();
@@ -188,7 +188,11 @@ impl App {
         };
         let mon = self.monitor;
         let work = to_rect(mon.work);
-        let target = view::place_within(window_size(display, &mon), work.center(), work);
+        let target = view::place_within(
+            window_size(display, &mon, self.window_frac()),
+            work.center(),
+            work,
+        );
         self.mode = Mode::Windowed;
         self.dim = 0.0;
         window::set_mode(self.hwnd, true, to_win32(target))?;
@@ -303,13 +307,14 @@ impl App {
 /// Windowed-mode window size for a photo of `display` pixels: the photo at
 /// 100 % (or fitted into 90 % of the work area) plus the title bar and the
 /// frame. Chosen when the window opens; browsing keeps it.
-fn window_size(display: (f64, f64), mon: &Monitor) -> (f64, f64) {
+fn window_size(display: (f64, f64), mon: &Monitor, frac: f64) -> (f64, f64) {
     let f = mon.px(FRAME_DIP);
     let t = mon.px(caption::TITLE_H).round();
     let work = to_rect(mon.work);
     let photo = view::windowed_size(
         display,
         (work.width() - 2.0 * f, work.height() - f - t),
+        frac,
         mon.px(MIN_WINDOW_DIP),
     );
     (photo.0 + 2.0 * f, photo.1 + f + t)
@@ -324,5 +329,50 @@ pub(super) fn photo_area(window: Rect, mon: &Monitor) -> Rect {
         y0: window.y0 + mon.px(caption::TITLE_H).round(),
         x1: window.x1 - f,
         y1: window.y1 - f,
+    }
+}
+
+impl App {
+    /// Largest share of the work area a new window takes: previews (Space
+    /// in Explorer, pinned) stay smaller than the viewer window.
+    pub(super) fn window_frac(&self) -> f64 {
+        if self.preview() { 0.8 } else { 0.9 }
+    }
+
+    /// A preview shows a new photo: the window takes its size, keeping
+    /// the centre.
+    pub(super) fn fit_preview_window(&mut self) -> Result<()> {
+        let Some(display) = self.display() else {
+            return Ok(());
+        };
+        let mon = Monitor::of_window(self.hwnd);
+        self.monitor = mon;
+        let work = to_rect(mon.work);
+        let size = window_size(display, &mon, self.window_frac());
+        let center = to_rect(window::rect(self.hwnd)).center();
+        let target = view::place_within(size, center, work);
+        window::sync_to_compositor();
+        window::set_rect(self.hwnd, to_win32(target))?;
+        self.gpu.resize(
+            target.width().round() as u32,
+            target.height().round() as u32,
+        )
+    }
+
+    /// `--pinned`: a standalone preview window at `r` (screen), taking over
+    /// from the tray viewer without any animation.
+    pub fn start_pinned(&mut self, r: RECT) -> Result<()> {
+        self.pinned = true;
+        self.mode = Mode::Windowed;
+        self.dim = 0.0;
+        window::set_mode(self.hwnd, true, r)?;
+        self.monitor = Monitor::of_window(self.hwnd);
+        self.gpu
+            .resize((r.right - r.left) as u32, (r.bottom - r.top) as u32)?;
+        if let Some(v) = self.fit_view() {
+            self.view = v;
+        }
+        self.fitted = true;
+        Ok(())
     }
 }

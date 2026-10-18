@@ -61,6 +61,8 @@ enum Command {
 
 struct Args {
     path: Option<PathBuf>,
+    /// `--pinned l,t,r,b`: a standalone preview window at that rectangle.
+    pinned: Option<windows::Win32::Foundation::RECT>,
     command: Command,
     bench: bool,
     /// Exit right after the first frame (for repeated timing runs).
@@ -71,12 +73,31 @@ impl Args {
     fn parse() -> Self {
         let mut args = Args {
             path: None,
+            pinned: None,
             command: Command::View,
             bench: false,
             bench_exit: false,
         };
-        for a in std::env::args_os().skip(1) {
+        let mut it = std::env::args_os().skip(1);
+        while let Some(a) = it.next() {
             match a.to_str() {
+                Some("--pinned") => {
+                    let v: Vec<i32> = it
+                        .next()
+                        .and_then(|r| r.to_str().map(str::to_string))
+                        .unwrap_or_default()
+                        .split(',')
+                        .filter_map(|n| n.trim().parse().ok())
+                        .collect();
+                    if let [left, top, right, bottom] = v[..] {
+                        args.pinned = Some(windows::Win32::Foundation::RECT {
+                            left,
+                            top,
+                            right,
+                            bottom,
+                        });
+                    }
+                }
                 Some("--bench") => args.bench = true,
                 Some("--bench-exit") => {
                     args.bench = true;
@@ -108,6 +129,7 @@ fn main() {
         Command::View => {
             // A running viewer takes the file: no second window.
             let handed = !args.bench
+                && args.pinned.is_none()
                 && args.path.as_deref().is_some_and(|p| {
                     ipc::send_to_running(&std::path::absolute(p).unwrap_or(p.into()))
                 });
@@ -242,6 +264,9 @@ fn run(args: &Args) -> Result<()> {
         monitor,
         settings,
     )?;
+    if let Some(r) = args.pinned {
+        app.start_pinned(r)?;
+    }
     app.first_frame()?;
     // Activation (focus, text services) is slow; do it once the photo is up.
     win::window::activate(hwnd);

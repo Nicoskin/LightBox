@@ -9,6 +9,23 @@ pub enum CaptionButton {
     Minimize,
     Fullscreen,
     Close,
+    /// Preview: keep this photo in its own window.
+    Pin,
+    /// Preview: open in the viewer (with the folder).
+    OpenFull,
+}
+
+/// Which buttons the caption has.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptionStyle {
+    /// Round close button in the corner.
+    Fullscreen,
+    /// Viewer window: minimise, fullscreen, close.
+    Window,
+    /// Space-in-Explorer preview: pin, open in the viewer, close.
+    Preview,
+    /// Pinned preview: minimise, open in the viewer, close.
+    Pinned,
 }
 
 /// Title bar height in windowed mode, 96-DPI pixels.
@@ -30,8 +47,8 @@ pub struct CaptionLayout {
 }
 
 /// Caption for a `vp` viewport at UI scale `s`.
-pub fn layout(vp: (f64, f64), s: f64, windowed: bool) -> CaptionLayout {
-    if !windowed {
+pub fn layout(vp: (f64, f64), s: f64, style: CaptionStyle) -> CaptionLayout {
+    if style == CaptionStyle::Fullscreen {
         let size = (CORNER_SIZE * s).round();
         let gap = (CORNER_GAP * s).round();
         return CaptionLayout {
@@ -59,11 +76,25 @@ pub fn layout(vp: (f64, f64), s: f64, windowed: bool) -> CaptionLayout {
     };
     let mut buttons = Vec::with_capacity(3);
     let mut x1 = vp.0;
-    for b in [
-        CaptionButton::Close,
-        CaptionButton::Fullscreen,
-        CaptionButton::Minimize,
-    ] {
+    // Right to left.
+    let kinds = match style {
+        CaptionStyle::Preview => [
+            CaptionButton::Close,
+            CaptionButton::OpenFull,
+            CaptionButton::Pin,
+        ],
+        CaptionStyle::Pinned => [
+            CaptionButton::Close,
+            CaptionButton::OpenFull,
+            CaptionButton::Minimize,
+        ],
+        _ => [
+            CaptionButton::Close,
+            CaptionButton::Fullscreen,
+            CaptionButton::Minimize,
+        ],
+    };
+    for b in kinds {
         buttons.push((
             b,
             Rect {
@@ -110,7 +141,7 @@ mod tests {
 
     #[test]
     fn windowed_buttons_sit_right() {
-        let l = layout((800.0, 600.0), 1.5, true);
+        let l = layout((800.0, 600.0), 1.5, CaptionStyle::Window);
         assert_eq!(l.buttons.len(), 3);
         assert_eq!(l.hit((799.0, 10.0)), Some(CaptionButton::Close));
         assert_eq!(
@@ -120,12 +151,16 @@ mod tests {
         assert_eq!(l.hit((10.0, 10.0)), None);
         assert!(l.over_bar((10.0, 10.0)) && !l.over_bar((10.0, 100.0)));
         // Too narrow for a title: the buttons still fit.
-        assert!(layout((150.0, 100.0), 1.0, true).title.is_none());
+        assert!(
+            layout((150.0, 100.0), 1.0, CaptionStyle::Window)
+                .title
+                .is_none()
+        );
     }
 
     #[test]
     fn fullscreen_close_in_the_corner() {
-        let l = layout((2560.0, 1440.0), 1.0, false);
+        let l = layout((2560.0, 1440.0), 1.0, CaptionStyle::Fullscreen);
         assert_eq!(l.hit((2535.0, 30.0)), Some(CaptionButton::Close));
         assert!(l.bar.is_none() && l.round);
     }

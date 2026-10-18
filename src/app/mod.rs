@@ -262,6 +262,8 @@ pub struct App {
     pending_show: bool,
     /// Opened by Space in Explorer (Space closes it again).
     quicklook: bool,
+    /// A pinned preview: a standalone window for one photo (`--pinned`).
+    pinned: bool,
     /// Tray icon present; a real exit is under way.
     tray: bool,
     quitting: bool,
@@ -361,6 +363,7 @@ impl App {
             hidden: false,
             pending_show: false,
             quicklook: false,
+            pinned: false,
             tray: false,
             quitting: false,
             hook_thread: None,
@@ -483,10 +486,14 @@ impl App {
         }
     }
 
+    /// A preview of one photo (Space in Explorer, pinned): no folder.
+    fn preview(&self) -> bool {
+        self.quicklook || self.pinned
+    }
+
     /// Filmstrip height (96-DPI pixels) if it is shown.
     fn strip_height(&self) -> Option<f64> {
-        self.settings
-            .filmstrip
+        (self.settings.filmstrip && !self.preview())
             .then(|| self.settings.thumb_size.strip_height())
     }
 
@@ -941,6 +948,9 @@ impl App {
     /// Opening animation: the photo grows from the centre while the
     /// backdrop darkens. The first frame is already visible (not empty).
     fn start_open_anim(&mut self) {
+        if self.pinned {
+            return; // takes over a window already on screen
+        }
         let (Some(duration), Some(img), Some(fit)) =
             (self.anim_len(OPEN_ANIM), self.display(), self.fit_view())
         else {

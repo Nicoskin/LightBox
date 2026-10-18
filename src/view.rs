@@ -63,16 +63,12 @@ pub fn fill_scale(img_w: f64, img_h: f64, area_w: f64, area_h: f64) -> f64 {
     (area_w / img_w).min(area_h / img_h)
 }
 
-/// Size of the window in windowed mode for an image of `img` pixels on a
-/// monitor work area of `work`: 100 % if it fits, otherwise fitted into
-/// 90 % of the work area, keeping the aspect ratio. Tiny images are
+/// Size of the window for an image of `img` pixels on a monitor work area
+/// of `work`: 100 % if it fits into the fraction `frac` of the work area,
+/// otherwise fitted into it, keeping the aspect ratio. Tiny images are
 /// enlarged so that the longer side is at least `min` (a usable window).
-pub fn windowed_size(img: (f64, f64), work: (f64, f64), min: f64) -> (f64, f64) {
-    let mut s = if img.0 <= work.0 && img.1 <= work.1 {
-        1.0
-    } else {
-        fill_scale(img.0, img.1, work.0 * 0.9, work.1 * 0.9)
-    };
+pub fn windowed_size(img: (f64, f64), work: (f64, f64), frac: f64, min: f64) -> (f64, f64) {
+    let mut s = fit_scale(img.0, img.1, work.0 * frac, work.1 * frac);
     if img.0.max(img.1) * s < min {
         s = min / img.0.max(img.1);
     }
@@ -510,17 +506,20 @@ mod tests {
     #[test]
     fn windowed_size_rules() {
         let work = (2560.0, 1400.0);
-        assert_eq!(windowed_size((800.0, 600.0), work, 160.0), (800.0, 600.0));
+        assert_eq!(
+            windowed_size((800.0, 600.0), work, 0.9, 160.0),
+            (800.0, 600.0)
+        );
         // Too tall: fit into 90 % of the work area (1260 px high).
         assert_eq!(
-            windowed_size((4000.0, 6000.0), work, 160.0),
+            windowed_size((4000.0, 6000.0), work, 0.9, 160.0),
             (840.0, 1260.0)
         );
         assert_eq!(
-            windowed_size((6000.0, 4000.0), work, 160.0),
+            windowed_size((6000.0, 4000.0), work, 0.9, 160.0),
             (1890.0, 1260.0)
         );
-        assert_eq!(windowed_size((16.0, 8.0), work, 160.0), (160.0, 80.0));
+        assert_eq!(windowed_size((16.0, 8.0), work, 0.9, 160.0), (160.0, 80.0));
     }
 
     #[test]

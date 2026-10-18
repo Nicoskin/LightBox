@@ -133,6 +133,7 @@ pub fn layout(
     compact: bool,
     strip_h: Option<f64>,
     windowed: bool,
+    browse: bool,
 ) -> Layout {
     use Action::*;
     let bar_h = if compact { BAR_H_COMPACT } else { BAR_H } * s;
@@ -165,6 +166,12 @@ pub fn layout(
         Item::Button(Next, Icon::Glyph('\u{E76C}'), true),
         Item::Button(RotateCw, Icon::Glyph('\u{E7AD}'), false),
     ];
+    // A preview (Space in Explorer) shows one photo: no previous / next.
+    let still = [
+        Item::Button(RotateCcw, Icon::Mirrored('\u{E7AD}'), false),
+        Item::Button(RotateCw, Icon::Glyph('\u{E7AD}'), false),
+    ];
+    let center: &[Item] = if browse { &center } else { &still };
     let zoom = [
         Item::Button(ZoomOut, Icon::Glyph('\u{E71F}'), false),
         Item::ZoomText,
@@ -174,10 +181,10 @@ pub fn layout(
     if compact {
         // Windowed: centre group; zoom on the left and the mode toggle on
         // the right when there is room.
-        let cw = width(&center, s);
+        let cw = width(center, s);
         let roomy = vp.0 >= cw + 2.0 * (width(&zoom, s) + 2.0 * pad);
-        let centre_items: &[Item] = if vp.0 >= cw + 2.0 * pad {
-            &center
+        let centre_items: &[Item] = if vp.0 >= cw + 2.0 * pad || !browse {
+            center
         } else {
             &center[1..3]
         };
@@ -190,13 +197,14 @@ pub fn layout(
                 Item::Button(Straighten, Icon::Angle, false),
                 Item::Button(ToggleMode, mode_icon, false),
             ];
-            row(&right, vp.0 - pad - width(&right, s), cy, s, &mut out);
+            let right = if browse { &right[..] } else { &right[..2] };
+            row(right, vp.0 - pad - width(right, s), cy, s, &mut out);
         }
         return out;
     }
 
-    let cw = width(&center, s);
-    row(&center, (vp.0 - cw) / 2.0, cy, s, &mut out);
+    let cw = width(center, s);
+    row(center, (vp.0 - cw) / 2.0, cy, s, &mut out);
     let right = [
         Item::Button(ZoomOut, Icon::Glyph('\u{E71F}'), false),
         Item::ZoomText,
@@ -321,7 +329,7 @@ mod tests {
 
     #[test]
     fn fullscreen_layout() {
-        let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false);
+        let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false, true);
         no_overlaps(&l);
         assert_eq!(l.buttons.len(), 22);
         assert!(l.caption.is_some() && l.zoom_text.is_some());
@@ -340,13 +348,35 @@ mod tests {
     #[test]
     fn compact_layouts_fit() {
         for w in [160.0, 300.0, 500.0, 1400.0] {
-            let l = layout((w, 400.0), 1.0, true, Some(78.0), true);
+            let l = layout((w, 400.0), 1.0, true, Some(78.0), true, true);
             no_overlaps(&l);
             assert!(l.strip.is_none());
             assert!(l.buttons.iter().any(|b| b.action == Action::Next), "w={w}");
         }
         // Narrow screens drop the right group instead of overlapping.
-        no_overlaps(&layout((700.0, 400.0), 1.5, false, None, false));
+        no_overlaps(&layout((700.0, 400.0), 1.5, false, None, false, true));
+    }
+
+    /// Previous / next sit exactly in the middle at every width and scale,
+    /// whatever else fits on the bar.
+    #[test]
+    fn prev_next_always_centred() {
+        for s in [1.0, 1.25, 1.5, 2.0] {
+            for w in [320.0, 640.0, 900.0, 1280.0, 1920.0, 2560.0, 3840.0] {
+                for compact in [false, true] {
+                    let l = layout((w * s, 900.0), s, compact, Some(64.0), compact, true);
+                    let find = |a| l.buttons.iter().find(|b| b.action == a).map(|b| b.rect);
+                    let (Some(p), Some(n)) = (find(Action::Prev), find(Action::Next)) else {
+                        panic!("no prev/next at {w}×{s}");
+                    };
+                    let mid = (p.x0 + n.x1) / 2.0;
+                    assert!(
+                        (mid - w * s / 2.0).abs() < 0.5,
+                        "{w}×{s} compact={compact}: {mid}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]

@@ -48,6 +48,7 @@ impl App {
             windowed,
             self.strip_height(),
             windowed,
+            !self.preview(),
         )
     }
 

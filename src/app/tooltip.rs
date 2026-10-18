@@ -109,6 +109,8 @@ impl App {
                 CaptionButton::Minimize => "Свернуть",
                 CaptionButton::Fullscreen => "Во весь экран (F11)",
                 CaptionButton::Close => "Закрыть (Esc)",
+                CaptionButton::Pin => "Закрепить: оставить это фото в отдельном окне",
+                CaptionButton::OpenFull => "Открыть в Lightbox (с папкой)",
             }
             .to_string(),
             Hot::DialReset => "Сбросить угол (двойной клик по шкале)".to_string(),

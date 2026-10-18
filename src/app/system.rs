@@ -106,7 +106,9 @@ impl App {
             self.pending_show = true;
         }
         self.update_title();
-        self.rescan_folder();
+        if !self.preview() {
+            self.rescan_folder();
+        }
         if self.show_current()? {
             if self.pending_show {
                 self.reveal()?;
@@ -128,9 +130,11 @@ impl App {
         self.pending_show = false;
         self.hidden = false;
         self.monitor = Monitor::under_cursor();
-        match self.settings.open_mode {
-            OpenMode::Windowed => self.start_windowed()?,
-            OpenMode::Fullscreen => {
+        // A preview always opens as a window sized to the photo.
+        let windowed = self.quicklook || self.settings.open_mode == OpenMode::Windowed;
+        match windowed {
+            true => self.start_windowed()?,
+            false => {
                 self.mode = Mode::Fullscreen;
                 window::set_mode(self.hwnd, false, self.monitor.rect)?;
                 let (w, h) = self.monitor.size();
@@ -179,7 +183,7 @@ impl App {
     /// Close in resident mode: hide and free the images, keep the device.
     /// Returns `false` if the window should really close.
     pub(super) fn hide_instead_of_close(&mut self) -> bool {
-        if !self.settings.resident || self.quitting {
+        if !self.settings.resident || self.quitting || self.pinned {
             return false;
         }
         self.leave_current();
@@ -555,5 +559,51 @@ impl App {
         if let Err(e) = crate::win::registry::set_autostart(&exe, on) {
             tracing::warn!("autostart: {e:#}");
         }
+    }
+}
+
+// Preview window (Space in Explorer).
+impl App {
+    /// Pin: the photo moves to its own window (a separate process at the
+    /// same place) and stays there; the tray viewer is free for the next
+    /// Space.
+    pub(super) fn pin_preview(&mut self) -> Result<()> {
+        use std::os::windows::io::AsRawHandle;
+        self.leave_current();
+        let r = window::rect(self.hwnd);
+        let exe = std::env::current_exe()?;
+        let child = std::process::Command::new(exe)
+            .arg("--pinned")
+            .arg(format!("{},{},{},{}", r.left, r.top, r.right, r.bottom))
+            .arg(&self.current)
+            .spawn()?;
+        // SAFETY: the child's handle is valid while `child` lives; its
+        // message loop starts right after its first frame is on screen.
+        unsafe {
+            let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(child.id());
+            let _ = windows::Win32::System::Threading::WaitForInputIdle(
+                windows::Win32::Foundation::HANDLE(child.as_raw_handle()),
+                2000,
+            );
+        }
+        self.quicklook = false;
+        self.close_window();
+        Ok(())
+    }
+
+    /// A preview becomes the full viewer: the folder, the filmstrip and
+    /// the default mode.
+    pub(super) fn open_full(&mut self) -> Result<()> {
+        self.quicklook = false;
+        self.pinned = false;
+        self.rescan_folder();
+        if self.settings.open_mode == OpenMode::Fullscreen {
+            self.go_fullscreen()?;
+        } else {
+            self.render()?;
+        }
+        self.request_thumbs();
+        self.schedule();
+        Ok(())
     }
 }

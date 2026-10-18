@@ -11,7 +11,7 @@ use super::panel::Hot;
 use super::{App, MENU_TIMER, Mode};
 use crate::gfx::{CaptionButtonView, CaptionView, DialView, MenuItemView, MenuView};
 use crate::settings::AlphaBg;
-use crate::ui::caption::{self, CaptionButton, CaptionLayout};
+use crate::ui::caption::{self, CaptionButton, CaptionLayout, CaptionStyle};
 use crate::ui::dial::{self, DialLayout};
 use crate::ui::popup::{self, MenuLayout};
 use crate::ui::toolbar::Action;
@@ -22,11 +22,13 @@ const MENU_HOVER_MS: u32 = 450;
 
 impl App {
     pub(super) fn caption_layout(&self) -> CaptionLayout {
-        caption::layout(
-            self.viewport(),
-            self.ui_scale(),
-            self.mode == Mode::Windowed,
-        )
+        let style = match (self.mode, self.quicklook, self.pinned) {
+            (Mode::Fullscreen, ..) => CaptionStyle::Fullscreen,
+            (_, _, true) => CaptionStyle::Pinned,
+            (_, true, _) => CaptionStyle::Preview,
+            _ => CaptionStyle::Window,
+        };
+        caption::layout(self.viewport(), self.ui_scale(), style)
     }
 
     /// The caption is always there in a window; in fullscreen the close
@@ -67,6 +69,8 @@ impl App {
                         CaptionButton::Minimize => '\u{E921}',
                         CaptionButton::Fullscreen => '\u{E740}',
                         CaptionButton::Close => '\u{E8BB}',
+                        CaptionButton::Pin => '\u{E718}',
+                        CaptionButton::OpenFull => '\u{E8A7}',
                     },
                     close: *b == CaptionButton::Close,
                     hot: self.hot == Some(Hot::Caption(*b)),
@@ -101,6 +105,8 @@ impl App {
                 Ok(())
             }
             CaptionButton::Fullscreen => self.toggle_mode(),
+            CaptionButton::Pin => self.pin_preview(),
+            CaptionButton::OpenFull => self.open_full(),
             CaptionButton::Close => {
                 // SAFETY: posting to our own window.
                 unsafe { PostMessageW(Some(self.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0))? };

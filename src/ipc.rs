@@ -30,7 +30,18 @@ fn pipe_name() -> HSTRING {
     // SAFETY: valid out-pointer.
     let _ = unsafe { ProcessIdToSessionId(GetCurrentProcessId(), &mut session) };
     let user = std::env::var("USERNAME").unwrap_or_default();
-    HSTRING::from(format!(r"\\.\pipe\{APP_NAME}-{session}-{user}"))
+    // Per program copy: an installed viewer and a development build run
+    // side by side without handing files to each other.
+    let exe = std::env::current_exe()
+        .map(|p| p.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    let hash = exe.bytes().fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+        (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+    });
+    HSTRING::from(format!(
+        r"\\.\pipe\{APP_NAME}-{session}-{user}-{:08x}",
+        hash as u32
+    ))
 }
 
 /// `true` if a viewer of this user is listening.

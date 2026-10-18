@@ -20,6 +20,7 @@ pub enum OpenMode {
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ThumbSize {
+    Tiny,
     Small,
     #[default]
     Medium,
@@ -30,9 +31,10 @@ impl ThumbSize {
     /// Filmstrip height in 96-DPI pixels.
     pub fn strip_height(self) -> f64 {
         match self {
-            ThumbSize::Small => 60.0,
-            ThumbSize::Medium => 78.0,
-            ThumbSize::Large => 108.0,
+            ThumbSize::Tiny => 40.0,
+            ThumbSize::Small => 52.0,
+            ThumbSize::Medium => 64.0,
+            ThumbSize::Large => 84.0,
         }
     }
 }

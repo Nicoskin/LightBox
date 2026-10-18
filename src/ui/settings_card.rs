@@ -50,6 +50,7 @@ pub fn rows() -> Vec<Row> {
         Row {
             label: "Размер миниатюр",
             choices: vec![
+                (Thumbs(ThumbSize::Tiny), "Крошечные"),
                 (Thumbs(ThumbSize::Small), "Мелкие"),
                 (Thumbs(ThumbSize::Medium), "Средние"),
                 (Thumbs(ThumbSize::Large), "Крупные"),

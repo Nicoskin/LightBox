@@ -9,7 +9,7 @@ use std::time::Instant;
 
 use anyhow::Result;
 
-use super::{Anim, AnimKind, App, TURN_SHIFT, WM_APP_DECODED, WM_APP_LIBRARY, post};
+use super::{Anim, AnimKind, App, Mode, TURN_SHIFT, WM_APP_DECODED, WM_APP_LIBRARY, post};
 use crate::cache::{self, Slot};
 use crate::decode::{DecodedImage, SizeHint};
 use crate::gfx::GpuImage;
@@ -39,9 +39,13 @@ impl App {
         self.start_thumbs();
         self.start_writer();
         self.start_fileops();
-        self.start_ipc();
-        if self.settings.resident {
-            self.apply_resident();
+        // A pinned preview is a plain window: the tray viewer stays the one
+        // that receives files and Space.
+        if !self.pinned {
+            self.start_ipc();
+            if self.settings.resident {
+                self.apply_resident();
+            }
         }
         // The preview may have finished before the window could be notified.
         if let Err(e) = self.on_decoded() {
@@ -262,6 +266,10 @@ impl App {
         self.finish_anim()?;
         let old_view = self.view;
         let previous = self.shown.replace((key, tex));
+        // A visible preview takes the size of each new photo.
+        if self.preview() && !self.hidden && self.mode == Mode::Windowed {
+            self.fit_preview_window()?;
+        }
         if let Some(v) = self.fit_view() {
             self.view = v;
             self.fitted = true;
