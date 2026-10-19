@@ -50,6 +50,7 @@ impl App {
         // that receives files and Space.
         if !self.pinned {
             self.start_ipc();
+            self.auto_update_check();
             if self.settings.resident {
                 self.apply_resident();
             }

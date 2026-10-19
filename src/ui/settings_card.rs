@@ -21,6 +21,9 @@ pub enum Choice {
     Resident(bool),
     QuickLook(bool),
     Autostart(bool),
+    AutoUpdate(bool),
+    /// Action: check for updates now (never shown as selected).
+    CheckUpdates,
     ConfirmDelete(bool),
     /// `true`: choose an editor (the app opens a dialog); `false`: system.
     Editor(bool),
@@ -133,6 +136,14 @@ pub fn rows() -> Vec<Row> {
             label: "Запуск с Windows",
             choices: vec![(Autostart(true), "В трее"), (Autostart(false), "Нет")],
         },
+        Row {
+            label: "Обновления",
+            choices: vec![
+                (AutoUpdate(true), "Раз в день"),
+                (AutoUpdate(false), "Вручную"),
+                (CheckUpdates, "Проверить"),
+            ],
+        },
     ]
 }
 
@@ -153,6 +164,8 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         // Only works while the viewer waits in the tray.
         Choice::QuickLook(v) => (s.quick_look && s.resident) == v,
         Choice::Autostart(v) => s.autostart == v,
+        Choice::AutoUpdate(v) => s.check_updates == v,
+        Choice::CheckUpdates => false,
         Choice::ConfirmDelete(v) => s.confirm_delete == v,
         Choice::Editor(v) => s.editor.is_some() == v,
     }
@@ -177,6 +190,8 @@ pub fn apply(s: &mut Settings, c: Choice) {
             s.resident |= v;
         }
         Choice::Autostart(v) => s.autostart = v,
+        Choice::AutoUpdate(v) => s.check_updates = v,
+        Choice::CheckUpdates => {}
         Choice::ConfirmDelete(v) => s.confirm_delete = v,
         Choice::Editor(false) => s.editor = None,
         // Chosen in a file dialog by the app.
@@ -315,8 +330,8 @@ mod tests {
         let mut s = Settings::default();
         for row in rows() {
             for (c, _) in row.choices {
-                if c == Choice::Editor(true) {
-                    continue; // needs a file dialog
+                if c == Choice::Editor(true) || c == Choice::CheckUpdates {
+                    continue; // actions, not settings
                 }
                 apply(&mut s, c);
                 assert!(is_selected(&s, c), "{c:?}");

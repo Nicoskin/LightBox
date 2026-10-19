@@ -18,6 +18,7 @@ mod encode;
 mod fileops;
 mod gfx;
 mod inspect;
+mod install;
 mod ipc;
 mod library;
 mod loader;
@@ -25,6 +26,7 @@ mod metadata;
 mod orientation;
 mod settings;
 mod ui;
+mod update;
 mod view;
 mod win;
 
@@ -57,6 +59,11 @@ enum Command {
     Unregister,
     /// `--background`: start in the tray without a window (resident mode).
     Background,
+    /// `--uninstall`: remove the installed program (from "Installed apps").
+    Uninstall,
+    /// `--enable-tray`: tray mode, Space preview and start with Windows on
+    /// (the installer's check box).
+    EnableTray,
 }
 
 struct Args {
@@ -106,6 +113,8 @@ impl Args {
                 Some("--register") => args.command = Command::Register,
                 Some("--unregister") => args.command = Command::Unregister,
                 Some("--background") => args.command = Command::Background,
+                Some("--uninstall") => args.command = Command::Uninstall,
+                Some("--enable-tray") => args.command = Command::EnableTray,
                 _ if args.path.is_none() => args.path = Some(PathBuf::from(a)),
                 _ => {}
             }
@@ -123,6 +132,15 @@ fn main() {
     let result = match args.command {
         Command::Register => win::registry::register(&exe),
         Command::Unregister => win::registry::unregister(&exe),
+        Command::Uninstall => install::uninstall(),
+        Command::EnableTray => {
+            let mut s = settings::Settings::load();
+            s.resident = true;
+            s.quick_look = true;
+            s.autostart = true;
+            s.save();
+            win::registry::set_autostart(&exe, true)
+        }
         // Already running: nothing to do.
         Command::Background if ipc::is_running() => Ok(()),
         Command::Background => run_background(),

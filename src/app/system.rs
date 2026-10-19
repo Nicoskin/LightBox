@@ -607,3 +607,10 @@ impl App {
         Ok(())
     }
 }
+
+/// "Quit for real" (also from the tray): the installer and uninstaller
+/// send it before replacing or removing the program.
+pub fn quit_message() -> u32 {
+    // SAFETY: registering a message name has no preconditions.
+    unsafe { RegisterWindowMessageW(w!("Lightbox.Quit")) }
+}

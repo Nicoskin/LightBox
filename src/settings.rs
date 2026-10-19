@@ -168,6 +168,10 @@ pub struct Settings {
     pub quick_look: bool,
     /// External editor (`None`: the system "Edit" command).
     pub editor: Option<PathBuf>,
+    /// Look for a new version once a day (release builds only).
+    pub check_updates: bool,
+    /// When the last check ran (Unix seconds).
+    pub last_update_check: u64,
     /// F1..F9 folders (kept last: arrays of tables follow plain keys).
     pub quick_folders: Vec<QuickFolder>,
 }
@@ -196,6 +200,8 @@ impl Default for Settings {
             autostart: false,
             quick_look: false,
             editor: None,
+            check_updates: true,
+            last_update_check: 0,
             quick_folders: Vec::new(),
         }
     }

@@ -478,6 +478,7 @@ impl App {
                 }
                 self.apply_resident();
             }
+            Choice::CheckUpdates => self.check_updates(true),
             Choice::Autostart(on) => {
                 self.set_autostart(on);
                 if on && !self.settings.resident {

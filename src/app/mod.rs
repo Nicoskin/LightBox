@@ -20,6 +20,9 @@ mod slideshow;
 mod system;
 mod textures;
 mod tooltip;
+mod updates;
+
+pub use system::quit_message;
 mod vector;
 
 use std::cell::RefCell;
@@ -128,6 +131,8 @@ const WM_APP_TRAY: u32 = WM_APP + 11;
 const WM_APP_FRAMES: u32 = WM_APP + 12;
 /// Posted by the folder watcher.
 const WM_APP_WATCH: u32 = WM_APP + 13;
+/// Posted by the update thread.
+const WM_APP_UPDATE: u32 = WM_APP + 14;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -298,6 +303,10 @@ pub struct App {
     hook_thread: Option<u32>,
     /// Registered "TaskbarCreated" message.
     taskbar_msg: u32,
+    /// Registered "quit for real" message (sent by the installer).
+    quit_msg: u32,
+    /// Update check / download in progress.
+    update_rx: Option<updates::UpdateRx>,
     /// SVG: renders the visible region at screen resolution, and the
     /// latest such rendering.
     vector: Option<vector::VectorWorker>,
@@ -402,6 +411,8 @@ impl App {
             quitting: false,
             hook_thread: None,
             taskbar_msg: system::taskbar_created_message(),
+            quit_msg: system::quit_message(),
+            update_rx: None,
             vector: None,
             detail: None,
             drag: None,
@@ -1150,6 +1161,14 @@ impl App {
             }
             WM_APP_TRAY => {
                 self.on_tray((lparam.0 & 0xffff) as u32)?;
+                Ok(Some(LRESULT(0)))
+            }
+            m if m == self.quit_msg && m != 0 => {
+                self.quit();
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_UPDATE => {
+                self.on_update()?;
                 Ok(Some(LRESULT(0)))
             }
             m if m == self.taskbar_msg && m != 0 => {
