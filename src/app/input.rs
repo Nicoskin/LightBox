@@ -64,6 +64,12 @@ impl App {
                 return Ok(Some(LRESULT(0)));
             }
         }
+        if self.tone.is_some()
+            && msg != WM_MOUSEWHEEL
+            && self.tone_input(msg, wparam.0, client_point(lparam))?
+        {
+            return Ok(Some(LRESULT(0)));
+        }
         if self.crop.is_some()
             && msg != WM_MOUSEWHEEL
             && self.crop_input(msg, wparam.0, client_point(lparam))?
@@ -225,8 +231,7 @@ impl App {
         match a {
             Action::ZoomOut => self.zoom_by(1.0 / ZOOM_STEP, center),
             Action::ZoomIn => self.zoom_by(ZOOM_STEP, center),
-            Action::ActualSize => self.zoom_to(1.0, center),
-            Action::Fit => self.zoom_fit(),
+            Action::ToggleZoom => self.toggle_zoom(center),
             Action::Prev => self.step(-1),
             Action::Next => self.step(1),
             Action::RotateCcw => self.rotate(Orientation::ROTATE_CCW),
@@ -251,6 +256,8 @@ impl App {
             Action::Settings => self.open_settings(),
             Action::Straighten => self.toggle_dial(),
             Action::Crop => self.toggle_crop(),
+            Action::Adjust => self.toggle_tone(),
+            Action::Tags => self.edit_tags(),
             Action::Batch => self.batch_dialog(),
             Action::Grid => self.toggle_grid(),
             Action::Info => self.toggle_info(),
@@ -397,6 +404,7 @@ impl App {
             Command::Tags => self.edit_tags(),
             Command::Batch => self.batch_dialog(),
             Command::Crop => self.toggle_crop(),
+            Command::Adjust => self.toggle_tone(),
         }
     }
 

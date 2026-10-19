@@ -7,7 +7,9 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows_numerics::Vector2;
 
-use super::overlay::{CaptionView, CropView, DialView, MenuView, Overlay, SegmentView, rgba};
+use super::overlay::{
+    AdjustView, CaptionView, CropView, DialView, MenuView, Overlay, SegmentView, rgba,
+};
 use super::panel::rf;
 use crate::view::Rect;
 
@@ -586,6 +588,92 @@ impl Overlay {
                     .FillRoundedRectangle(&rounded(r, 6.0 * s), &self.brush);
                 self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
                 self.glyph_str(&seg.text, r, &self.formats.option);
+            }
+        }
+    }
+}
+
+impl Overlay {
+    /// The adjustments card: sliders with a zero mark, values, a note and
+    /// the buttons.
+    pub(super) unsafe fn adjust_card(&self, a: &AdjustView, s: f32) {
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            let card = rf(a.card);
+            self.brush.SetColor(&rgba(0.11, 0.11, 0.12, 0.94));
+            self.ctx
+                .FillRoundedRectangle(&rounded(card, 10.0 * s), &self.brush);
+            for sl in &a.sliders {
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.8));
+                self.glyph_str(&sl.label.1, rf(sl.label.0), &self.formats.label);
+                let t = rf(sl.track);
+                let cy = (t.top + t.bottom) / 2.0;
+                let (x0, x1) = (t.left + 10.0 * s, t.right - 10.0 * s);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.18));
+                self.ctx.FillRoundedRectangle(
+                    &rounded(
+                        D2D_RECT_F {
+                            left: x0,
+                            top: cy - 2.0 * s,
+                            right: x1,
+                            bottom: cy + 2.0 * s,
+                        },
+                        2.0 * s,
+                    ),
+                    &self.brush,
+                );
+                // From zero to the value, in the accent colour.
+                let (z, k) = (sl.zero as f32, sl.knob as f32);
+                self.brush
+                    .SetColor(&rgba(ACCENT.0, ACCENT.1, ACCENT.2, 0.9));
+                self.ctx.FillRectangle(
+                    &D2D_RECT_F {
+                        left: z.min(k),
+                        top: cy - 2.0 * s,
+                        right: z.max(k),
+                        bottom: cy + 2.0 * s,
+                    },
+                    &self.brush,
+                );
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.45));
+                self.ctx.FillRectangle(
+                    &D2D_RECT_F {
+                        left: z - 0.75 * s,
+                        top: cy - 7.0 * s,
+                        right: z + 0.75 * s,
+                        bottom: cy + 7.0 * s,
+                    },
+                    &self.brush,
+                );
+                let r = if sl.hot { 8.0 } else { 7.0 } * s;
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 1.0));
+                self.ctx.FillEllipse(
+                    &D2D1_ELLIPSE {
+                        point: Vector2 { X: k, Y: cy },
+                        radiusX: r,
+                        radiusY: r,
+                    },
+                    &self.brush,
+                );
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.9));
+                self.glyph_str(&sl.value.1, rf(sl.value.0), &self.formats.option);
+            }
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.55));
+            self.glyph_str(&a.note.1, rf(a.note.0), &self.formats.label);
+            for b in &a.buttons {
+                let r = rf(b.rect);
+                let fill = if b.selected {
+                    rgba(ACCENT.0, ACCENT.1, ACCENT.2, if b.hot { 1.0 } else { 0.9 })
+                } else if b.hot {
+                    rgba(1.0, 1.0, 1.0, 0.16)
+                } else {
+                    rgba(1.0, 1.0, 1.0, 0.08)
+                };
+                self.brush.SetColor(&fill);
+                self.ctx
+                    .FillRoundedRectangle(&rounded(r, 6.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+                self.glyph_str(&b.text, r, &self.formats.option);
             }
         }
     }

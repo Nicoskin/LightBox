@@ -150,6 +150,21 @@ fn small_thumbnail(jpeg: &[u8]) -> Option<Vec<u8>> {
     super::encode_jpeg(&img.into_raw(), tw, th, 80).ok()
 }
 
+/// A newly encoded JPEG (`fresh`, upright, `w` × `h`) with the original
+/// file's EXIF carried over: orientation reset, size and thumbnail updated.
+pub fn with_exif_of(original: &[u8], fresh: Vec<u8>, w: u32, h: u32) -> Vec<u8> {
+    let Some((_, start, end)) = find_exif(original) else {
+        return fresh;
+    };
+    let tiff = original[start..end].to_vec();
+    let thumb = small_thumbnail(&fresh);
+    edit_exif(&fresh, true, move |t| {
+        *t = tiff;
+        tiff::set_dims(t, w, h);
+        tiff::normalize(t, false, |_| thumb.clone());
+    })
+}
+
 /// Location of the EXIF block: (APP1 marker offset, TIFF start, TIFF end).
 fn find_exif(data: &[u8]) -> Option<(usize, usize, usize)> {
     let mut pos = 2;

@@ -25,6 +25,7 @@ cbuffer Params : register(b0)
     float2 pivot;          // rotation centre, screen pixels
     uint   edges;          // sides of this part that are image edges: 1 left, 2 top, 4 right, 8 bottom
     float  diff_gain;      // PSDiff: amplification of |B - A|
+    float4 adjust;         // exposure (EV), contrast, saturation, warmth; 0 = none
 };
 
 Texture2D<float4> image : register(t0);
@@ -92,9 +93,31 @@ float edge_px(float v, float dx, float dy)
     return v / max(length(float2(dx, dy)), 1e-7);
 }
 
+// Tonal adjustments on straight linear colour; the same formulas as
+// `Adjust::apply_linear` in src/adjust.rs.
+float3 tone(float3 c)
+{
+    c *= exp2(adjust.x);
+    c.r *= 1.0 + 0.12 * adjust.w;
+    c.b *= 1.0 - 0.12 * adjust.w;
+    if (adjust.y != 0.0)
+    {
+        float3 p = pow(max(c, 0.0), 1.0 / 2.2);
+        c = pow(max((p - 0.46) * (1.0 + adjust.y) + 0.46, 0.0), 2.2);
+    }
+    if (adjust.z != 0.0)
+    {
+        float lum = dot(c, float3(0.2126, 0.7152, 0.0722));
+        c = max(lum + (c - lum) * (1.0 + adjust.z), 0.0);
+    }
+    return saturate(c);
+}
+
 float4 PSMain(VSOut i) : SV_Target
 {
     float4 c = image.Sample(samp, i.uv); // premultiplied, linear
+    if (any(adjust != 0.0) && c.a > 0.0)
+        c = float4(tone(c.rgb / c.a) * c.a, c.a);
 
     if (channel_mode == 4)
     {

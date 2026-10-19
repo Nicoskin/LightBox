@@ -74,8 +74,7 @@ impl App {
             Hot::Button(a) => match a {
                 Action::ZoomOut => "Уменьшить (−)",
                 Action::ZoomIn => "Увеличить (+)",
-                Action::ActualSize => "Реальный размер, 100 % (1)",
-                Action::Fit => "Вписать в экран (0)",
+                Action::ToggleZoom => "Вписать ↔ 100 % (щелчок; клавиши 0, 1, Z)",
                 Action::Prev => "Предыдущее фото (←)",
                 Action::Next => "Следующее фото (→)",
                 Action::RotateCcw => "Повернуть влево (L)",
@@ -92,6 +91,8 @@ impl App {
                 Action::FlipV => "Отразить по вертикали (Shift+M)",
                 Action::Straighten => "Повернуть на любой угол ( [ и ] )",
                 Action::Crop => "Обрезать (X)",
+                Action::Adjust => "Коррекция: экспозиция, контраст, цвет (A)",
+                Action::Tags => "Метки (Ctrl+K)",
                 Action::Batch => "Переименовать или конвертировать выбранные (Ctrl+B)",
                 Action::Info => "Информация о файле (I)",
                 Action::Histogram => "Гистограмма (H)",

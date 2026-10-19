@@ -68,6 +68,8 @@ pub struct Ui {
     pub home: Vec<SegmentView>,
     /// The crop tool.
     pub crop: Option<CropView>,
+    /// The adjustments card.
+    pub adjust: Option<AdjustView>,
 }
 
 impl Ui {
@@ -86,6 +88,7 @@ impl Ui {
             && self.labels.is_empty()
             && self.home.is_empty()
             && self.crop.is_none()
+            && self.adjust.is_none()
     }
 }
 
@@ -305,6 +308,9 @@ impl Overlay {
             }
             if let Some(c) = &ui.crop {
                 self.crop(c, ui.scale);
+            }
+            if let Some(a) = &ui.adjust {
+                self.adjust_card(a, ui.scale);
             }
             if let Some(caption) = &ui.caption {
                 self.caption(caption);
@@ -588,4 +594,23 @@ pub struct CropView {
     pub frame: Rect,
     pub size: String,
     pub segments: Vec<SegmentView>,
+}
+
+/// One slider of the adjustments card.
+pub struct SliderView {
+    pub label: (Rect, String),
+    pub track: Rect,
+    /// Screen x of the knob and of the zero mark.
+    pub knob: f64,
+    pub zero: f64,
+    pub value: (Rect, String),
+    pub hot: bool,
+}
+
+/// The adjustments card (A).
+pub struct AdjustView {
+    pub card: Rect,
+    pub sliders: Vec<SliderView>,
+    pub note: (Rect, String),
+    pub buttons: Vec<SegmentView>,
 }

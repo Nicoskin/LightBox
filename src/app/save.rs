@@ -202,7 +202,7 @@ impl App {
                     path,
                     edit,
                     undo,
-                    cropped,
+                    note,
                 } => {
                     let key = cache::key(&path);
                     self.saving.remove(&key);
@@ -215,11 +215,7 @@ impl App {
                     } else {
                         self.apply_saved_edit(&key, edit);
                     }
-                    self.notice(if cropped {
-                        "Обрезка сохранена · Ctrl+Z — вернуть"
-                    } else {
-                        "Поворот сохранён"
-                    });
+                    self.notice(note);
                 }
                 Outcome::NeedsJpegChoice {
                     path,

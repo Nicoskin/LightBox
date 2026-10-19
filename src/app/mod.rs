@@ -25,6 +25,7 @@ mod slideshow;
 mod stars;
 mod system;
 mod textures;
+mod tone;
 mod tooltip;
 mod updates;
 
@@ -362,6 +363,8 @@ pub struct App {
     doc: Option<document::DocState>,
     /// The crop tool, while open.
     crop: Option<crop::CropState>,
+    /// The adjustments card, while open.
+    tone: Option<tone::ToneState>,
 
     // Input.
     drag: Option<Drag>,
@@ -487,6 +490,7 @@ impl App {
             detail: None,
             doc: None,
             crop: None,
+            tone: None,
             drag: None,
             wheel_accum: 0,
             fast_nav: false,
@@ -825,6 +829,7 @@ impl App {
             pivot: [(vp.0 / 2.0) as f32, (vp.1 / 2.0) as f32],
             channel: self.channel,
             grid,
+            adjust: self.adjust_preview(key),
         })
     }
 
@@ -921,6 +926,7 @@ impl App {
             labels: self.compare_labels(),
             home: self.home_view(),
             crop: self.crop_view(),
+            adjust: self.tone_view(),
         };
         self.gpu.draw(&params, &ui)
     }

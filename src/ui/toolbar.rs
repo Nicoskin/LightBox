@@ -9,8 +9,8 @@ use crate::view::Rect;
 pub enum Action {
     ZoomOut,
     ZoomIn,
-    ActualSize,
-    Fit,
+    /// The zoom percentage: fit ↔ 100 %.
+    ToggleZoom,
     Prev,
     Next,
     RotateCcw,
@@ -25,6 +25,10 @@ pub enum Action {
     Straighten,
     /// The crop tool (X).
     Crop,
+    /// Adjustments (A).
+    Adjust,
+    /// Tags (Ctrl+K).
+    Tags,
     /// Batch rename / convert (Ctrl+B).
     Batch,
     /// Pixel grid (G), info panel (I), histogram (H).
@@ -105,11 +109,19 @@ fn row(items: &[Item], x: f64, cy: f64, s: f64, out: &mut Layout) -> f64 {
             }
             Item::ZoomText => {
                 let w = ZOOM_TEXT_W * s;
-                out.zoom_text = Some(Rect {
+                let rect = Rect {
                     x0: x,
                     y0: cy - BTN * s / 2.0,
                     x1: x + w,
                     y1: cy + BTN * s / 2.0,
+                };
+                out.zoom_text = Some(rect);
+                // Clicking the percentage toggles fit ↔ 100 %.
+                out.buttons.push(Button {
+                    action: Action::ToggleZoom,
+                    rect,
+                    icon: Icon::Text(""),
+                    round: false,
                 });
                 x += w + GAP * s;
             }
@@ -218,8 +230,6 @@ pub fn layout(
         Item::Button(ZoomOut, Icon::Glyph('\u{E71F}'), false),
         Item::ZoomText,
         Item::Button(ZoomIn, Icon::Glyph('\u{E8A3}'), false),
-        Item::Button(ActualSize, Icon::Text("1:1"), false),
-        Item::Button(Fit, Icon::Glyph('\u{E9A6}'), false),
         Item::Gap,
         Item::Button(Checker, Icon::Checker, false),
         Item::Button(Smoothing, Icon::Smoothing, false),
@@ -246,11 +256,13 @@ pub fn layout(
         Item::Button(FlipV, Icon::Text("\u{21C5}"), false),
         Item::Button(Straighten, Icon::Angle, false),
         Item::Button(Crop, Icon::Glyph('\u{E7A8}'), false),
+        Item::Button(Adjust, Icon::Glyph('\u{E706}'), false),
     ];
     let files = [
         Item::Button(Save, Icon::Glyph('\u{E74E}'), false),
         Item::Button(SaveAs, Icon::Glyph('\u{E792}'), false),
         Item::Button(Reset, Icon::Glyph('\u{E7A7}'), false),
+        Item::Button(Tags, Icon::Glyph('\u{E8EC}'), false),
         Item::Button(Batch, Icon::Glyph('\u{E762}'), false),
     ];
     let (tw, fw) = (width(&tools, s), width(&files, s));
@@ -361,7 +373,7 @@ mod tests {
     fn fullscreen_layout() {
         let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false, true);
         no_overlaps(&l);
-        assert_eq!(l.buttons.len(), 26);
+        assert_eq!(l.buttons.len(), 27);
         assert!(l.caption.is_some() && l.zoom_text.is_some());
         let strip = l.strip.unwrap();
         assert_eq!(strip.y1, l.bar.y0);

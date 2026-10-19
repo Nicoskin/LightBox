@@ -246,10 +246,11 @@ pub enum Command {
     Tags,
     Batch,
     Crop,
+    Adjust,
 }
 
 impl Command {
-    pub const ALL: [Command; 48] = {
+    pub const ALL: [Command; 49] = {
         use Command::*;
         [
             Prev,
@@ -300,6 +301,7 @@ impl Command {
             Tags,
             Batch,
             Crop,
+            Adjust,
         ]
     };
 
@@ -355,6 +357,7 @@ impl Command {
             Tags => "tags",
             Batch => "batch",
             Crop => "crop",
+            Adjust => "adjust",
         }
     }
 
@@ -410,6 +413,7 @@ impl Command {
             Tags => "Метки",
             Batch => "Пакетная обработка",
             Crop => "Обрезать",
+            Adjust => "Коррекция",
         }
     }
 
@@ -466,6 +470,7 @@ impl Command {
             Tags => vec![Key::ctrl(c(b'K'))],
             Batch => vec![Key::ctrl(c(b'B'))],
             Crop => vec![Key::plain(c(b'X'))],
+            Adjust => vec![Key::plain(c(b'A'))],
         }
     }
 

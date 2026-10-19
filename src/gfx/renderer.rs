@@ -72,6 +72,8 @@ pub struct Layer<'a> {
     pub channel: u32,
     /// Outline every texel (pixel inspector at high zoom).
     pub grid: bool,
+    /// Tonal adjustments previewed (see `crate::adjust`), zero: none.
+    pub adjust: [f32; 4],
 }
 
 /// Everything needed to draw one frame.
@@ -107,6 +109,7 @@ struct Constants {
     pivot: [f32; 2],
     edges: u32,
     diff_gain: f32,
+    adjust: [f32; 4],
 }
 
 const _: () = assert!(std::mem::size_of::<Constants>().is_multiple_of(16));
@@ -278,6 +281,7 @@ impl Renderer {
                 pivot: layer.pivot,
                 edges: part.edges,
                 diff_gain,
+                adjust: layer.adjust,
             };
             // SAFETY: see the caller; the constants outlive the call.
             unsafe {

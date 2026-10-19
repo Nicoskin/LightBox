@@ -48,6 +48,16 @@ pub enum Job {
         format: ExportFormat,
         quality: u8,
     },
+    /// Bake tonal adjustments and a straightening angle into the file.
+    Adjust {
+        path: PathBuf,
+        display: Orientation,
+        edit: Orientation,
+        adjust: crate::adjust::Adjust,
+        angle: f64,
+        quality: u8,
+        keep_dates: bool,
+    },
     /// Put back the bytes saved before an earlier rotation (undo).
     Restore { undo: Undo },
 }
@@ -65,8 +75,8 @@ pub enum Outcome {
         path: PathBuf,
         edit: Orientation,
         undo: Undo,
-        /// The write also cropped the photo.
-        cropped: bool,
+        /// What was saved, for the notice.
+        note: &'static str,
     },
     /// The JPEG cannot be rotated exactly; ask the user and resubmit.
     NeedsJpegChoice {
@@ -164,7 +174,11 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
                 path,
                 edit,
                 undo,
-                cropped: crop.is_some(),
+                note: if crop.is_some() {
+                    "Обрезка сохранена · Ctrl+Z — вернуть"
+                } else {
+                    "Поворот сохранён"
+                },
             },
             Ok(None) => Outcome::NeedsJpegChoice {
                 path,
@@ -186,6 +200,34 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
             Ok(()) => Outcome::Exported { dst },
             Err(e) => Outcome::Failed {
                 path: dst,
+                error: e.to_string(),
+            },
+        },
+        Job::Adjust {
+            path,
+            display,
+            edit,
+            adjust,
+            angle,
+            quality,
+            keep_dates,
+        } => match adjust_file(
+            &path,
+            display,
+            (adjust, angle),
+            quality,
+            keep_dates,
+            backups,
+            n,
+        ) {
+            Ok(undo) => Outcome::Rotated {
+                path,
+                edit,
+                undo,
+                note: "Коррекция сохранена · Ctrl+Z — вернуть",
+            },
+            Err(e) => Outcome::Failed {
+                path,
                 error: e.to_string(),
             },
         },
@@ -240,21 +282,60 @@ fn rotate_file(
             .unwrap_or_default();
         encode::other::transform(&data, &ext, display, crop)?
     };
+    write_with_backup(path, &data, &out, keep_dates, backups, n).map(Some)
+}
+
+/// Keeps `old` (the file's bytes) for undo, then replaces the file with
+/// `new`.
+fn write_with_backup(
+    path: &Path,
+    old: &[u8],
+    new: &[u8],
+    keep_dates: bool,
+    backups: &Path,
+    n: u32,
+) -> Result<Undo, WriteError> {
     let modified = fs::metadata(path).and_then(|m| m.modified()).ok();
-    // Keep the original bytes for undo before touching the file.
     fs::create_dir_all(backups)?;
     let name = path
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     let backup = backups.join(format!("{n:04}-{name}"));
-    fs::write(&backup, &data)?;
-    replace_file(path, &out, keep_dates.then_some(modified).flatten())?;
-    Ok(Some(Undo {
+    fs::write(&backup, old)?;
+    replace_file(path, new, keep_dates.then_some(modified).flatten())?;
+    Ok(Undo {
         path: path.to_path_buf(),
         backup,
         modified,
-    }))
+    })
+}
+
+/// Tonal adjustments and straightening baked into the file (re-encoded in
+/// its format; JPEG at `quality`).
+/// `look`: the adjustments and the straightening angle (degrees).
+fn adjust_file(
+    path: &Path,
+    display: Orientation,
+    (adjust, angle): (crate::adjust::Adjust, f64),
+    quality: u8,
+    keep_dates: bool,
+    backups: &Path,
+    n: u32,
+) -> Result<Undo, WriteError> {
+    let data = fs::read(path)?;
+    let img = decode::decode_data(&data, path, None)?;
+    let rgba = img.to_straight_rgba8();
+    let (mut px, w, h) =
+        encode::orient_pixels(&rgba, img.width as usize, img.height as usize, 4, display);
+    adjust.apply_srgb8(&mut px);
+    let (px, w, h) = crate::adjust::straighten(&px, w, h, angle);
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let out = encode::reencode_like(&data, &ext, &px, w, h, quality)?;
+    write_with_backup(path, &data, &out, keep_dates, backups, n)
 }
 
 fn restore(undo: &Undo) -> Result<(), WriteError> {

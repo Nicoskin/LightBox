@@ -8,6 +8,7 @@
 
 #![windows_subsystem = "windows"]
 
+mod adjust;
 mod app;
 mod bench;
 mod cache;

@@ -11,6 +11,70 @@ use image::{DynamicImage, ImageEncoder, ImageFormat};
 use super::{EncodeError, orient_pixels, tiff};
 use crate::orientation::Orientation;
 
+/// Writes new pixels (straight RGBA8, upright) in the original's format,
+/// losslessly: TIFF, BMP, QOI, TGA, PNM and lossless WebP. Lossy and
+/// palette formats are refused.
+pub fn encode_like(
+    original: &[u8],
+    ext: &str,
+    rgba: &[u8],
+    w: usize,
+    h: usize,
+) -> Result<Vec<u8>, EncodeError> {
+    let is_tiff = original.starts_with(b"II*\0") || original.starts_with(b"MM\0*");
+    let format = if is_tiff && matches!(ext, "tif" | "tiff") {
+        ImageFormat::Tiff
+    } else if original.len() > 16 && &original[0..4] == b"RIFF" && &original[8..12] == b"WEBP" {
+        if !webp_is_lossless(original) {
+            return Err(EncodeError::Unsupported(
+                "WebP со сжатием с потерями не пересохраняется. Сохраните копию через «Сохранить как»",
+            ));
+        }
+        ImageFormat::WebP
+    } else {
+        match ext {
+            "bmp" | "dib" if original.starts_with(b"BM") => ImageFormat::Bmp,
+            "qoi" => ImageFormat::Qoi,
+            "tga" => ImageFormat::Tga,
+            "pbm" | "pgm" | "ppm" | "pnm" | "pam" => ImageFormat::Pnm,
+            _ => {
+                return Err(EncodeError::Unsupported(
+                    "этот формат не пересохраняется. Сохраните копию через «Сохранить как»",
+                ));
+            }
+        }
+    };
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, rgba.to_vec())
+        .ok_or_else(|| EncodeError::Format("размер".into()))?;
+    let img = if img.pixels().all(|p| p[3] == 255) && format != ImageFormat::WebP {
+        DynamicImage::ImageRgb8(DynamicImage::ImageRgba8(img).into_rgb8())
+    } else {
+        DynamicImage::ImageRgba8(img)
+    };
+    let mut out = Vec::new();
+    img.write_to(&mut Cursor::new(&mut out), format)
+        .map_err(|e| EncodeError::Format(e.to_string()))?;
+    Ok(out)
+}
+
+/// `true` for a still WebP with lossless (VP8L) data.
+fn webp_is_lossless(data: &[u8]) -> bool {
+    let mut pos = 12;
+    let mut lossless = false;
+    while pos + 8 <= data.len() {
+        let kind = &data[pos..pos + 4];
+        let len = u32::from_le_bytes([data[pos + 4], data[pos + 5], data[pos + 6], data[pos + 7]])
+            as usize;
+        match kind {
+            b"ANIM" | b"VP8 " => return false,
+            b"VP8L" => lossless = true,
+            _ => {}
+        }
+        pos += 8 + len + (len & 1);
+    }
+    lossless
+}
+
 /// Rotates `data` (file extension `ext`, lower case) so that it shows what
 /// `display` shows today.
 #[cfg(test)]

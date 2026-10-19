@@ -101,6 +101,28 @@ pub fn encode_png(rgba: &[u8], w: usize, h: usize) -> Result<Vec<u8>, EncodeErro
     Ok(out)
 }
 
+/// New pixels (straight sRGB RGBA8, upright) written in the format of
+/// `original`, with what can be kept of its metadata: JPEG at `quality`
+/// with its EXIF (orientation reset, new thumbnail), PNG with its text
+/// chunks (prompts), other lossless formats as they are.
+pub fn reencode_like(
+    original: &[u8],
+    ext: &str,
+    rgba: &[u8],
+    w: usize,
+    h: usize,
+    quality: u8,
+) -> Result<Vec<u8>, EncodeError> {
+    if original.starts_with(&[0xFF, 0xD8, 0xFF]) {
+        let fresh = encode_jpeg(rgba, w, h, quality)?;
+        return Ok(jpeg::with_exif_of(original, fresh, w as u32, h as u32));
+    }
+    if original.starts_with(b"\x89PNG\r\n\x1a\n") {
+        return png::with_text_of(original, &encode_png(rgba, w, h)?);
+    }
+    other::encode_like(original, ext, rgba, w, h)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

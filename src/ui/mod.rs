@@ -1,6 +1,7 @@
 //! User interface pieces drawn over the image: the bottom panel, the
 //! thumbnail strip, the window caption, pop-ups and the straightening dial.
 
+pub mod adjust;
 pub mod caption;
 pub mod crop;
 pub mod dial;

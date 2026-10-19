@@ -179,6 +179,30 @@ fn unpack(
     }
 }
 
+/// A newly encoded PNG (`fresh`) with the text chunks (prompts, workflow,
+/// parameters) and EXIF of the original carried over, orientation reset.
+pub fn with_text_of(original: &[u8], fresh: &[u8]) -> Result<Vec<u8>, EncodeError> {
+    let old = chunks(original)?;
+    let new = chunks(fresh)?;
+    let mut out = SIGNATURE.to_vec();
+    for c in new.iter().filter(|c| &c.kind != b"IEND") {
+        write_chunk(&mut out, &c.kind, c.data);
+    }
+    for c in &old {
+        match &c.kind {
+            b"tEXt" | b"zTXt" | b"iTXt" => write_chunk(&mut out, &c.kind, c.data),
+            b"eXIf" => {
+                let mut t = c.data.to_vec();
+                tiff::set_orientation(&mut t, 1);
+                write_chunk(&mut out, b"eXIf", &t);
+            }
+            _ => {}
+        }
+    }
+    write_chunk(&mut out, b"IEND", &[]);
+    Ok(out)
+}
+
 /// The `c` = (x, y, width, height) part of a `w` × `h` grid of `bpp`-byte
 /// units, clamped to the grid.
 pub(super) fn crop_units(
