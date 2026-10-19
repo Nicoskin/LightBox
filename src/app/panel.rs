@@ -9,6 +9,7 @@ use super::{App, Mode, PANEL_HOLD_MS, PANEL_TIMER, WM_APP_THUMB, post};
 use crate::cache;
 use crate::gfx::Icon;
 use crate::gfx::{ButtonView, CardView, CellView, PanelView, SegmentView, TextStyle, TextView};
+use crate::keymap::{self, Command, Key, Keymap};
 use crate::orientation::Orientation;
 use crate::settings::AlphaBg;
 use crate::ui::caption::CaptionButton;
@@ -397,7 +398,12 @@ pub fn zoom_label(scale: f64) -> String {
 
 impl App {
     fn card_layout(&self) -> settings_card::CardLayout {
-        settings_card::layout(self.viewport(), self.ui_scale(), self.card_tab)
+        settings_card::layout(
+            self.viewport(),
+            self.ui_scale(),
+            self.card_tab,
+            self.card_scroll,
+        )
     }
 
     pub(super) fn card_view(&self) -> Option<CardView> {
@@ -421,6 +427,33 @@ impl App {
                 });
             }
         }
+        // Keys page: the action names and a chip per key slot.
+        for r in &l.keys {
+            labels.push((r.label, r.cmd.label().to_string()));
+            let keys = self.keymap.keys(r.cmd);
+            for (k, rect) in r.chips.iter().enumerate() {
+                let capturing = self.card_capture == Some((r.cmd, k));
+                let text = if capturing {
+                    "Нажмите…".to_string()
+                } else {
+                    keys.get(k).map_or_else(String::new, |key| key.label())
+                };
+                segments.push(SegmentView {
+                    rect: *rect,
+                    text,
+                    selected: capturing,
+                    hot: self.card_hot == Some(settings_card::Hit::KeySlot(r.cmd, k)),
+                    first: true,
+                    last: true,
+                });
+            }
+        }
+        let keys_page = self.card_tab == settings_card::Tab::Keys;
+        let footer = if keys_page {
+            "Щелчок — назначить клавишу, правый щелчок — убрать".to_string()
+        } else {
+            settings_card::version_text()
+        };
         Some(CardView {
             rect: l.card,
             title: (l.title, "Настройки".to_string()),
@@ -438,52 +471,137 @@ impl App {
                 })
                 .collect(),
             labels,
-            footer: (l.footer, settings_card::version_text()),
+            footer: (l.footer, footer),
             segments,
+            clip: keys_page.then_some(l.list),
+            button: l.reset.map(|r| {
+                (
+                    r,
+                    "Сбросить все".to_string(),
+                    self.card_hot == Some(settings_card::Hit::ResetKeys),
+                )
+            }),
         })
     }
 
     pub(super) fn open_settings(&mut self) -> Result<()> {
         self.card_open = true;
         self.card_hot = None;
+        self.card_capture = None;
         self.render()
     }
 
     pub(super) fn close_settings(&mut self) -> Result<()> {
         self.card_open = false;
+        self.card_capture = None;
         self.render()
     }
 
     /// Input while the card is open: it takes all mouse and keyboard input.
     pub(super) fn card_input(&mut self, msg: u32, wparam: usize, p: (f64, f64)) -> Result<bool> {
-        use windows::Win32::UI::Input::KeyboardAndMouse::VK_ESCAPE;
+        use settings_card::Hit;
+        use windows::Win32::UI::Input::KeyboardAndMouse::{
+            GetKeyState, VK_CONTROL, VK_ESCAPE, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
+        };
         use windows::Win32::UI::WindowsAndMessaging::{
-            WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL,
+            WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+            WM_MOUSEWHEEL, WM_RBUTTONDOWN, WM_RBUTTONUP, WM_SYSKEYDOWN,
         };
         let l = self.card_layout();
+        let down = |vk: u16| {
+            // SAFETY: no preconditions.
+            unsafe { GetKeyState(i32::from(vk)) < 0 }
+        };
         match msg {
+            // Waiting for the new key of a shortcut.
+            WM_KEYDOWN | WM_SYSKEYDOWN if self.card_capture.is_some() => {
+                let vk = wparam as u16;
+                let modifier = [VK_SHIFT, VK_CONTROL, VK_MENU, VK_LWIN, VK_RWIN]
+                    .iter()
+                    .any(|m| m.0 == vk);
+                if modifier {
+                    return Ok(true);
+                }
+                if let Some((cmd, slot)) = self.card_capture.take()
+                    && vk != VK_ESCAPE.0
+                {
+                    let key = Key {
+                        vk,
+                        ctrl: down(VK_CONTROL.0),
+                        shift: down(VK_SHIFT.0),
+                        alt: down(VK_MENU.0),
+                    };
+                    self.set_shortcut(cmd, slot, Some(key));
+                }
+                self.render()?;
+            }
             WM_MOUSEMOVE => {
-                let hot = l.hit(p).filter(|h| *h != settings_card::Hit::Card);
+                let hot = l.hit(p).filter(|h| *h != Hit::Card);
                 if hot != self.card_hot {
                     self.card_hot = hot;
                     self.render()?;
                 }
             }
-            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_MOUSEWHEEL => {}
-            WM_LBUTTONUP => match l.hit(p) {
-                None | Some(settings_card::Hit::Close) => self.close_settings()?,
-                Some(settings_card::Hit::Tab(t)) => {
-                    self.card_tab = t;
+            WM_MOUSEWHEEL if self.card_tab == settings_card::Tab::Keys => {
+                let delta = f64::from((wparam >> 16) as u16 as i16);
+                let step = 3.0 * 30.0 * self.ui_scale();
+                self.card_scroll =
+                    (self.card_scroll - delta / 120.0 * step).clamp(0.0, l.max_scroll);
+                self.card_hot = None;
+                self.render()?;
+            }
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_MOUSEWHEEL | WM_RBUTTONDOWN => {}
+            WM_RBUTTONUP => {
+                if let Some(Hit::KeySlot(cmd, slot)) = l.hit(p) {
+                    self.card_capture = None;
+                    self.set_shortcut(cmd, slot, None);
                     self.render()?;
                 }
-                Some(settings_card::Hit::Choice(c)) => self.choose(c)?,
-                Some(settings_card::Hit::Card) => {}
+            }
+            WM_LBUTTONUP => match l.hit(p) {
+                None | Some(Hit::Close) => self.close_settings()?,
+                Some(Hit::Tab(t)) => {
+                    self.card_tab = t;
+                    self.card_scroll = 0.0;
+                    self.card_capture = None;
+                    self.render()?;
+                }
+                Some(Hit::Choice(c)) => self.choose(c)?,
+                Some(Hit::KeySlot(cmd, slot)) => {
+                    self.card_capture = Some((cmd, slot));
+                    self.render()?;
+                }
+                Some(Hit::ResetKeys) => {
+                    self.settings.keys.clear();
+                    self.settings.save();
+                    self.keymap = Keymap::new(&self.settings.keys);
+                    self.card_capture = None;
+                    self.notice("Клавиши — как по умолчанию");
+                    self.render()?;
+                }
+                Some(Hit::Card) => {}
             },
             WM_KEYDOWN if wparam == usize::from(VK_ESCAPE.0) => self.close_settings()?,
-            WM_KEYDOWN => {}
+            WM_KEYDOWN | WM_SYSKEYDOWN => {}
             _ => return Ok(false),
         }
         Ok(true)
+    }
+
+    /// Reassigns (or clears) one key slot of an action and saves; a key
+    /// taken from another action is reported.
+    fn set_shortcut(&mut self, cmd: Command, slot: usize, key: Option<Key>) {
+        let taken = key.and_then(|k| {
+            Command::ALL
+                .into_iter()
+                .find(|c| *c != cmd && self.keymap.keys(*c).contains(&k))
+        });
+        keymap::assign(&mut self.settings.keys, cmd, slot, key);
+        self.settings.save();
+        self.keymap = Keymap::new(&self.settings.keys);
+        if let (Some(k), Some(other)) = (key, taken) {
+            self.notice(&format!("{} снята с «{}»", k.label(), other.label()));
+        }
     }
 
     /// Applies a choice from the card, with its immediate effects.
@@ -514,6 +632,8 @@ impl App {
                 self.apply_resident();
             }
             Choice::CheckUpdates => self.check_updates(true),
+            Choice::Cache(mb) => self.cache.set_budget(mb as usize * (1 << 20)),
+            Choice::Preload(_) => self.schedule(),
             Choice::Autostart(on) => {
                 self.set_autostart(on);
                 if on && !self.settings.resident {

@@ -6,9 +6,6 @@ use std::sync::Arc;
 
 use crate::decode::DecodedImage;
 
-/// Default budget: ~1.5 GB of decoded pixels.
-pub const DEFAULT_BUDGET: usize = 1536 << 20;
-
 pub enum Slot {
     Image(Arc<DecodedImage>),
     Failed(Arc<str>),
@@ -128,6 +125,11 @@ impl Cache {
     }
 
     /// Drops an entry (the file changed on disk).
+    /// Changes the budget; the next insertion evicts down to it.
+    pub fn set_budget(&mut self, budget: usize) {
+        self.budget = budget;
+    }
+
     pub fn remove(&mut self, path: &Path) {
         if let Some(it) = self.items.remove(&key(path)) {
             self.used -= slot_bytes(&it.slot);

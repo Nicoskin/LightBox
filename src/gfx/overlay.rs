@@ -165,6 +165,10 @@ pub struct CardView {
     pub labels: Vec<(Rect, String)>,
     /// Dim line at the bottom (version).
     pub footer: (Rect, String),
+    /// Labels and segments are clipped to this (the scrolling keys page).
+    pub clip: Option<Rect>,
+    /// A button in the footer: rect, text, hot.
+    pub button: Option<(Rect, String, bool)>,
     /// Segments: rect, text, selected, hot, first / last in its row.
     pub segments: Vec<SegmentView>,
 }

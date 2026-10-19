@@ -2,6 +2,7 @@
 //! the viewer, with the version in the footer. Pure layout / hit-testing /
 //! applying; drawing is in the overlay.
 
+use crate::keymap::{Command, SLOTS};
 use crate::settings::{ImperfectJpeg, OpenMode, SaveMode, Settings, ThumbSize, Wheel};
 use crate::view::Rect;
 
@@ -28,6 +29,11 @@ pub enum Choice {
     ConfirmDelete(bool),
     /// `true`: choose an editor (the app opens a dialog); `false`: system.
     Editor(bool),
+    JpegQuality(u8),
+    /// Cache size, megabytes.
+    Cache(u32),
+    /// Photos decoded ahead.
+    Preload(u8),
 }
 
 /// Settings pages.
@@ -38,10 +44,18 @@ pub enum Tab {
     Interface,
     Files,
     System,
+    /// Keyboard shortcuts (a list of its own, see `KeyRowLayout`).
+    Keys,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::View, Tab::Interface, Tab::Files, Tab::System];
+    pub const ALL: [Tab; 5] = [
+        Tab::View,
+        Tab::Interface,
+        Tab::Files,
+        Tab::System,
+        Tab::Keys,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -49,6 +63,7 @@ impl Tab {
             Tab::Interface => "Интерфейс",
             Tab::Files => "Файлы",
             Tab::System => "Система",
+            Tab::Keys => "Клавиши",
         }
     }
 }
@@ -155,6 +170,14 @@ pub fn rows(tab: Tab) -> Vec<Row> {
                 "Редактор (E)",
                 vec![(Editor(false), "Системный"), (Editor(true), "Выбрать…")],
             ),
+            row(
+                "Качество JPEG",
+                vec![
+                    (JpegQuality(85), "85"),
+                    (JpegQuality(92), "92"),
+                    (JpegQuality(97), "97"),
+                ],
+            ),
         ],
         Tab::System => vec![
             row(
@@ -180,7 +203,24 @@ pub fn rows(tab: Tab) -> Vec<Row> {
                     (CheckUpdates, "Проверить"),
                 ],
             ),
+            row(
+                "Кэш изображений",
+                vec![
+                    (Cache(512), "0,5 ГБ"),
+                    (Cache(1536), "1,5 ГБ"),
+                    (Cache(4096), "4 ГБ"),
+                ],
+            ),
+            row(
+                "Предзагрузка",
+                vec![
+                    (Preload(1), "1 фото"),
+                    (Preload(3), "3 фото"),
+                    (Preload(6), "6 фото"),
+                ],
+            ),
         ],
+        Tab::Keys => vec![],
     }
 }
 
@@ -216,6 +256,9 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         Choice::CheckUpdates => false,
         Choice::ConfirmDelete(v) => s.confirm_delete == v,
         Choice::Editor(v) => s.editor.is_some() == v,
+        Choice::JpegQuality(v) => s.jpeg_quality == v,
+        Choice::Cache(v) => s.cache_mb == v,
+        Choice::Preload(v) => s.preload == v,
     }
 }
 
@@ -244,6 +287,9 @@ pub fn apply(s: &mut Settings, c: Choice) {
         Choice::Editor(false) => s.editor = None,
         // Chosen in a file dialog by the app.
         Choice::Editor(true) => {}
+        Choice::JpegQuality(v) => s.jpeg_quality = v,
+        Choice::Cache(v) => s.cache_mb = v,
+        Choice::Preload(v) => s.preload = v,
     }
 }
 
@@ -262,6 +308,20 @@ pub struct CardLayout {
     pub rows: Vec<RowLayout>,
     /// Version line at the bottom.
     pub footer: Rect,
+    /// Keys page: the scrolling list, its rows (already scrolled) and the
+    /// largest scroll offset.
+    pub list: Rect,
+    pub keys: Vec<KeyRowLayout>,
+    pub max_scroll: f64,
+    /// Keys page: "reset all" in the footer.
+    pub reset: Option<Rect>,
+}
+
+/// One action on the keys page: its name and a chip per key slot.
+pub struct KeyRowLayout {
+    pub cmd: Command,
+    pub label: Rect,
+    pub chips: [Rect; SLOTS],
 }
 
 /// Sizes in 96-DPI pixels.
@@ -274,6 +334,10 @@ const ROW_H: f64 = 46.0;
 const LABEL_W: f64 = 220.0;
 const PAD: f64 = 24.0;
 const FOOTER_H: f64 = 40.0;
+/// Keys page: row height, column gap, chip width.
+const KEY_ROW_H: f64 = 30.0;
+const KEY_COL_GAP: f64 = 20.0;
+const CHIP_W: f64 = 74.0;
 
 /// Rows on the longest page: every page gets this height, so the card does
 /// not jump when switching pages.
@@ -282,8 +346,8 @@ fn max_rows() -> usize {
 }
 
 /// The card for page `tab`, centred in a `vp` viewport at UI scale `s`
-/// (shrunk to fit).
-pub fn layout(vp: (f64, f64), s: f64, tab: Tab) -> CardLayout {
+/// (shrunk to fit); `scroll` moves the keys page.
+pub fn layout(vp: (f64, f64), s: f64, tab: Tab, scroll: f64) -> CardLayout {
     let page = rows(tab);
     let natural_h = TITLE_H + TABS_H + TABS_GAP + ROW_H * max_rows() as f64 + FOOTER_H;
     // Scale down on small windows so that the card always fits.
@@ -378,6 +442,25 @@ pub fn layout(vp: (f64, f64), s: f64, tab: Tab) -> CardLayout {
         x1: card.x1 - PAD * s,
         y1: card.y1,
     };
+    let list = Rect {
+        x0: x0 + PAD * s,
+        y0: rows_y,
+        x1: card.x1 - PAD * s,
+        y1: rows_y + ROW_H * max_rows() as f64 * s,
+    };
+    let (keys, max_scroll, reset) = if tab == Tab::Keys {
+        let (k, m) = key_rows(list, s, scroll);
+        let bw = 170.0 * s;
+        let reset = Rect {
+            x0: footer.x1 - bw,
+            y0: footer.y0 + 6.0 * s,
+            x1: footer.x1,
+            y1: footer.y1 - 8.0 * s,
+        };
+        (k, m, Some(reset))
+    } else {
+        (Vec::new(), 0.0, None)
+    };
     CardLayout {
         card,
         title,
@@ -385,7 +468,52 @@ pub fn layout(vp: (f64, f64), s: f64, tab: Tab) -> CardLayout {
         tabs,
         rows: out,
         footer,
+        list,
+        keys,
+        max_scroll,
+        reset,
     }
+}
+
+/// The actions in two columns (down the left, then the right), moved up
+/// by `scroll` (clamped); returns them and the largest scroll.
+fn key_rows(list: Rect, s: f64, scroll: f64) -> (Vec<KeyRowLayout>, f64) {
+    let per_col = Command::ALL.len().div_ceil(2);
+    let row_h = KEY_ROW_H * s;
+    let max_scroll = (per_col as f64 * row_h - list.height()).max(0.0);
+    let scroll = scroll.clamp(0.0, max_scroll);
+    let col_w = (list.width() - KEY_COL_GAP * s) / 2.0;
+    let chip_w = CHIP_W * s;
+    let rows = Command::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, c)| {
+            let (col, r) = (i / per_col, i % per_col);
+            let x0 = list.x0 + col as f64 * (col_w + KEY_COL_GAP * s);
+            let y0 = (list.y0 + r as f64 * row_h - scroll).round();
+            let x1 = x0 + col_w;
+            let chip = |k: usize| {
+                let right = x1 - (SLOTS - 1 - k) as f64 * (chip_w + 4.0 * s);
+                Rect {
+                    x0: (right - chip_w).round(),
+                    y0: y0 + 3.0 * s,
+                    x1: right.round(),
+                    y1: y0 + row_h - 3.0 * s,
+                }
+            };
+            KeyRowLayout {
+                cmd: *c,
+                label: Rect {
+                    x0,
+                    y0,
+                    x1: x1 - SLOTS as f64 * (chip_w + 4.0 * s),
+                    y1: y0 + row_h,
+                },
+                chips: std::array::from_fn(chip),
+            }
+        })
+        .collect();
+    (rows, max_scroll)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -393,6 +521,9 @@ pub enum Hit {
     Close,
     Tab(Tab),
     Choice(Choice),
+    /// Keys page: a key slot of an action.
+    KeySlot(Command, usize),
+    ResetKeys,
     /// Inside the card but on nothing clickable.
     Card,
 }
@@ -409,6 +540,16 @@ impl CardLayout {
             for (c, _, rect) in &r.choices {
                 if rect.contains(p) {
                     return Some(Hit::Choice(*c));
+                }
+            }
+        }
+        if self.reset.is_some_and(|r| r.contains(p)) {
+            return Some(Hit::ResetKeys);
+        }
+        if self.list.contains(p) {
+            for r in &self.keys {
+                if let Some(k) = r.chips.iter().position(|c| c.contains(p)) {
+                    return Some(Hit::KeySlot(r.cmd, k));
                 }
             }
         }
@@ -456,23 +597,50 @@ mod tests {
     fn layout_fits_and_hits() {
         for vp in [(2560.0, 1440.0), (800.0, 500.0)] {
             for tab in Tab::ALL {
-                let l = layout(vp, 1.5, tab);
+                let l = layout(vp, 1.5, tab, 0.0);
                 assert!(
                     l.card.x0 >= 0.0 && l.card.x1 <= vp.0 && l.card.y1 <= vp.1,
                     "{vp:?}"
                 );
-                let (c, _, r) = l.rows[1].choices[1];
-                assert_eq!(l.hit(r.center()), Some(Hit::Choice(c)));
+                if let Some(row) = l.rows.get(1) {
+                    let (c, _, r) = row.choices[1];
+                    assert_eq!(l.hit(r.center()), Some(Hit::Choice(c)));
+                }
                 assert_eq!(l.hit(l.close.center()), Some(Hit::Close));
                 assert_eq!(l.hit(l.tabs[2].1.center()), Some(Hit::Tab(Tab::Files)));
                 assert_eq!(l.hit((1.0, 1.0)), None);
                 // The last row stays above the footer.
-                assert!(l.rows.last().unwrap().label.y1 <= l.footer.y0 + 0.5);
+                if let Some(last) = l.rows.last() {
+                    assert!(last.label.y1 <= l.footer.y0 + 0.5);
+                }
             }
         }
         // Every page has the same card.
-        let a = layout((1920.0, 1080.0), 1.0, Tab::View).card;
-        let b = layout((1920.0, 1080.0), 1.0, Tab::Files).card;
+        let a = layout((1920.0, 1080.0), 1.0, Tab::View, 0.0).card;
+        let b = layout((1920.0, 1080.0), 1.0, Tab::Keys, 0.0).card;
         assert_eq!((a.y0, a.y1), (b.y0, b.y1));
+    }
+
+    #[test]
+    fn keys_page_scrolls_and_hits() {
+        let l = layout((1920.0, 1080.0), 1.0, Tab::Keys, 0.0);
+        assert_eq!(l.keys.len(), Command::ALL.len());
+        assert!(l.max_scroll > 0.0);
+        let first = &l.keys[0];
+        assert_eq!(
+            l.hit(first.chips[1].center()),
+            Some(Hit::KeySlot(first.cmd, 1))
+        );
+        assert_eq!(l.hit(l.reset.unwrap().center()), Some(Hit::ResetKeys));
+        // Scrolled to the end: the last action of the left column is in
+        // view, the first is out of the list and cannot be hit.
+        let end = layout((1920.0, 1080.0), 1.0, Tab::Keys, 1e9);
+        let per_col = Command::ALL.len().div_ceil(2);
+        let last = &end.keys[per_col - 1];
+        assert!(last.label.y1 <= end.list.y1 + 0.5);
+        assert_ne!(
+            end.hit(end.keys[0].chips[0].center()),
+            Some(Hit::KeySlot(Command::ALL[0], 0))
+        );
     }
 }

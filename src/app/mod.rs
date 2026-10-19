@@ -256,6 +256,12 @@ pub struct App {
     card_hot: Option<crate::ui::settings_card::Hit>,
     /// Settings page shown.
     card_tab: crate::ui::settings_card::Tab,
+    /// The shortcut being reassigned on the keys page (action, slot).
+    card_capture: Option<(crate::keymap::Command, usize)>,
+    /// Scroll offset of the keys page, pixels.
+    card_scroll: f64,
+    /// Keyboard shortcuts (rebuilt when reassigned).
+    keymap: crate::keymap::Keymap,
     /// Window kept above all others (windowed mode only).
     on_top: bool,
     /// Filmstrip scroll position (file index, fractional while gliding)
@@ -367,7 +373,8 @@ impl App {
             current: path,
             direction: 1,
             library_rx: None,
-            cache: Cache::new(cache::DEFAULT_BUDGET),
+            cache: Cache::new(settings.cache_mb as usize * (1 << 20)),
+            keymap: crate::keymap::Keymap::new(&settings.keys),
             loader: None,
             textures: Textures::default(),
             shown: None,
@@ -398,6 +405,8 @@ impl App {
             card_open: false,
             card_hot: None,
             card_tab: Default::default(),
+            card_capture: None,
+            card_scroll: 0.0,
             on_top: false,
             strip_pos: 0.0,
             strip_tick: None,

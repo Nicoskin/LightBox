@@ -20,6 +20,7 @@ mod gfx;
 mod inspect;
 mod install;
 mod ipc;
+mod keymap;
 mod library;
 mod loader;
 mod metadata;

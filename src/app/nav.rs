@@ -17,8 +17,7 @@ use crate::library::{self, SortMode};
 use crate::loader::{self, Loader, Quality, Request};
 use crate::win::window;
 
-/// Prefetch window: decoded ahead in the direction of travel / behind.
-const AHEAD: usize = 3;
+/// Prefetch window behind (ahead: `Settings::preload`).
 const BEHIND: usize = 1;
 
 impl App {
@@ -348,8 +347,9 @@ impl App {
         let n = self.files.len() as isize;
         let i = self.index as isize;
         let d = self.direction;
-        let mut out = Vec::with_capacity(AHEAD + BEHIND);
-        for k in 1..=AHEAD as isize {
+        let ahead = usize::from(self.settings.preload);
+        let mut out = Vec::with_capacity(ahead + BEHIND);
+        for k in 1..=ahead as isize {
             let j = i + d * k;
             if (0..n).contains(&j) {
                 out.push(self.files[j as usize].clone());

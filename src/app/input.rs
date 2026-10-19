@@ -5,10 +5,8 @@ use std::time::{Duration, Instant};
 use anyhow::Result;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetDoubleClickTime, GetKeyState, ReleaseCapture, SetCapture, VK_ADD, VK_CONTROL, VK_DELETE,
-    VK_END, VK_ESCAPE, VK_F1, VK_F5, VK_F9, VK_F11, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0,
-    VK_NUMPAD1, VK_OEM_4, VK_OEM_6, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
-    VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_SUBTRACT,
+    GetDoubleClickTime, GetKeyState, ReleaseCapture, SetCapture, VK_CONTROL, VK_ESCAPE, VK_F1,
+    VK_F9, VK_MENU, VK_SHIFT, VK_SPACE,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     PostMessageW, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CLOSE, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK,
@@ -19,6 +17,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use super::mode::lparam_point;
 use super::panel::Hot;
 use super::{Anim, AnimKind, App, Drag, Mode, ZOOM_ANIM};
+use crate::keymap::{Command, Key};
 use crate::orientation::Orientation;
 use crate::settings::Wheel;
 use crate::ui::toolbar::Action;
@@ -254,104 +253,124 @@ impl App {
     }
 
     fn on_key(&mut self, vk: u16) -> Result<Option<LRESULT>> {
-        let center = self.view_area().center();
         let ch = |c: u8| u16::from(c);
         let (ctrl, shift) = (key_down(VK_CONTROL.0), key_down(VK_SHIFT.0));
+        let alt = key_down(VK_MENU.0);
+        // Keys whose meaning depends on what is open come first.
         match vk {
-            k if ctrl && k == ch(b'S') => {
-                if shift {
-                    self.save_as()?;
-                } else if !self.selected.is_empty() {
-                    self.save_selection()?;
-                } else {
-                    self.save_current()?;
-                }
-            }
-            k if ctrl && k == ch(b'Z') => self.undo_save()?,
-            k if ctrl && k == ch(b'C') => {
-                if shift {
-                    self.copy_path()?;
-                } else {
-                    self.copy_image()?;
-                }
-            }
-            k if k == VK_DELETE.0 => self.delete_current()?,
-            // F1..F9 except F5 (slideshow): quick folders (Ctrl: the other
-            // action, Shift: assign).
-            k if (VK_F1.0..=VK_F9.0).contains(&k) && k != VK_F5.0 => {
-                let n = (k - VK_F1.0 + 1) as u8;
-                if shift {
-                    self.assign_folder(n)?;
-                } else {
-                    self.quick_folder(n, ctrl)?;
-                }
-            }
-            k if k == ch(b'E') => self.open_in_editor(),
             // Space closes a QuickLook preview (as in Explorer).
-            k if k == VK_SPACE.0 && self.quicklook => self.close_window(),
-            // Space: pause / play an animation; "," / ".": frame by frame.
+            k if k == VK_SPACE.0 && self.quicklook => {
+                self.close_window();
+                return Ok(Some(LRESULT(0)));
+            }
             // Comparing in one place: hold Space to see A.
-            k if k == VK_SPACE.0 && self.hold_a(true)? => {}
-            k if k == VK_SPACE.0 => {
-                self.toggle_playback()?;
-            }
-            k if k == VK_OEM_COMMA.0 => self.step_frame(-1)?,
-            k if k == VK_OEM_PERIOD.0 => self.step_frame(1)?,
-            k if k == VK_ESCAPE.0 && !self.selected.is_empty() => self.clear_selection()?,
-            k if k == VK_ESCAPE.0 && self.compare.is_some() => self.toggle_compare()?,
-            k if k == VK_ESCAPE.0 && self.slideshow => {
-                self.stop_slideshow();
-                self.render()?;
-            }
-            k if k == VK_ESCAPE.0 && self.menu_open => self.close_menu()?,
-            k if k == VK_ESCAPE.0 && self.info_state.open => self.toggle_info()?,
-            k if k == VK_ESCAPE.0 && self.dial_open => self.toggle_dial()?,
+            k if k == VK_SPACE.0 && self.hold_a(true)? => return Ok(Some(LRESULT(0))),
             k if k == VK_ESCAPE.0 => {
-                // SAFETY: posting to our own window.
-                unsafe { PostMessageW(Some(self.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0))? };
-            }
-            k if k == VK_RIGHT.0 || k == VK_NEXT.0 => self.step(1)?,
-            k if k == VK_LEFT.0 || k == VK_PRIOR.0 => self.step(-1)?,
-            k if k == VK_HOME.0 => self.go_to(0)?,
-            k if k == VK_END.0 => self.go_to(self.files.len().saturating_sub(1))?,
-            k if k == VK_ADD.0 || k == VK_OEM_PLUS.0 => self.zoom_by(ZOOM_STEP, center)?,
-            k if k == VK_SUBTRACT.0 || k == VK_OEM_MINUS.0 => {
-                self.zoom_by(1.0 / ZOOM_STEP, center)?;
+                self.on_escape()?;
+                return Ok(Some(LRESULT(0)));
             }
             // Shift+1..4: one channel; Shift+0: all channels.
-            k if shift && (ch(b'0')..=ch(b'4')).contains(&k) => {
+            k if shift && !ctrl && (ch(b'0')..=ch(b'4')).contains(&k) => {
                 self.set_channel(u32::from(k - ch(b'0')))?;
+                return Ok(Some(LRESULT(0)));
             }
-            k if k == ch(b'0') || k == VK_NUMPAD0.0 => self.zoom_fit()?,
-            k if k == ch(b'1') || k == VK_NUMPAD1.0 => self.zoom_to(1.0, center)?,
-            k if k == ch(b'Z') => self.toggle_zoom(center)?,
-            k if k == VK_RETURN.0 => self.go_fullscreen()?,
-            k if k == VK_F11.0 => self.toggle_mode()?,
-            k if k == ch(b'R') => self.rotate(Orientation::ROTATE_CW)?,
-            k if k == ch(b'L') => self.rotate(Orientation::ROTATE_CCW)?,
-            k if k == ch(b'M') => self.rotate(if key_down(VK_SHIFT.0) {
-                Orientation::FLIP_V
-            } else {
-                Orientation::FLIP_H
-            })?,
-            k if k == ch(b'F') => self.toggle_filmstrip()?,
-            k if k == ch(b'T') => self.run_action(Action::Checker)?,
-            k if k == ch(b'N') => self.run_action(Action::Smoothing)?,
-            k if k == ch(b'G') => self.toggle_grid()?,
-            k if k == ch(b'H') => self.toggle_histogram()?,
-            k if k == ch(b'S') || k == VK_F5.0 => self.toggle_slideshow()?,
-            k if k == ch(b'C') => self.toggle_compare()?,
-            k if k == ch(b'V') => self.toggle_compare_layout()?,
-            k if k == ch(b'I') => self.toggle_info()?,
-            // [ and ]: turn by 1° (Shift: 0.1°).
-            k if k == VK_OEM_4.0 || k == VK_OEM_6.0 => {
-                let step = if shift { 0.1 } else { 1.0 };
-                let step = if k == VK_OEM_4.0 { -step } else { step };
-                self.set_angle(((self.angle + step) * 10.0).round() / 10.0)?;
-            }
-            _ => return Ok(None),
+            _ => {}
         }
-        Ok(Some(LRESULT(0)))
+        let key = Key {
+            vk,
+            ctrl,
+            shift,
+            alt,
+        };
+        if let Some(c) = self.keymap.get(key) {
+            self.run_command(c)?;
+            return Ok(Some(LRESULT(0)));
+        }
+        // F1..F9 not bound to anything else: quick folders (Ctrl: the other
+        // action, Shift: assign).
+        if (VK_F1.0..=VK_F9.0).contains(&vk) {
+            let n = (vk - VK_F1.0 + 1) as u8;
+            if shift {
+                self.assign_folder(n)?;
+            } else {
+                self.quick_folder(n, ctrl)?;
+            }
+            return Ok(Some(LRESULT(0)));
+        }
+        Ok(None)
+    }
+
+    /// Esc closes what is open, from the top: selection, comparison,
+    /// slideshow, menus and panels, then the window.
+    fn on_escape(&mut self) -> Result<()> {
+        if !self.selected.is_empty() {
+            self.clear_selection()
+        } else if self.compare.is_some() {
+            self.toggle_compare()
+        } else if self.slideshow {
+            self.stop_slideshow();
+            self.render()
+        } else if self.menu_open {
+            self.close_menu()
+        } else if self.info_state.open {
+            self.toggle_info()
+        } else if self.dial_open {
+            self.toggle_dial()
+        } else {
+            // SAFETY: posting to our own window.
+            unsafe { PostMessageW(Some(self.hwnd), WM_CLOSE, WPARAM(0), LPARAM(0))? };
+            Ok(())
+        }
+    }
+
+    /// Runs a reassignable action (see `keymap`).
+    pub(super) fn run_command(&mut self, c: Command) -> Result<()> {
+        let center = self.view_area().center();
+        let tilt = |a: f64, step: f64| ((a + step) * 10.0).round() / 10.0;
+        match c {
+            Command::Prev => self.step(-1),
+            Command::Next => self.step(1),
+            Command::First => self.go_to(0),
+            Command::Last => self.go_to(self.files.len().saturating_sub(1)),
+            Command::ZoomIn => self.zoom_by(ZOOM_STEP, center),
+            Command::ZoomOut => self.zoom_by(1.0 / ZOOM_STEP, center),
+            Command::Fit => self.zoom_fit(),
+            Command::ActualSize => self.zoom_to(1.0, center),
+            Command::ToggleZoom => self.toggle_zoom(center),
+            Command::Fullscreen => self.go_fullscreen(),
+            Command::ToggleMode => self.toggle_mode(),
+            Command::RotateCw => self.rotate(Orientation::ROTATE_CW),
+            Command::RotateCcw => self.rotate(Orientation::ROTATE_CCW),
+            Command::FlipH => self.rotate(Orientation::FLIP_H),
+            Command::FlipV => self.rotate(Orientation::FLIP_V),
+            Command::TiltLeft => self.set_angle(tilt(self.angle, -1.0)),
+            Command::TiltRight => self.set_angle(tilt(self.angle, 1.0)),
+            Command::TiltLeftFine => self.set_angle(tilt(self.angle, -0.1)),
+            Command::TiltRightFine => self.set_angle(tilt(self.angle, 0.1)),
+            Command::Filmstrip => self.toggle_filmstrip(),
+            Command::Checker => self.run_action(Action::Checker),
+            Command::Smoothing => self.run_action(Action::Smoothing),
+            Command::Grid => self.toggle_grid(),
+            Command::Histogram => self.toggle_histogram(),
+            Command::Info => self.toggle_info(),
+            Command::Slideshow => self.toggle_slideshow(),
+            Command::Compare => self.toggle_compare(),
+            Command::CompareLayout => self.toggle_compare_layout(),
+            Command::PlayPause => self.toggle_playback().map(drop),
+            Command::FramePrev => self.step_frame(-1),
+            Command::FrameNext => self.step_frame(1),
+            Command::Editor => {
+                self.open_in_editor();
+                Ok(())
+            }
+            Command::Delete => self.delete_current(),
+            Command::Save if !self.selected.is_empty() => self.save_selection(),
+            Command::Save => self.save_current(),
+            Command::SaveAs => self.save_as(),
+            Command::Undo => self.undo_save(),
+            Command::CopyImage => self.copy_image(),
+            Command::CopyPath => self.copy_path(),
+        }
     }
 
     fn on_wheel(&mut self, delta: i32, p: (f64, f64)) -> Result<()> {

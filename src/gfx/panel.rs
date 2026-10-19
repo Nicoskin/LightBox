@@ -638,6 +638,19 @@ impl Overlay {
             self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.42));
             self.glyph_str(&c.footer.1, rf(c.footer.0), &self.formats.label);
 
+            if let Some((r, text, hot)) = &c.button {
+                let br = rf(*r);
+                let a = if *hot { 0.16 } else { 0.08 };
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, a));
+                self.ctx
+                    .FillRoundedRectangle(&rounded(br, 6.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.9));
+                self.glyph_str(text, br, &self.formats.option);
+            }
+            if let Some(clip) = c.clip {
+                self.ctx
+                    .PushAxisAlignedClip(&rf(clip), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            }
             for (rect, text) in &c.labels {
                 self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.78));
                 self.glyph_str(text, rf(*rect), &self.formats.label);
@@ -662,6 +675,9 @@ impl Overlay {
                     .FillRoundedRectangle(&rounded(inner, 6.0 * s), &self.brush);
                 self.brush.SetColor(&rgba(1.0, 1.0, 1.0, text_a));
                 self.glyph_str(&seg.text, inner, &self.formats.option);
+            }
+            if c.clip.is_some() {
+                self.ctx.PopAxisAlignedClip();
             }
         }
     }

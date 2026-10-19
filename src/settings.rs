@@ -172,8 +172,14 @@ pub struct Settings {
     pub check_updates: bool,
     /// When the last check ran (Unix seconds).
     pub last_update_check: u64,
-    /// F1..F9 folders (kept last: arrays of tables follow plain keys).
+    /// Decoded-image cache, megabytes.
+    pub cache_mb: u32,
+    /// Photos decoded ahead in the direction of travel.
+    pub preload: u8,
+    /// F1..F9 folders (tables follow the plain keys).
     pub quick_folders: Vec<QuickFolder>,
+    /// Reassigned shortcuts (see `keymap`): action → keys.
+    pub keys: crate::keymap::Overrides,
 }
 
 impl Default for Settings {
@@ -202,7 +208,10 @@ impl Default for Settings {
             editor: None,
             check_updates: true,
             last_update_check: 0,
+            cache_mb: 1536,
+            preload: 3,
             quick_folders: Vec::new(),
+            keys: Default::default(),
         }
     }
 }
@@ -230,6 +239,9 @@ impl Settings {
             Ok(mut s) => {
                 s.dim_percent = s.dim_percent.clamp(0, 100);
                 s.jpeg_quality = s.jpeg_quality.clamp(1, 100);
+                s.cache_mb = s.cache_mb.clamp(256, 16384);
+                s.preload = s.preload.clamp(1, 12);
+                crate::keymap::sanitize(&mut s.keys);
                 s
             }
             Err(e) => {
