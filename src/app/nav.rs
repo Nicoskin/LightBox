@@ -68,8 +68,8 @@ impl App {
         if self.current.as_os_str().is_empty() {
             return; // started in the tray without a file
         }
-        if self.preview() {
-            return; // a preview shows only its one file
+        if self.preview() || self.is_doc() {
+            return; // a preview or a document shows only its one file
         }
         let hwnd = self.hwnd.0 as isize;
         let current = self.current.clone();
@@ -260,6 +260,7 @@ impl App {
             }
             None => None,
         };
+        let pages = img.as_ref().map(|i| i.info.pages);
         let tex = match (self.textures.get(&key), img) {
             (Some(t), Some(img)) if t.full || !img.is_full() => t,
             (_, Some(img)) => {
@@ -270,6 +271,8 @@ impl App {
             (Some(t), None) => t,
             (None, None) => return Ok(false), // still decoding
         };
+        // Documents: the page being read rather than page 1.
+        let tex = self.doc_texture(&key, pages, tex);
         self.error = None;
 
         let same_file = self.shown.as_ref().is_some_and(|(k, _)| *k == key);

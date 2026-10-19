@@ -612,6 +612,106 @@ fn huge_png(path: &Path) {
     wr.finish().expect("finish");
 }
 
+/// Documents for the Space preview: a two-page PDF, text in UTF-8 and in
+/// Windows-1251, and a minimal DOCX (shown by Word's preview handler).
+fn documents(dir: &Path) {
+    println!("documents…");
+    // PDF: objects written in order, the cross-reference table from their
+    // byte offsets.
+    let pages = [
+        "Lightbox - PDF, page 1",
+        "Page 2: the second page of the sample",
+    ];
+    let mut objects: Vec<String> = vec![
+        "<< /Type /Catalog /Pages 2 0 R >>".into(),
+        format!(
+            "<< /Type /Pages /Kids [{}] /Count {} >>",
+            (0..pages.len())
+                .map(|i| format!("{} 0 R", 4 + i * 2))
+                .collect::<Vec<_>>()
+                .join(" "),
+            pages.len()
+        ),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".into(),
+    ];
+    for (i, text) in pages.iter().enumerate() {
+        let content = format!(
+            "BT /F1 28 Tf 72 720 Td ({text}) Tj ET\n\
+             0.2 0.4 0.9 rg 72 300 451 300 re f\n\
+             BT /F1 14 Tf 72 260 Td (A4, vector text and a filled rectangle) Tj ET"
+        );
+        objects.push(format!(
+            "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] \
+             /Resources << /Font << /F1 3 0 R >> >> /Contents {} 0 R >>",
+            5 + i * 2
+        ));
+        objects.push(format!(
+            "<< /Length {} >>\nstream\n{content}\nendstream",
+            content.len()
+        ));
+    }
+    let mut pdf = b"%PDF-1.4\n".to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objects.iter().enumerate() {
+        offsets.push(pdf.len());
+        pdf.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let xref = pdf.len();
+    pdf.extend_from_slice(
+        format!("xref\n0 {}\n0000000000 65535 f \n", objects.len() + 1).as_bytes(),
+    );
+    for o in offsets {
+        pdf.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    pdf.extend_from_slice(
+        format!(
+            "trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n",
+            objects.len() + 1
+        )
+        .as_bytes(),
+    );
+    fs::write(dir.join("sample.pdf"), pdf).expect("pdf");
+
+    let text: String = (1..=150)
+        .map(|i| format!("{i:3}. Строка текста для предпросмотра по пробелу — Lightbox.\n"))
+        .collect();
+    fs::write(dir.join("text_utf8.txt"), &text).expect("txt");
+    // The same in Windows-1251 (Cyrillic letters only map to one byte).
+    let cp1251: Vec<u8> = text
+        .chars()
+        .map(|c| match c {
+            'А'..='я' => (c as u32 - 'А' as u32 + 0xC0) as u8,
+            'Ё' => 0xA8,
+            'ё' => 0xB8,
+            '—' => 0x97,
+            c if c.is_ascii() => c as u8,
+            _ => b'?',
+        })
+        .collect();
+    fs::write(dir.join("text_cp1251.txt"), cp1251).expect("txt");
+    fs::write(
+        dir.join("code.rs"),
+        "// Code is shown in a monospaced font.\nfn main() {\n\tprintln!(\"Привет, Lightbox\");\n}\n",
+    )
+    .expect("code");
+
+    let document = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Lightbox — DOCX для предпросмотра</w:t></w:r></w:p></w:body></w:document>"#;
+    let types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
+    let rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/></Relationships>"#;
+    fs::write(
+        dir.join("sample.docx"),
+        zip_stored(&[
+            ("[Content_Types].xml", types.as_bytes()),
+            ("_rels/.rels", rels.as_bytes()),
+            ("word/document.xml", document.as_bytes()),
+        ]),
+    )
+    .expect("docx");
+}
+
 fn main() {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata");
     fs::create_dir_all(&dir).expect("mkdir testdata");
@@ -698,6 +798,7 @@ fn main() {
 
     formats(&dir);
     models(&dir);
+    documents(&dir);
     let huge = dir.join("huge_30000x20000.png");
     if !huge.exists() {
         println!("huge_30000x20000.png (takes a while)…");

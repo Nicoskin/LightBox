@@ -14,11 +14,13 @@ pub use alpha::{f16_to_straight_srgb8, unpremultiply};
 mod avif;
 mod generic;
 mod jpeg;
+pub mod pdf;
 mod png;
 mod psd;
 mod raw;
 pub mod scale;
 pub mod svg;
+pub mod text;
 mod wic;
 
 use std::path::Path;
@@ -58,6 +60,11 @@ fn ext_of(path: &Path) -> String {
 /// Everything the viewer opens: image [`EXTENSIONS`] and 3D models.
 pub fn all_extensions() -> impl Iterator<Item = &'static str> {
     EXTENSIONS.iter().chain(crate::model::EXTENSIONS).copied()
+}
+
+/// Documents shown on Space (PDF, text): not part of folder browsing.
+pub fn is_document(path: &Path) -> bool {
+    ext_of(path) == "pdf" || text::is_text(path)
 }
 
 /// `true` if the file name has one of the supported extensions (images or
@@ -137,6 +144,8 @@ pub struct SourceInfo {
     pub float: bool,
     /// Embedded colour profile, by name.
     pub icc: Option<String>,
+    /// Documents (PDF, text): pages; 0 for images.
+    pub pages: u32,
 }
 
 impl DecodedImage {
@@ -197,6 +206,8 @@ pub struct RawImage {
     pub source: (u32, u32),
     pub orientation: Orientation,
     pub icc: Option<Vec<u8>>,
+    /// Documents: the number of pages (0 for images).
+    pub pages: u32,
 }
 
 impl RawImage {
@@ -208,8 +219,14 @@ impl RawImage {
             source: (width, height),
             orientation: Orientation::IDENTITY,
             icc: None,
+            pages: 0,
         }
     }
+}
+
+/// A rendered document page or region, ready for upload.
+pub fn finish_page(raw: RawImage) -> Result<DecodedImage, DecodeError> {
+    finish(raw, true)
 }
 
 /// Colour management, premultiplication, storage format, overview.
@@ -227,6 +244,7 @@ fn finish(mut img: RawImage, premultiply: bool) -> Result<DecodedImage, DecodeEr
         },
         float: matches!(img.data, Raw::RgbaF32(_)),
         icc: img.icc.as_deref().and_then(color::profile_name),
+        pages: img.pages,
     };
     if let Some(icc) = &img.icc {
         color::to_srgb(icc, &mut img.data);
@@ -306,6 +324,12 @@ pub fn decode_data(
     let ext = ext_of(path);
     let mut img = finish(decode_raw(data, &ext, hint, Some(path))?, true)?;
     img.info.format = format_name(sniff(data, &ext));
+    if ext == "pdf" {
+        img.info.format = "PDF".into();
+    } else if text::is_text(path) {
+        let head = &data[..data.len().min(64 << 10)];
+        img.info.format = format!("Текст ({})", text::decode_bytes(head).1);
+    }
     Ok(img)
 }
 
@@ -360,6 +384,15 @@ fn decode_raw(
     hint: Option<SizeHint>,
     path: Option<&Path>,
 ) -> Result<RawImage, DecodeError> {
+    // Documents render from the file (pages are re-rendered from it too).
+    if let Some(p) = path {
+        if ext == "pdf" || data.starts_with(b"%PDF-") {
+            return pdf::decode(p, hint);
+        }
+        if text::is_text(p) {
+            return text::decode(p, hint);
+        }
+    }
     let format = sniff(data, ext);
     let result = match format {
         Format::Jpeg => jpeg::decode(data, hint),
@@ -572,11 +605,8 @@ mod tests {
             let model = [".stl", ".obj", ".mtl", ".3mf"]
                 .iter()
                 .any(|e| name.ends_with(e));
-            if name.starts_with("broken_")
-                || name.starts_with("huge")
-                || name.ends_with(".md")
-                || model
-            {
+            let viewable = is_supported(&path) || is_document(&path);
+            if name.starts_with("broken_") || name.starts_with("huge") || model || !viewable {
                 continue;
             }
             let img = decode_file(&path, Some(SCREEN)).unwrap_or_else(|e| panic!("{name}: {e}"));

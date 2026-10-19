@@ -8,6 +8,7 @@ mod animation;
 mod batch;
 mod chrome;
 mod compare;
+mod document;
 mod files;
 mod folder;
 mod input;
@@ -332,6 +333,8 @@ pub struct App {
     /// latest such rendering.
     vector: Option<vector::VectorWorker>,
     detail: Option<vector::Detail>,
+    /// The open document (PDF, text): page shown and page textures.
+    doc: Option<document::DocState>,
 
     // Input.
     drag: Option<Drag>,
@@ -445,6 +448,7 @@ impl App {
             update_rx: None,
             vector: None,
             detail: None,
+            doc: None,
             drag: None,
             wheel_accum: 0,
             fast_nav: false,

@@ -1,7 +1,8 @@
-//! Vector detail for SVG: when the view magnifies the base raster, the
-//! visible region (plus a margin for panning) is rendered again at screen
-//! resolution on a worker thread and drawn instead of the raster. Outlines
-//! therefore stay smooth at any zoom.
+//! Vector detail for SVG and documents (PDF, text): when the view magnifies
+//! the base raster, the visible region (plus a margin for panning) is
+//! rendered again at screen resolution on a worker thread and drawn instead
+//! of the raster. Outlines and letters therefore stay sharp at any zoom.
+//! The same worker renders whole document pages (see `document.rs`).
 
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -13,7 +14,7 @@ use anyhow::Result;
 
 use super::{App, WM_APP_VECTOR, post};
 use crate::cache;
-use crate::decode::{DecodedImage, svg};
+use crate::decode::{self, DecodeError, DecodedImage, SizeHint, pdf, svg, text};
 use crate::gfx::GpuImage;
 use crate::orientation::Orientation;
 use crate::view::{self, Quad, Rect, View};
@@ -28,15 +29,27 @@ const MAX_PIXELS: f64 = 24e6;
 struct Request {
     path: PathBuf,
     key: String,
-    /// Size of the base raster the region is expressed in.
-    raster: (u32, u32),
-    region: [f64; 4],
-    out: (u32, u32),
+    /// Document page (0 for drawings).
+    page: u32,
+    what: What,
+}
+
+enum What {
+    /// `region` of a `raster`-sized base rendering into `out` pixels.
+    Region {
+        raster: (u32, u32),
+        region: [f64; 4],
+        out: (u32, u32),
+    },
+    /// A whole document page, fitted to the screen box.
+    Page(SizeHint),
 }
 
 struct Done {
     key: String,
-    region: [f64; 4],
+    page: u32,
+    /// `None`: a whole page.
+    region: Option<[f64; 4]>,
     /// Output pixels per raster pixel.
     k: f64,
     image: Result<DecodedImage, String>,
@@ -45,24 +58,36 @@ struct Done {
 /// A rendered region of the current drawing, on the GPU.
 pub(super) struct Detail {
     key: String,
+    page: u32,
     region: [f64; 4],
     k: f64,
     tex: Rc<GpuImage>,
 }
 
-type Slot = Arc<(Mutex<Option<Request>>, Condvar)>;
+/// Pages first: a region request never replaces a waiting page.
+#[derive(Default)]
+struct Pending {
+    page: Option<Request>,
+    region: Option<Request>,
+}
 
-/// Renders one region at a time; a new request replaces a waiting one.
+type Slot = Arc<(Mutex<Pending>, Condvar)>;
+
+/// A region request: file key, page, region, output size.
+type RegionId = (String, u32, [f64; 4], (u32, u32));
+
+/// Renders one request at a time; a new request replaces a waiting one of
+/// its kind.
 pub(super) struct VectorWorker {
     slot: Slot,
     results: Receiver<Done>,
-    /// Last request sent (to avoid sending the same one twice).
-    last: Option<(String, [f64; 4], (u32, u32))>,
+    /// Last region request sent (to avoid sending the same one twice).
+    last: Option<RegionId>,
 }
 
 impl VectorWorker {
     fn new(hwnd: isize) -> Self {
-        let slot: Slot = Arc::new((Mutex::new(None), Condvar::new()));
+        let slot: Slot = Arc::new((Mutex::new(Pending::default()), Condvar::new()));
         let (tx, results) = channel();
         let worker_slot = Arc::clone(&slot);
         let spawned = thread::Builder::new()
@@ -79,22 +104,69 @@ impl VectorWorker {
     }
 
     fn request(&mut self, r: Request) {
-        let id = (r.key.clone(), r.region, r.out);
-        if self.last.as_ref() == Some(&id) {
-            return;
+        if let What::Region { region, out, .. } = &r.what {
+            let id = (r.key.clone(), r.page, *region, *out);
+            if self.last.as_ref() == Some(&id) {
+                return;
+            }
+            self.last = Some(id);
         }
-        self.last = Some(id);
         let (lock, wake) = &*self.slot;
         if let Ok(mut s) = lock.lock() {
-            *s = Some(r);
+            match r.what {
+                What::Page(_) => s.page = Some(r),
+                What::Region { .. } => s.region = Some(r),
+            }
             wake.notify_one();
         }
     }
 }
 
+/// An open drawing or document, kept between requests.
+enum Doc {
+    Svg(Box<svg::Tree>),
+    Pdf(pdf::Pdf),
+    Text(text::TextDoc),
+}
+
+impl Doc {
+    fn open(path: &Path) -> Result<Self, DecodeError> {
+        if text::is_text(path) {
+            return Ok(Doc::Text(text::TextDoc::open(path)?));
+        }
+        if decode::is_document(path) {
+            return Ok(Doc::Pdf(pdf::Pdf::open(path)?));
+        }
+        let data = std::fs::read(path)?;
+        Ok(Doc::Svg(Box::new(svg::parse(&data)?)))
+    }
+
+    fn render(
+        &self,
+        page: u32,
+        raster: (u32, u32),
+        region: [f64; 4],
+        out: (u32, u32),
+    ) -> Result<DecodedImage, DecodeError> {
+        match self {
+            Doc::Svg(t) => svg::render_region(t, raster, region, out),
+            Doc::Pdf(p) => decode::finish_page(p.render(page, raster, region, out)?),
+            Doc::Text(t) => decode::finish_page(t.render(page, raster, region, out)?),
+        }
+    }
+
+    /// Base raster of a page for a screen box.
+    fn raster(&self, page: u32, hint: SizeHint) -> Result<(u32, u32), DecodeError> {
+        match self {
+            Doc::Pdf(p) => p.raster_size(page, Some(hint)),
+            Doc::Text(_) => Ok(text::raster_size(Some(hint))),
+            Doc::Svg(_) => Err(DecodeError::Unsupported),
+        }
+    }
+}
+
 fn worker(slot: &Slot, tx: &Sender<Done>, hwnd: isize) {
-    // The parsed drawing is kept between requests (zooming re-renders it).
-    let mut tree: Option<(PathBuf, svg::Tree)> = None;
+    let mut doc: Option<(PathBuf, Doc)> = None;
     loop {
         let req = {
             let (lock, wake) = &**slot;
@@ -102,7 +174,7 @@ fn worker(slot: &Slot, tx: &Sender<Done>, hwnd: isize) {
                 return;
             };
             loop {
-                if let Some(r) = s.take() {
+                if let Some(r) = s.page.take().or_else(|| s.region.take()) {
                     break r;
                 }
                 s = match wake.wait(s) {
@@ -111,25 +183,52 @@ fn worker(slot: &Slot, tx: &Sender<Done>, hwnd: isize) {
                 };
             }
         };
-        if tree.as_ref().is_none_or(|(p, _)| *p != req.path) {
-            tree = std::fs::read(&req.path)
-                .map_err(|e| e.to_string())
-                .and_then(|d| svg::parse(&d).map_err(|e| e.to_string()))
-                .map(|t| (req.path.clone(), t))
+        if doc.as_ref().is_none_or(|(p, _)| *p != req.path) {
+            doc = Doc::open(&req.path)
+                .map(|d| (req.path.clone(), d))
                 .inspect_err(|e| tracing::warn!("vector: {e}"))
                 .ok();
         }
-        let image = match &tree {
-            Some((_, t)) => {
-                svg::render_region(t, req.raster, req.region, req.out).map_err(|e| e.to_string())
+        let done = match (&doc, req.what) {
+            (None, what) => Done {
+                key: req.key,
+                page: req.page,
+                region: match what {
+                    What::Region { region, .. } => Some(region),
+                    What::Page(_) => None,
+                },
+                k: 1.0,
+                image: Err("cannot read the file".into()),
+            },
+            (
+                Some((_, d)),
+                What::Region {
+                    raster,
+                    region,
+                    out,
+                },
+            ) => Done {
+                key: req.key,
+                page: req.page,
+                region: Some(region),
+                k: f64::from(out.0) / (region[2] - region[0]),
+                image: d
+                    .render(req.page, raster, region, out)
+                    .map_err(|e| e.to_string()),
+            },
+            (Some((_, d)), What::Page(hint)) => {
+                let image = d.raster(req.page, hint).and_then(|raster| {
+                    let whole = [0.0, 0.0, f64::from(raster.0), f64::from(raster.1)];
+                    d.render(req.page, raster, whole, raster)
+                });
+                Done {
+                    key: req.key,
+                    page: req.page,
+                    region: None,
+                    k: 1.0,
+                    image: image.map_err(|e| e.to_string()),
+                }
             }
-            None => Err("cannot read the drawing".into()),
-        };
-        let done = Done {
-            key: req.key,
-            region: req.region,
-            k: f64::from(req.out.0) / (req.region[2] - req.region[0]),
-            image,
         };
         if tx.send(done).is_err() {
             return;
@@ -138,11 +237,13 @@ fn worker(slot: &Slot, tx: &Sender<Done>, hwnd: isize) {
     }
 }
 
-/// SVG files get vector detail.
+/// SVG files and documents get vector detail.
 fn is_vector(path: &Path) -> bool {
-    path.extension()
-        .and_then(|e| e.to_str())
-        .is_some_and(|e| e.eq_ignore_ascii_case("svg") || e.eq_ignore_ascii_case("svgz"))
+    decode::is_document(path)
+        || path
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| e.eq_ignore_ascii_case("svg") || e.eq_ignore_ascii_case("svgz"))
 }
 
 /// Part of a `raster`-sized image (pixels) visible on screen, where the
@@ -164,6 +265,11 @@ fn covers(outer: [f64; 4], inner: [f64; 4]) -> bool {
 }
 
 impl App {
+    /// The document page shown (0 for drawings and pictures).
+    fn shown_page(&self) -> u32 {
+        self.doc().map_or(0, |d| d.page)
+    }
+
     /// Screen geometry of the current drawing for `view`: its rectangle,
     /// the visible clip and screen pixels per raster pixel. `None` if the
     /// image is not a drawing shown upright.
@@ -181,6 +287,26 @@ impl App {
         ))
     }
 
+    fn worker(&mut self) -> &mut VectorWorker {
+        let hwnd = self.hwnd.0 as isize;
+        self.vector.get_or_insert_with(|| VectorWorker::new(hwnd))
+    }
+
+    /// Asks the worker for a whole page of the current document.
+    pub(super) fn request_page(&mut self, page: u32) {
+        let (mw, mh) = self.monitor.size();
+        let r = Request {
+            path: self.current.clone(),
+            key: cache::key(&self.current),
+            page,
+            what: What::Page(SizeHint {
+                box_width: mw,
+                box_height: mh,
+            }),
+        };
+        self.worker().request(r);
+    }
+
     /// Asks for a sharper rendering of the visible region when the view
     /// magnifies the base raster (and none that is good enough exists).
     pub(super) fn update_detail(&mut self) {
@@ -188,7 +314,12 @@ impl App {
             self.detail = None;
             return;
         };
-        if self.detail.as_ref().is_some_and(|d| d.key != key) {
+        let page = self.shown_page();
+        if self
+            .detail
+            .as_ref()
+            .is_some_and(|d| d.key != key || d.page != page)
+        {
             self.detail = None;
         }
         let view = self.zoom_target();
@@ -234,41 +365,55 @@ impl App {
             region[1] + out.1 / kk,
         ];
         tracing::debug!("vector request {region:?} -> {out:?} (k {kk:.2})");
-        let hwnd = self.hwnd.0 as isize;
-        self.vector
-            .get_or_insert_with(|| VectorWorker::new(hwnd))
-            .request(Request {
-                path: self.current.clone(),
-                key,
+        let r = Request {
+            path: self.current.clone(),
+            key,
+            page,
+            what: What::Region {
                 raster: (img.width, img.height),
                 region,
                 out: (out.0 as u32, out.1 as u32),
-            });
+            },
+        };
+        self.worker().request(r);
     }
 
-    /// A rendered region arrived: upload it and redraw.
+    /// A rendered region or page arrived: upload it and redraw.
     pub(super) fn on_vector(&mut self) -> Result<()> {
+        let mut pages = Vec::new();
         let mut latest = None;
         while let Some(done) = self.vector.as_ref().and_then(|v| v.results.try_recv().ok()) {
-            latest = Some(done);
+            if done.region.is_none() {
+                pages.push(done);
+            } else {
+                latest = Some(done);
+            }
+        }
+        let current = cache::key(&self.current);
+        for done in pages {
+            match done.image {
+                Ok(img) if done.key == current => self.on_page(&done.key, done.page, img)?,
+                Ok(_) => {}
+                Err(e) => {
+                    tracing::warn!("page render: {e}");
+                    self.notice(&format!("Страница {} не отрисовалась", done.page + 1));
+                    self.render()?;
+                }
+            }
         }
         let Some(done) = latest else {
             return Ok(());
         };
-        tracing::debug!("vector done {:?} ok={}", done.region, done.image.is_ok());
-        if done.key != cache::key(&self.current) {
+        if done.key != current || done.page != self.shown_page() {
             return Ok(());
         }
-        let image = match done.image {
-            Ok(i) => i,
-            Err(e) => {
-                tracing::warn!("vector render: {e}");
-                return Ok(());
-            }
+        let (Some(region), Ok(image)) = (done.region, done.image) else {
+            return Ok(());
         };
         self.detail = Some(Detail {
             key: done.key,
-            region: done.region,
+            page: done.page,
+            region,
             k: done.k,
             tex: Rc::new(GpuImage::upload(&self.gpu, &image)?),
         });
@@ -288,7 +433,11 @@ impl App {
         img: &GpuImage,
         view: &View,
     ) -> Option<(Quad, u32)> {
-        let d = self.detail.as_ref().filter(|d| d.key == key)?;
+        let page = self.shown_page();
+        let d = self
+            .detail
+            .as_ref()
+            .filter(|d| d.key == key && d.page == page)?;
         let (rect, clip, k) = self.vector_geometry(key, img, view)?;
         if k <= 1.0 {
             return None;
@@ -338,5 +487,6 @@ mod tests {
         assert!(covers([0.0, 0.0, 1000.0, 500.0], r));
         assert!(!covers([150.0, 0.0, 1000.0, 500.0], r));
         assert!(is_vector(Path::new("a/B.SVG")) && !is_vector(Path::new("a.png")));
+        assert!(is_vector(Path::new("doc.pdf")) && is_vector(Path::new("notes.txt")));
     }
 }

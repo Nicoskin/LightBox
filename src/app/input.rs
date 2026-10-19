@@ -269,6 +269,10 @@ impl App {
                 self.on_escape()?;
                 return Ok(Some(LRESULT(0)));
             }
+            // ↑ / ↓ turn document pages.
+            0x26 | 0x28 if !ctrl && self.step_page(if vk == 0x26 { -1 } else { 1 })? => {
+                return Ok(Some(LRESULT(0)));
+            }
             // Shift+1..4: one channel; Shift+0: all channels.
             k if shift && !ctrl && (ch(b'0')..=ch(b'4')).contains(&k) => {
                 self.set_channel(u32::from(k - ch(b'0')))?;
@@ -328,6 +332,11 @@ impl App {
         let center = self.view_area().center();
         let tilt = |a: f64, step: f64| ((a + step) * 10.0).round() / 10.0;
         match c {
+            // In a document the same keys turn pages.
+            Command::Prev if self.step_page(-1)? => Ok(()),
+            Command::Next if self.step_page(1)? => Ok(()),
+            Command::First if self.go_page(0)? => Ok(()),
+            Command::Last if self.go_page(i64::from(u32::MAX))? => Ok(()),
             Command::Prev => self.step(-1),
             Command::Next => self.step(1),
             Command::First => self.go_to(0),
@@ -379,6 +388,11 @@ impl App {
             let step = if key_down(VK_SHIFT.0) { 0.1 } else { 1.0 };
             let a = self.angle + step * f64::from(delta.signum());
             return self.set_angle((a * 10.0).round() / 10.0);
+        }
+        // Documents: the wheel turns pages, Ctrl + wheel zooms.
+        if self.is_doc() && !key_down(VK_CONTROL.0) && !self.over_panel(p) {
+            self.step_page(if delta > 0 { -1 } else { 1 })?;
+            return Ok(());
         }
         // Shift + wheel in the difference view: the gain.
         if key_down(VK_SHIFT.0) && self.step_diff_gain(delta > 0)? {

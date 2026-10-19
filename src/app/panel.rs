@@ -275,7 +275,9 @@ impl App {
         if self.files.len() > 1 {
             parts.push(format!("{} из {}", self.index + 1, self.files.len()));
         }
-        if let Some((w, h)) = self.display() {
+        if let Some(p) = self.page_label() {
+            parts.push(p);
+        } else if let Some((w, h)) = self.display() {
             parts.push(format!("{w:.0} × {h:.0}"));
         }
         if self.edits.contains_key(&cache::key(&self.current)) {
