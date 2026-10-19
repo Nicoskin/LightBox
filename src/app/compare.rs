@@ -18,7 +18,12 @@ pub(super) enum CompareLayout {
     SideBySide,
     /// B in place; holding Space shows A.
     Overlay,
+    /// |B − A| per pixel, amplified (Shift + wheel).
+    Difference,
 }
+
+/// Difference gains Shift + wheel steps through.
+const GAINS: [f32; 5] = [1.0, 2.0, 4.0, 8.0, 16.0];
 
 pub(super) struct Compare {
     pub key: String,
@@ -27,6 +32,8 @@ pub(super) struct Compare {
     pub layout: CompareLayout,
     /// Space held (overlay: A shown instead of B).
     pub held: bool,
+    /// Difference layout: index into `GAINS`.
+    pub gain: usize,
 }
 
 /// Moves a layer by `dx` screen pixels (the right half).
@@ -116,6 +123,19 @@ impl App {
                     out.push(l);
                 }
             }
+            // A first (drawn off screen), then B against it.
+            CompareLayout::Difference => {
+                if let (Some(v), Some((key, img))) = (a_view, b) {
+                    let plain = |mut l: Layer<'a>| {
+                        l.background = crate::gfx::Background::None;
+                        l.grid = false;
+                        l.channel = 0;
+                        l
+                    };
+                    out.extend(self.layer(a_key, a_tex, &v, 1.0, None).map(plain));
+                    out.extend(self.layer(key, img, &self.view, 1.0, detail).map(plain));
+                }
+            }
             CompareLayout::Overlay => match (held, a_view, b) {
                 (true, Some(v), _) => out.extend(self.layer(a_key, a_tex, &v, 1.0, None)),
                 (_, _, Some((key, img))) => {
@@ -158,6 +178,14 @@ impl App {
                     label(right, self.viewport().0, format!("B · {b_name}")),
                 ]
             }
+            CompareLayout::Difference => vec![label(
+                0.0,
+                self.viewport().0,
+                format!(
+                    "Разность A − B · усиление ×{} (Shift + колесо)",
+                    GAINS[c.gain]
+                ),
+            )],
             CompareLayout::Overlay => {
                 let (text, w) = if c.held {
                     (format!("A · {}", c.name), self.viewport().0)
@@ -192,6 +220,7 @@ impl App {
             tex,
             layout: CompareLayout::SideBySide,
             held: false,
+            gain: 2,
         });
         let next = if self.index + 1 < self.files.len() {
             self.index + 1
@@ -204,14 +233,15 @@ impl App {
         self.refit_and_render()
     }
 
-    /// V: side by side ↔ one place (Space shows A).
+    /// V: side by side → one place (Space shows A) → difference.
     pub(super) fn toggle_compare_layout(&mut self) -> Result<()> {
         let Some(c) = &mut self.compare else {
             return Ok(());
         };
         c.layout = match c.layout {
             CompareLayout::SideBySide => CompareLayout::Overlay,
-            CompareLayout::Overlay => CompareLayout::SideBySide,
+            CompareLayout::Overlay => CompareLayout::Difference,
+            CompareLayout::Difference => CompareLayout::SideBySide,
         };
         self.refit_and_render()
     }
@@ -228,6 +258,33 @@ impl App {
             c.held = held;
             self.render()?;
         }
+        Ok(true)
+    }
+
+    /// The difference gain to draw with, while the difference is shown.
+    pub(super) fn diff_gain(&self) -> Option<f32> {
+        self.compare
+            .as_ref()
+            .filter(|c| c.layout == CompareLayout::Difference)
+            .map(|c| GAINS[c.gain])
+    }
+
+    /// Shift + wheel in the difference layout: more or less gain. Returns
+    /// `false` when not comparing that way.
+    pub(super) fn step_diff_gain(&mut self, up: bool) -> Result<bool> {
+        let Some(c) = self
+            .compare
+            .as_mut()
+            .filter(|c| c.layout == CompareLayout::Difference)
+        else {
+            return Ok(false);
+        };
+        c.gain = if up {
+            (c.gain + 1).min(GAINS.len() - 1)
+        } else {
+            c.gain.saturating_sub(1)
+        };
+        self.render()?;
         Ok(true)
     }
 

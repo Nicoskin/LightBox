@@ -24,10 +24,11 @@ cbuffer Params : register(b0)
     float4 tex_rect;       // content part of the texture: offset xy, size zw (tiles)
     float2 pivot;          // rotation centre, screen pixels
     uint   edges;          // sides of this part that are image edges: 1 left, 2 top, 4 right, 8 bottom
-    uint   pad;
+    float  diff_gain;      // PSDiff: amplification of |B - A|
 };
 
 Texture2D<float4> image : register(t0);
+Texture2D<float4> under : register(t1); // PSDiff: photo A, drawn off screen
 SamplerState      samp  : register(s0);
 
 struct VSOut
@@ -132,4 +133,14 @@ float4 PSMain(VSOut i) : SV_Target
         bg = float4(v, v, v, 1.0);
     }
     return grid_line(i.uv, c + bg * (1.0 - c.a)) * opacity * cover;
+}
+
+// Comparing: |B - A| at each screen pixel, both composited over black,
+// amplified. A was drawn into `under` with the same geometry rules.
+float4 PSDiff(VSOut i) : SV_Target
+{
+    float4 b = image.Sample(samp, i.uv);
+    float4 a = under.Load(int3(i.pos.xy, 0));
+    float3 d = saturate(abs(b.rgb - a.rgb) * diff_gain);
+    return float4(d, 1.0) * opacity;
 }

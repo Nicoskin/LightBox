@@ -13,6 +13,12 @@ use std::{env, fs};
 const SHADERS: &[(&str, &str, &str, &str)] = &[
     ("shaders/image.hlsl", "VSMain", "vs_5_0", "image_vs.cso"),
     ("shaders/image.hlsl", "PSMain", "ps_5_0", "image_ps.cso"),
+    (
+        "shaders/image.hlsl",
+        "PSDiff",
+        "ps_5_0",
+        "image_diff_ps.cso",
+    ),
     ("shaders/model.hlsl", "VSMain", "vs_5_0", "model_vs.cso"),
     ("shaders/model.hlsl", "PSMain", "ps_5_0", "model_ps.cso"),
 ];

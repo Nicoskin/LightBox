@@ -380,6 +380,10 @@ impl App {
             let a = self.angle + step * f64::from(delta.signum());
             return self.set_angle((a * 10.0).round() / 10.0);
         }
+        // Shift + wheel in the difference view: the gain.
+        if key_down(VK_SHIFT.0) && self.step_diff_gain(delta > 0)? {
+            return Ok(());
+        }
         // Over the panel the wheel browses; elsewhere it zooms (Ctrl swaps).
         let zooms = self.settings.wheel == Wheel::Zoom;
         let browse = self.over_panel(p) || zooms == key_down(VK_CONTROL.0);

@@ -840,6 +840,7 @@ impl App {
             layers: &layers,
             filter: self.filter(),
             model: model.as_ref().map(model3d::draw_desc),
+            diff: self.diff_gain(),
         };
         let ui = Ui {
             scale: self.ui_scale() as f32,

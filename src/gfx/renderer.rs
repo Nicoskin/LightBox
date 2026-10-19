@@ -1,20 +1,25 @@
 use anyhow::{Context as _, Result};
 use windows::Win32::Graphics::Direct3D::D3D11_PRIMITIVE_TOPOLOGY_TRIANGLESTRIP;
 use windows::Win32::Graphics::Direct3D11::{
-    D3D11_BIND_CONSTANT_BUFFER, D3D11_BLEND_DESC, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_ONE,
-    D3D11_BLEND_OP_ADD, D3D11_BUFFER_DESC, D3D11_COLOR_WRITE_ENABLE_ALL, D3D11_COMPARISON_NEVER,
-    D3D11_CULL_NONE, D3D11_FILL_SOLID, D3D11_FILTER, D3D11_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR,
+    D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_RENDER_TARGET, D3D11_BIND_SHADER_RESOURCE,
+    D3D11_BLEND_DESC, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_ONE, D3D11_BLEND_OP_ADD,
+    D3D11_BUFFER_DESC, D3D11_COLOR_WRITE_ENABLE_ALL, D3D11_COMPARISON_NEVER, D3D11_CULL_NONE,
+    D3D11_FILL_SOLID, D3D11_FILTER, D3D11_FILTER_MIN_LINEAR_MAG_POINT_MIP_LINEAR,
     D3D11_FILTER_MIN_MAG_MIP_LINEAR, D3D11_FILTER_MIN_MAG_MIP_POINT, D3D11_FLOAT32_MAX,
     D3D11_RASTERIZER_DESC, D3D11_RENDER_TARGET_BLEND_DESC, D3D11_SAMPLER_DESC,
-    D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT, ID3D11BlendState,
-    ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader, ID3D11RasterizerState,
-    ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView, ID3D11VertexShader,
+    D3D11_TEXTURE_ADDRESS_CLAMP, D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_VIEWPORT,
+    ID3D11BlendState, ID3D11Buffer, ID3D11Device, ID3D11DeviceContext, ID3D11PixelShader,
+    ID3D11RasterizerState, ID3D11RenderTargetView, ID3D11SamplerState, ID3D11ShaderResourceView,
+    ID3D11VertexShader,
 };
+
+use windows::Win32::Graphics::Dxgi::Common::{DXGI_FORMAT_B8G8R8A8_UNORM_SRGB, DXGI_SAMPLE_DESC};
 
 use crate::view::Quad;
 
 static VS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/image_vs.cso"));
 static PS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/image_ps.cso"));
+static PS_DIFF: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/image_diff_ps.cso"));
 
 /// Texture filtering mode.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -78,6 +83,8 @@ pub struct DrawParams<'a> {
     pub filter: Filter,
     /// A 3D model instead of image layers.
     pub model: Option<crate::gfx::ModelDraw<'a>>,
+    /// Comparing: draw |layers[1] − layers[0]| with this gain.
+    pub diff: Option<f32>,
 }
 
 /// Must match `cbuffer Params` in shaders/image.hlsl.
@@ -99,7 +106,7 @@ struct Constants {
     tex_rect: [f32; 4],
     pivot: [f32; 2],
     edges: u32,
-    pad: u32,
+    diff_gain: f32,
 }
 
 const _: () = assert!(std::mem::size_of::<Constants>().is_multiple_of(16));
@@ -107,6 +114,9 @@ const _: () = assert!(std::mem::size_of::<Constants>().is_multiple_of(16));
 pub struct Renderer {
     vs: ID3D11VertexShader,
     ps: ID3D11PixelShader,
+    ps_diff: ID3D11PixelShader,
+    /// Off-screen target for the difference: size, views.
+    under: Option<((u32, u32), ID3D11RenderTargetView, ID3D11ShaderResourceView)>,
     cbuffer: ID3D11Buffer,
     blend: ID3D11BlendState,
     raster: ID3D11RasterizerState,
@@ -123,6 +133,8 @@ impl Renderer {
             device.CreateVertexShader(VS, None, Some(&mut vs))?;
             let mut ps = None;
             device.CreatePixelShader(PS, None, Some(&mut ps))?;
+            let mut ps_diff = None;
+            device.CreatePixelShader(PS_DIFF, None, Some(&mut ps_diff))?;
 
             let cb_desc = D3D11_BUFFER_DESC {
                 ByteWidth: std::mem::size_of::<Constants>() as u32,
@@ -160,6 +172,8 @@ impl Renderer {
             Ok(Self {
                 vs: vs.context("vs")?,
                 ps: ps.context("ps")?,
+                ps_diff: ps_diff.context("ps_diff")?,
+                under: None,
                 cbuffer: cbuffer.context("cbuffer")?,
                 blend: blend.context("blend")?,
                 raster: raster.context("raster")?,
@@ -171,7 +185,7 @@ impl Renderer {
     }
 
     pub fn draw(
-        &self,
+        &mut self,
         ctx: &ID3D11DeviceContext,
         rtv: &ID3D11RenderTargetView,
         (w, h): (u32, u32),
@@ -208,45 +222,121 @@ impl Renderer {
             };
             ctx.PSSetSamplers(0, Some(&[Some(sampler.clone())]));
 
+            // Difference: A off screen, then B against it.
+            if let (Some(gain), [a, b]) = (p.diff, p.layers) {
+                let (target_rtv, target_srv) = self.under(ctx, w, h)?;
+                ctx.OMSetRenderTargets(Some(&[Some(target_rtv.clone())]), None);
+                ctx.ClearRenderTargetView(&target_rtv, &[0.0; 4]);
+                self.draw_layer(ctx, a, (w, h), 0.0);
+                ctx.OMSetRenderTargets(Some(&[Some(rtv.clone())]), None);
+                ctx.PSSetShaderResources(1, Some(&[Some(target_srv)]));
+                ctx.PSSetShader(&self.ps_diff, None);
+                self.draw_layer(ctx, b, (w, h), gain);
+                // Unbound, so that the texture can be a target next frame.
+                ctx.PSSetShaderResources(1, Some(&[None]));
+                ctx.PSSetShader(&self.ps, None);
+                return Ok(());
+            }
             for layer in p.layers {
-                let (bg_mode, bg_color, checker) = match layer.background {
-                    Background::None => (0, [0.0; 4], 8.0),
-                    Background::Checker(size) => (1, [0.0; 4], size.max(1.0)),
-                    Background::Solid(c) => (2, c, 8.0),
-                };
-                for part in &layer.parts {
-                    let constants = Constants {
-                        dst_rect: part.quad.dst,
-                        uv_rect: part.quad.uv,
-                        bg_color,
-                        viewport: [w as f32, h as f32],
-                        checker_origin: layer.origin,
-                        checker_size: checker,
-                        orientation: layer.orientation,
-                        bg_mode,
-                        opacity: layer.opacity.clamp(0.0, 1.0),
-                        tex_rect: part.tex,
-                        rot: layer.rotation,
-                        channel_mode: layer.channel,
-                        grid: u32::from(layer.grid),
-                        pivot: layer.pivot,
-                        edges: part.edges,
-                        ..Default::default()
-                    };
-                    ctx.UpdateSubresource(
-                        &self.cbuffer,
-                        0,
-                        None,
-                        std::ptr::from_ref(&constants).cast(),
-                        0,
-                        0,
-                    );
-                    ctx.PSSetShaderResources(0, Some(&[Some(part.srv.clone())]));
-                    ctx.Draw(4, 0);
-                }
+                self.draw_layer(ctx, layer, (w, h), 0.0);
             }
         }
         Ok(())
+    }
+
+    /// Draws every part of `layer` with the pixel shader that is set.
+    ///
+    /// # Safety
+    /// Called inside `draw`, with the pipeline set up.
+    unsafe fn draw_layer(
+        &self,
+        ctx: &ID3D11DeviceContext,
+        layer: &Layer,
+        (w, h): (u32, u32),
+        diff_gain: f32,
+    ) {
+        let (bg_mode, bg_color, checker) = match layer.background {
+            Background::None => (0, [0.0; 4], 8.0),
+            Background::Checker(size) => (1, [0.0; 4], size.max(1.0)),
+            Background::Solid(c) => (2, c, 8.0),
+        };
+        for part in &layer.parts {
+            let constants = Constants {
+                dst_rect: part.quad.dst,
+                uv_rect: part.quad.uv,
+                bg_color,
+                viewport: [w as f32, h as f32],
+                checker_origin: layer.origin,
+                checker_size: checker,
+                orientation: layer.orientation,
+                bg_mode,
+                opacity: layer.opacity.clamp(0.0, 1.0),
+                tex_rect: part.tex,
+                rot: layer.rotation,
+                channel_mode: layer.channel,
+                grid: u32::from(layer.grid),
+                pivot: layer.pivot,
+                edges: part.edges,
+                diff_gain,
+            };
+            // SAFETY: see the caller; the constants outlive the call.
+            unsafe {
+                ctx.UpdateSubresource(
+                    &self.cbuffer,
+                    0,
+                    None,
+                    std::ptr::from_ref(&constants).cast(),
+                    0,
+                    0,
+                );
+                ctx.PSSetShaderResources(0, Some(&[Some(part.srv.clone())]));
+                ctx.Draw(4, 0);
+            }
+        }
+    }
+
+    /// The off-screen target photo A is drawn into for the difference,
+    /// (re)created at the frame size.
+    fn under(
+        &mut self,
+        ctx: &ID3D11DeviceContext,
+        w: u32,
+        h: u32,
+    ) -> Result<(ID3D11RenderTargetView, ID3D11ShaderResourceView)> {
+        if let Some((size, rtv, srv)) = &self.under
+            && *size == (w, h)
+        {
+            return Ok((rtv.clone(), srv.clone()));
+        }
+        self.under = None;
+        // SAFETY: descriptors outlive the calls; the device is the context's.
+        unsafe {
+            let device = ctx.GetDevice()?;
+            let desc = D3D11_TEXTURE2D_DESC {
+                Width: w.max(1),
+                Height: h.max(1),
+                MipLevels: 1,
+                ArraySize: 1,
+                Format: DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
+                SampleDesc: DXGI_SAMPLE_DESC {
+                    Count: 1,
+                    Quality: 0,
+                },
+                Usage: D3D11_USAGE_DEFAULT,
+                BindFlags: (D3D11_BIND_RENDER_TARGET.0 | D3D11_BIND_SHADER_RESOURCE.0) as u32,
+                ..Default::default()
+            };
+            let mut tex = None;
+            device.CreateTexture2D(&desc, None, Some(&mut tex))?;
+            let tex = tex.context("difference texture")?;
+            let mut rtv = None;
+            device.CreateRenderTargetView(&tex, None, Some(&mut rtv))?;
+            let mut srv = None;
+            device.CreateShaderResourceView(&tex, None, Some(&mut srv))?;
+            let (rtv, srv) = (rtv.context("rtv")?, srv.context("srv")?);
+            self.under = Some(((w, h), rtv.clone(), srv.clone()));
+            Ok((rtv, srv))
+        }
     }
 }
 
