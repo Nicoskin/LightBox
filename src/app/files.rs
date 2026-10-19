@@ -274,7 +274,8 @@ impl App {
         let Some(i) = self.files.iter().position(|p| library::same_path(p, path)) else {
             return Ok(());
         };
-        self.files.remove(i);
+        let gone = self.files.remove(i);
+        self.all_files.retain(|p| *p != gone);
         if self.files.is_empty() {
             self.close_window();
             return Ok(());

@@ -477,6 +477,27 @@ impl Overlay {
                         None::<&ID2D1StrokeStyle>,
                     );
                 }
+                if c.stars > 0 {
+                    // Rating: a small "★4" in the bottom-left corner.
+                    let (w, h) = (24.0 * s, 13.0 * s);
+                    let badge = D2D_RECT_F {
+                        left: frame.left + 2.0 * s,
+                        top: frame.bottom - h - 2.0 * s,
+                        right: frame.left + 2.0 * s + w,
+                        bottom: frame.bottom - 2.0 * s,
+                    };
+                    self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.6 * o));
+                    self.ctx.FillRoundedRectangle(
+                        &D2D1_ROUNDED_RECT {
+                            rect: badge,
+                            radiusX: 3.0 * s,
+                            radiusY: 3.0 * s,
+                        },
+                        &self.brush,
+                    );
+                    self.brush.SetColor(&rgba(1.0, 0.82, 0.25, o));
+                    self.glyph_str(&format!("★{}", c.stars), badge, &self.formats.option);
+                }
                 if c.current || c.hot {
                     let a = if c.current { 0.95 } else { 0.5 };
                     self.brush.SetColor(&rgba(1.0, 1.0, 1.0, a * o));

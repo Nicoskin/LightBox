@@ -5,7 +5,7 @@ use std::time::Instant;
 use anyhow::Result;
 use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 
-use super::{App, Mode, PANEL_HOLD_MS, PANEL_TIMER, WM_APP_THUMB, post};
+use super::{App, Mode, PANEL_HOLD_MS, PANEL_TIMER, WM_APP_THUMB, post, stars};
 use crate::cache;
 use crate::gfx::Icon;
 use crate::gfx::{ButtonView, CardView, CellView, PanelView, SegmentView, TextStyle, TextView};
@@ -254,6 +254,7 @@ impl App {
                         .copied()
                         .unwrap_or(Orientation::IDENTITY),
                     hot: self.hot == Some(Hot::Cell(i)),
+                    stars: self.stars_of(i),
                 })
                 .collect()
         });
@@ -282,6 +283,12 @@ impl App {
         }
         if self.edits.contains_key(&cache::key(&self.current)) {
             parts.push("повёрнуто, не сохранено".into());
+        }
+        if let Some(s) = self.stars().filter(|s| *s > 0) {
+            parts.push(stars::stars_text(s));
+        }
+        if let Some(f) = self.filter_label() {
+            parts.push(f);
         }
         if let Some(f) = self.frame_label() {
             parts.push(f);

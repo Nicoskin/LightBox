@@ -153,6 +153,8 @@ pub struct CellView {
     pub selected: bool,
     /// The user's rotation of this photo (drawn turned).
     pub turn: crate::orientation::Orientation,
+    /// Star rating (0 = none).
+    pub stars: u8,
 }
 
 /// The settings card.

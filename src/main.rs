@@ -27,6 +27,7 @@ mod loader;
 mod metadata;
 mod model;
 mod orientation;
+mod rating;
 mod settings;
 mod ui;
 mod update;

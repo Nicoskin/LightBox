@@ -16,9 +16,11 @@ mod inspector;
 mod mode;
 mod model3d;
 mod nav;
+mod organize;
 mod panel;
 mod save;
 mod slideshow;
+mod stars;
 mod system;
 mod textures;
 mod tooltip;
@@ -137,6 +139,10 @@ const WM_APP_WATCH: u32 = WM_APP + 13;
 const WM_APP_UPDATE: u32 = WM_APP + 14;
 /// Posted by the model loader.
 const WM_APP_MODEL: u32 = WM_APP + 15;
+/// Posted by the rating threads (read or written stars).
+const WM_APP_RATING: u32 = WM_APP + 16;
+/// Posted by the batch worker (progress, done).
+const WM_APP_BATCH: u32 = WM_APP + 17;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -204,6 +210,16 @@ pub struct App {
 
     // Files.
     files: Vec<PathBuf>,
+    /// The whole folder (`files` may be narrowed by the rating filter).
+    all_files: Vec<PathBuf>,
+    /// Known star ratings by file key, the filter (minimum stars, 0 = all)
+    /// and the channel of the rating threads.
+    ratings: HashMap<String, u8>,
+    rating_filter: u8,
+    /// A running batch (rename / convert).
+    batch_rx: Option<organize::BatchRx>,
+    stars_tx: std::sync::mpsc::Sender<stars::RatingMsg>,
+    stars_rx: Receiver<stars::RatingMsg>,
     index: usize,
     current: PathBuf,
     /// +1 / -1: direction of the last step, for prefetching.
@@ -357,6 +373,7 @@ impl App {
         monitor: Monitor,
         settings: Settings,
     ) -> Result<Self> {
+        let (stars_tx, stars_rx) = std::sync::mpsc::channel();
         let Opening {
             path,
             decoded,
@@ -372,6 +389,12 @@ impl App {
             monitor,
             mode: Mode::Fullscreen,
             files: vec![path.clone()],
+            all_files: vec![path.clone()],
+            ratings: HashMap::new(),
+            rating_filter: 0,
+            batch_rx: None,
+            stars_tx,
+            stars_rx,
             index: 0,
             current: path,
             direction: 1,
@@ -1216,6 +1239,14 @@ impl App {
             }
             m if m == self.quit_msg && m != 0 => {
                 self.quit();
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_BATCH => {
+                self.on_batch()?;
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_RATING => {
+                self.on_rating()?;
                 Ok(Some(LRESULT(0)))
             }
             WM_APP_MODEL => {

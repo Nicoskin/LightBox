@@ -402,6 +402,7 @@ impl App {
         }
         self.current = std::path::PathBuf::new();
         self.files.clear();
+        self.all_files.clear();
         self.index = 0;
         self.shown = None;
         self.model = None;

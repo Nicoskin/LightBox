@@ -236,10 +236,19 @@ pub enum Command {
     Undo,
     CopyImage,
     CopyPath,
+    Rate0,
+    Rate1,
+    Rate2,
+    Rate3,
+    Rate4,
+    Rate5,
+    RatingFilter,
+    Tags,
+    Batch,
 }
 
 impl Command {
-    pub const ALL: [Command; 38] = {
+    pub const ALL: [Command; 47] = {
         use Command::*;
         [
             Prev,
@@ -280,6 +289,15 @@ impl Command {
             Undo,
             CopyImage,
             CopyPath,
+            Rate1,
+            Rate2,
+            Rate3,
+            Rate4,
+            Rate5,
+            Rate0,
+            RatingFilter,
+            Tags,
+            Batch,
         ]
     };
 
@@ -325,6 +343,15 @@ impl Command {
             Undo => "undo",
             CopyImage => "copy_image",
             CopyPath => "copy_path",
+            Rate0 => "rate_0",
+            Rate1 => "rate_1",
+            Rate2 => "rate_2",
+            Rate3 => "rate_3",
+            Rate4 => "rate_4",
+            Rate5 => "rate_5",
+            RatingFilter => "rating_filter",
+            Tags => "tags",
+            Batch => "batch",
         }
     }
 
@@ -370,6 +397,15 @@ impl Command {
             Undo => "Отменить сохранение",
             CopyImage => "Копировать изображение",
             CopyPath => "Копировать путь",
+            Rate0 => "Снять рейтинг",
+            Rate1 => "Рейтинг ★",
+            Rate2 => "Рейтинг ★★",
+            Rate3 => "Рейтинг ★★★",
+            Rate4 => "Рейтинг ★★★★",
+            Rate5 => "Рейтинг ★★★★★",
+            RatingFilter => "Фильтр по рейтингу",
+            Tags => "Метки",
+            Batch => "Пакетная обработка",
         }
     }
 
@@ -416,6 +452,15 @@ impl Command {
             Undo => vec![Key::ctrl(c(b'Z'))],
             CopyImage => vec![Key::ctrl(c(b'C'))],
             CopyPath => vec![Key::ctrl_shift(c(b'C'))],
+            Rate0 => vec![Key::ctrl(c(b'0'))],
+            Rate1 => vec![Key::ctrl(c(b'1'))],
+            Rate2 => vec![Key::ctrl(c(b'2'))],
+            Rate3 => vec![Key::ctrl(c(b'3'))],
+            Rate4 => vec![Key::ctrl(c(b'4'))],
+            Rate5 => vec![Key::ctrl(c(b'5'))],
+            RatingFilter => vec![Key::ctrl(c(b'F'))],
+            Tags => vec![Key::ctrl(c(b'K'))],
+            Batch => vec![Key::ctrl(c(b'B'))],
         }
     }
 

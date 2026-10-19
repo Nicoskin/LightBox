@@ -100,6 +100,7 @@ impl App {
             self.leave_current();
         }
         self.current = path.clone();
+        self.all_files = vec![path.clone()];
         self.files = vec![path];
         self.index = 0;
         self.strip_pos = 0.0;

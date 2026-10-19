@@ -106,6 +106,7 @@ impl App {
         // one now at its place.
         let gone = pos.is_none() && self.files.len() > 1;
         self.index = pos.unwrap_or_else(|| self.index.min(files.len() - 1));
+        self.all_files = files.clone();
         self.files = files;
         self.strip_pos = self.index as f64;
         if let Some(p) = self.files.get(self.index) {
@@ -117,6 +118,10 @@ impl App {
                 self.render()?;
             }
         }
+        if self.rating_filter > 0 {
+            self.apply_filter();
+        }
+        self.read_ratings();
         self.watch_folder();
         self.update_title();
         self.request_thumbs();

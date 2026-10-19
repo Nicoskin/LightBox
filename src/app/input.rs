@@ -379,6 +379,15 @@ impl App {
             Command::Undo => self.undo_save(),
             Command::CopyImage => self.copy_image(),
             Command::CopyPath => self.copy_path(),
+            Command::Rate0 => self.rate(0),
+            Command::Rate1 => self.rate(1),
+            Command::Rate2 => self.rate(2),
+            Command::Rate3 => self.rate(3),
+            Command::Rate4 => self.rate(4),
+            Command::Rate5 => self.rate(5),
+            Command::RatingFilter => self.cycle_rating_filter(),
+            Command::Tags => self.edit_tags(),
+            Command::Batch => self.batch_dialog(),
         }
     }
 
