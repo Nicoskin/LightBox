@@ -433,3 +433,14 @@ impl App {
         Ok(())
     }
 }
+
+impl App {
+    /// `--peek`: a Space preview in its own process (the viewer that got
+    /// the Space shows another photo): a window sized to the photo, no
+    /// folder, closed by Space or Esc.
+    pub fn start_peek(&mut self) -> Result<()> {
+        self.peek = true;
+        self.quicklook = true;
+        self.start_windowed()
+    }
+}

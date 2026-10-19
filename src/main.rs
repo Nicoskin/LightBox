@@ -71,6 +71,8 @@ struct Args {
     path: Option<PathBuf>,
     /// `--pinned l,t,r,b`: a standalone preview window at that rectangle.
     pinned: Option<windows::Win32::Foundation::RECT>,
+    /// `--peek`: a Space preview in its own window (see `App::start_peek`).
+    peek: bool,
     command: Command,
     bench: bool,
     /// Exit right after the first frame (for repeated timing runs).
@@ -82,6 +84,7 @@ impl Args {
         let mut args = Args {
             path: None,
             pinned: None,
+            peek: false,
             command: Command::View,
             bench: false,
             bench_exit: false,
@@ -106,6 +109,7 @@ impl Args {
                         });
                     }
                 }
+                Some("--peek") => args.peek = true,
                 Some("--bench") => args.bench = true,
                 Some("--bench-exit") => {
                     args.bench = true;
@@ -157,6 +161,7 @@ fn main() {
             // A running viewer takes the file: no second window.
             let handed = !args.bench
                 && args.pinned.is_none()
+                && !args.peek
                 && args.path.as_deref().is_some_and(|p| {
                     ipc::send_to_running(&std::path::absolute(p).unwrap_or(p.into()))
                 });
@@ -293,6 +298,9 @@ fn run(args: &Args) -> Result<()> {
     )?;
     if let Some(r) = args.pinned {
         app.start_pinned(r)?;
+    }
+    if args.peek {
+        app.start_peek()?;
     }
     app.first_frame()?;
     // Activation (focus, text services) is slow; do it once the photo is up.

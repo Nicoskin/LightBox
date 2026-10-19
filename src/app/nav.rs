@@ -48,7 +48,7 @@ impl App {
         }
         // A pinned preview is a plain window: the tray viewer stays the one
         // that receives files and Space.
-        if !self.pinned {
+        if !self.pinned && !self.peek {
             self.start_ipc();
             self.auto_update_check();
             if self.settings.resident {

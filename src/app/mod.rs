@@ -306,6 +306,11 @@ pub struct App {
     quicklook: bool,
     /// A pinned preview: a standalone window for one photo (`--pinned`).
     pinned: bool,
+    /// A Space preview in its own process (`--peek`): opened while the
+    /// viewer showed another photo; it closes rather than hides.
+    peek: bool,
+    /// The `--peek` process started for Space: the file's cache key and pid.
+    peek_child: Option<(String, u32)>,
     /// Tray icon present; a real exit is under way.
     tray: bool,
     quitting: bool,
@@ -421,6 +426,8 @@ impl App {
             pending_show: false,
             quicklook: false,
             pinned: false,
+            peek: false,
+            peek_child: None,
             tray: false,
             quitting: false,
             hook_thread: None,

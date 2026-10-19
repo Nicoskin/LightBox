@@ -164,29 +164,13 @@ impl App {
     /// launcher allowed it; for QuickLook the input of Explorer's thread is
     /// shared for the moment).
     pub(super) fn bring_to_front(&self) {
-        // SAFETY: own window; attaching input queues is undone right away.
-        unsafe {
-            if IsIconic(self.hwnd).as_bool() {
-                let _ = ShowWindow(self.hwnd, SW_RESTORE);
-            }
-            let fg = GetForegroundWindow();
-            let fg_thread = GetWindowThreadProcessId(fg, None);
-            let me = GetCurrentThreadId();
-            let attach = fg_thread != 0 && fg_thread != me;
-            if attach {
-                let _ = AttachThreadInput(me, fg_thread, true);
-            }
-            let _ = SetForegroundWindow(self.hwnd);
-            if attach {
-                let _ = AttachThreadInput(me, fg_thread, false);
-            }
-        }
+        bring_window_to_front(self.hwnd);
     }
 
     /// Close in resident mode: hide and free the images, keep the device.
     /// Returns `false` if the window should really close.
     pub(super) fn hide_instead_of_close(&mut self) -> bool {
-        if !self.settings.resident || self.quitting || self.pinned {
+        if !self.settings.resident || self.quitting || self.pinned || self.peek {
             return false;
         }
         self.leave_current();
@@ -345,13 +329,55 @@ impl App {
             resend_space(explorer);
             return Ok(());
         };
+        let key = cache::key(&path);
+        // A preview in its own process: Space again on its file closes it,
+        // another file replaces it.
+        if let Some((shown, pid)) = self.peek_child.take()
+            && let Some(w) = window_of_process(pid)
+        {
+            post_close(w);
+            if shown == key {
+                return Ok(());
+            }
+        }
         // Space again on the same file while it is shown: close.
-        if !self.hidden && self.quicklook && cache::key(&path) == cache::key(&self.current) {
+        if !self.hidden && self.quicklook && key == cache::key(&self.current) {
             self.close_window();
             return Ok(());
         }
+        // The viewer shows the user's own photo and folder: leave them be
+        // and preview beside it.
+        if !self.hidden && !self.preview() {
+            return self.peek(&path);
+        }
         self.quicklook = true;
         self.open_external(&path)
+    }
+
+    /// Starts `--peek` for `path` and brings its window to the front.
+    fn peek(&mut self, path: &Path) -> Result<()> {
+        use std::os::windows::io::AsRawHandle;
+        let exe = std::env::current_exe()?;
+        let child = std::process::Command::new(exe)
+            .arg("--peek")
+            .arg(path)
+            .spawn()?;
+        let pid = child.id();
+        // SAFETY: the child's handle is valid while `child` lives; its
+        // message loop starts right after its first frame is on screen.
+        unsafe {
+            let _ = windows::Win32::System::Threading::WaitForInputIdle(
+                windows::Win32::Foundation::HANDLE(child.as_raw_handle()),
+                2000,
+            );
+        }
+        // This process may take the foreground (Explorer's input is shared
+        // for the moment); a freshly started one may not.
+        if let Some(w) = window_of_process(pid) {
+            bring_window_to_front(w);
+        }
+        self.peek_child = Some((cache::key(path), pid));
+        Ok(())
     }
 }
 
@@ -626,4 +652,57 @@ impl App {
 pub fn quit_message() -> u32 {
     // SAFETY: registering a message name has no preconditions.
     unsafe { RegisterWindowMessageW(w!("Lightbox.Quit")) }
+}
+
+/// Activates `hwnd` (ours or a `--peek` child's), also when another
+/// program is in front: our thread borrows the input queue of the
+/// foreground window's thread for the moment.
+fn bring_window_to_front(hwnd: HWND) {
+    // SAFETY: plain window calls; attaching input queues is undone right
+    // away.
+    unsafe {
+        if IsIconic(hwnd).as_bool() {
+            let _ = ShowWindow(hwnd, SW_RESTORE);
+        }
+        let fg = GetForegroundWindow();
+        let fg_thread = GetWindowThreadProcessId(fg, None);
+        let me = GetCurrentThreadId();
+        let attach = fg_thread != 0 && fg_thread != me;
+        if attach {
+            let _ = AttachThreadInput(me, fg_thread, true);
+        }
+        let _ = SetForegroundWindow(hwnd);
+        if attach {
+            let _ = AttachThreadInput(me, fg_thread, false);
+        }
+    }
+}
+
+/// The viewer window of process `pid`, if it is still running.
+fn window_of_process(pid: u32) -> Option<HWND> {
+    let mut after = None;
+    // SAFETY: plain window enumeration by class name.
+    unsafe {
+        while let Ok(w) = FindWindowExW(None, after, w!("LightboxViewer"), None) {
+            after = Some(w);
+            let mut p = 0;
+            GetWindowThreadProcessId(w, Some(&mut p));
+            if p == pid {
+                return Some(w);
+            }
+        }
+    }
+    None
+}
+
+fn post_close(hwnd: HWND) {
+    // SAFETY: posting a close request to a window of ours.
+    unsafe {
+        let _ = PostMessageW(
+            Some(hwnd),
+            windows::Win32::UI::WindowsAndMessaging::WM_CLOSE,
+            WPARAM(0),
+            LPARAM(0),
+        );
+    }
 }
