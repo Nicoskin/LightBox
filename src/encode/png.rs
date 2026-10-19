@@ -581,8 +581,11 @@ mod tests {
         out
     }
 
-    /// (width, height, x, y, delay numerator, red channel) of every frame.
-    fn frames(data: &[u8]) -> ((u32, u32), Vec<(u32, u32, u32, u32, u16, Vec<u8>)>) {
+    /// Width, height, x, y, delay numerator and red channel of a frame.
+    type Frame = (u32, u32, u32, u32, u16, Vec<u8>);
+
+    /// The canvas size and every frame.
+    fn frames(data: &[u8]) -> ((u32, u32), Vec<Frame>) {
         let mut d = Decoder::new(Cursor::new(data));
         d.set_transformations(Transformations::IDENTITY);
         let mut r = d.read_info().unwrap();
