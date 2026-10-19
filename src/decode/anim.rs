@@ -214,18 +214,22 @@ fn over(d: &mut [u8], s: &[u8]) {
 /// Decoder output (after EXPAND | ALPHA) to RGBA8.
 fn to_rgba8(b: &[u8], color: png::ColorType, depth: png::BitDepth) -> Vec<u8> {
     let v8: Vec<u8> = if depth == png::BitDepth::Sixteen {
-        b.chunks_exact(2).map(|c| c[0]).collect()
+        b.as_chunks::<2>().0.iter().map(|c| c[0]).collect()
     } else {
         b.to_vec()
     };
     match color {
         png::ColorType::Rgba => v8,
         png::ColorType::GrayscaleAlpha => v8
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[0], p[0], p[1]])
             .collect(),
         png::ColorType::Rgb => v8
-            .chunks_exact(3)
+            .as_chunks::<3>()
+            .0
+            .iter()
             .flat_map(|p| [p[0], p[1], p[2], 255])
             .collect(),
         _ => v8.iter().flat_map(|&g| [g, g, g, 255]).collect(),
