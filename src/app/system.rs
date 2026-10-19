@@ -324,11 +324,17 @@ impl App {
     /// Space in Explorer (posted by the hook, which swallowed the key):
     /// preview the selected image, or give the key back.
     pub(super) fn on_quick_look(&mut self, explorer: HWND) -> Result<()> {
-        let selected = selected_file(explorer).filter(|p| decode::is_supported(p));
-        let Some(path) = selected else {
+        let Some(path) = selected_file(explorer) else {
             resend_space(explorer);
             return Ok(());
         };
+        let ours = decode::is_supported(&path) || decode::is_document(&path);
+        // Other types: the system preview (Word, Excel…) in its own window.
+        let system = !ours && crate::docview::handler_for(&path).is_some();
+        if !ours && !system {
+            resend_space(explorer);
+            return Ok(());
+        }
         let key = cache::key(&path);
         // A preview in its own process: Space again on its file closes it,
         // another file replaces it.
@@ -340,6 +346,9 @@ impl App {
                 return Ok(());
             }
         }
+        if system {
+            return self.peek(&path, "--document");
+        }
         // Space again on the same file while it is shown: close.
         if !self.hidden && self.quicklook && key == cache::key(&self.current) {
             self.close_window();
@@ -348,18 +357,19 @@ impl App {
         // The viewer shows the user's own photo and folder: leave them be
         // and preview beside it.
         if !self.hidden && !self.preview() {
-            return self.peek(&path);
+            return self.peek(&path, "--peek");
         }
         self.quicklook = true;
         self.open_external(&path)
     }
 
-    /// Starts `--peek` for `path` and brings its window to the front.
-    fn peek(&mut self, path: &Path) -> Result<()> {
+    /// Starts a preview process (`--peek` or `--document`) for `path` and
+    /// brings its window to the front.
+    fn peek(&mut self, path: &Path, mode: &str) -> Result<()> {
         use std::os::windows::io::AsRawHandle;
         let exe = std::env::current_exe()?;
         let child = std::process::Command::new(exe)
-            .arg("--peek")
+            .arg(mode)
             .arg(path)
             .spawn()?;
         let pid = child.id();
@@ -678,16 +688,17 @@ fn bring_window_to_front(hwnd: HWND) {
     }
 }
 
-/// The viewer window of process `pid`, if it is still running.
+/// The visible top-level window of process `pid` (a preview we started),
+/// if it is still running.
 fn window_of_process(pid: u32) -> Option<HWND> {
     let mut after = None;
-    // SAFETY: plain window enumeration by class name.
+    // SAFETY: plain enumeration of top-level windows.
     unsafe {
-        while let Ok(w) = FindWindowExW(None, after, w!("LightboxViewer"), None) {
+        while let Ok(w) = FindWindowExW(None, after, None, None) {
             after = Some(w);
             let mut p = 0;
             GetWindowThreadProcessId(w, Some(&mut p));
-            if p == pid {
+            if p == pid && IsWindowVisible(w).as_bool() {
                 return Some(w);
             }
         }

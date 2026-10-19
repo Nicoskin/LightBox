@@ -13,6 +13,7 @@ mod bench;
 mod cache;
 mod color;
 mod decode;
+mod docview;
 mod edit;
 mod encode;
 mod fileops;
@@ -66,6 +67,9 @@ enum Command {
     /// `--enable-tray`: tray mode, Space preview and start with Windows on
     /// (the installer's check box).
     EnableTray,
+    /// `--document <file>`: the system preview of a file Lightbox does not
+    /// draw (DOCX, XLSX…), see `docview`.
+    Document,
 }
 
 struct Args {
@@ -121,6 +125,7 @@ impl Args {
                 Some("--background") => args.command = Command::Background,
                 Some("--uninstall") => args.command = Command::Uninstall,
                 Some("--enable-tray") => args.command = Command::EnableTray,
+                Some("--document") => args.command = Command::Document,
                 _ if args.path.is_none() => args.path = Some(PathBuf::from(a)),
                 _ => {}
             }
@@ -139,6 +144,10 @@ fn main() {
         Command::Register => win::registry::register(&exe),
         Command::Unregister => win::registry::unregister(&exe),
         Command::Uninstall => install::uninstall(),
+        Command::Document => match &args.path {
+            Some(p) => docview::run(p),
+            None => Ok(()),
+        },
         Command::EnableTray => {
             let mut s = settings::Settings::load();
             s.resident = true;
