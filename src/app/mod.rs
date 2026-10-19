@@ -13,6 +13,7 @@ mod folder;
 mod input;
 mod inspector;
 mod mode;
+mod model3d;
 mod nav;
 mod panel;
 mod save;
@@ -133,6 +134,8 @@ const WM_APP_FRAMES: u32 = WM_APP + 12;
 const WM_APP_WATCH: u32 = WM_APP + 13;
 /// Posted by the update thread.
 const WM_APP_UPDATE: u32 = WM_APP + 14;
+/// Posted by the model loader.
+const WM_APP_MODEL: u32 = WM_APP + 15;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -271,6 +274,9 @@ pub struct App {
     frames_rx: Option<animation::FramesRx>,
     /// Photos picked in the filmstrip for batch rotation (cache keys).
     selected: HashSet<String>,
+    /// 3D model shown, and one being loaded.
+    model: Option<model3d::ModelState>,
+    model_rx: Option<model3d::ModelRx>,
     /// Comparing with photo A (C).
     compare: Option<compare::Compare>,
     /// Slideshow running.
@@ -393,6 +399,8 @@ impl App {
             playback: None,
             frames_rx: None,
             selected: HashSet::new(),
+            model: None,
+            model_rx: None,
             compare: None,
             slideshow: false,
             watcher: None,
@@ -496,6 +504,7 @@ impl App {
             _ => None,
         };
         let _old = std::mem::replace(&mut self.gpu, gpu);
+        self.reupload_model()?;
         self.shown = new_tex.map(|t| {
             let key = cache::key(&self.current);
             self.textures.insert(key.clone(), Rc::clone(&t));
@@ -579,7 +588,10 @@ impl App {
 
     /// Display size of the shown image.
     fn display(&self) -> Option<(f64, f64)> {
-        self.shown.as_ref().map(|(k, t)| self.display_of(k, t))
+        self.shown
+            .as_ref()
+            .map(|(k, t)| self.display_of(k, t))
+            .or_else(|| self.model_mode().then_some(model3d::MODEL_DISPLAY))
     }
 
     /// Screen area photos are fitted into; fullscreen keeps the bottom free
@@ -795,10 +807,12 @@ impl App {
             Mode::Windowed => WINDOW_BG,
             Mode::Fullscreen => [0.0, 0.0, 0.0, self.dim],
         };
+        let model = self.model_draw();
         let params = DrawParams {
             clear,
             layers: &layers,
             filter: self.filter(),
+            model: model.as_ref().map(model3d::draw_desc),
         };
         let ui = Ui {
             scale: self.ui_scale() as f32,
@@ -1165,6 +1179,10 @@ impl App {
             }
             m if m == self.quit_msg && m != 0 => {
                 self.quit();
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_MODEL => {
+                self.on_model()?;
                 Ok(Some(LRESULT(0)))
             }
             WM_APP_UPDATE => {

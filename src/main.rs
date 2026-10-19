@@ -23,6 +23,7 @@ mod ipc;
 mod library;
 mod loader;
 mod metadata;
+mod model;
 mod orientation;
 mod settings;
 mod ui;

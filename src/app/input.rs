@@ -364,6 +364,9 @@ impl App {
         let browse = self.over_panel(p) || zooms == key_down(VK_CONTROL.0);
         if !browse {
             let notches = f64::from(delta) / f64::from(WHEEL_DELTA);
+            if self.zoom_model(ZOOM_STEP.powf(notches))? {
+                return Ok(());
+            }
             let anchor = self.to_image_space(p);
             return self.zoom_by(ZOOM_STEP.powf(notches), anchor);
         }
@@ -409,6 +412,11 @@ impl App {
         };
         let (dx, dy) = (p.0 - drag.last.0, p.1 - drag.last.1);
         drag.last = p;
+        // A model turns (or moves with Shift / Ctrl) instead of panning.
+        if self.model_mode() {
+            self.drag_model(dx, dy, key_down(VK_SHIFT.0) || key_down(VK_CONTROL.0))?;
+            return Ok(());
+        }
         if self.shown.is_none() {
             return Ok(());
         }
@@ -428,6 +436,7 @@ impl App {
         let ip = self.to_image_space(p);
         if self.mode == Mode::Fullscreen
             && self.compare.is_none()
+            && !self.model_mode()
             && !self.over_panel(p)
             && !self.image_rect().is_some_and(|r| r.contains(ip))
         {
@@ -457,6 +466,9 @@ impl App {
     }
 
     pub(super) fn zoom_by(&mut self, factor: f64, anchor: (f64, f64)) -> Result<()> {
+        if self.zoom_model(factor)? {
+            return Ok(());
+        }
         let base = self.zoom_target();
         self.zoom_to_view(
             base.zoom_at(base.scale * factor, anchor, self.image_vp()),
@@ -470,6 +482,9 @@ impl App {
     }
 
     fn zoom_fit(&mut self) -> Result<()> {
+        if self.reset_model()? {
+            return Ok(());
+        }
         let Some(fit) = self.fit_view() else {
             return Ok(());
         };
@@ -481,6 +496,9 @@ impl App {
 
     /// Z / double click: "fit" ↔ 100 %.
     fn toggle_zoom(&mut self, anchor: (f64, f64)) -> Result<()> {
+        if self.reset_model()? {
+            return Ok(());
+        }
         let Some(fit) = self.fit_view() else {
             return Ok(());
         };

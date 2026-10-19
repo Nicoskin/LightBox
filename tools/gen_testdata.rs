@@ -449,6 +449,137 @@ fn formats(dir: &Path) {
     );
 }
 
+/// 3D samples: a binary STL torus, an OBJ cube with MTL colours and a 3MF
+/// with two coloured parts placed by the build.
+fn models(dir: &Path) {
+    use std::f32::consts::TAU;
+    // Torus, Z-up like printer files.
+    let (big, small, nu, nv) = (30.0f32, 10.0f32, 64, 32);
+    let p = |i: usize, j: usize| {
+        let (u, v) = (TAU * i as f32 / nu as f32, TAU * j as f32 / nv as f32);
+        let r = big + small * v.cos();
+        [r * u.cos(), r * u.sin(), small + small * v.sin()]
+    };
+    let mut tris = Vec::new();
+    for i in 0..nu {
+        for j in 0..nv {
+            let (a, b, c, d) = (p(i, j), p(i + 1, j), p(i + 1, j + 1), p(i, j + 1));
+            tris.push([a, b, c]);
+            tris.push([a, c, d]);
+        }
+    }
+    let mut stl = vec![0u8; 80];
+    stl.extend_from_slice(&(tris.len() as u32).to_le_bytes());
+    for t in &tris {
+        stl.extend_from_slice(&[0u8; 12]);
+        for v in t {
+            for c in v {
+                stl.extend_from_slice(&c.to_le_bytes());
+            }
+        }
+        stl.extend_from_slice(&[0, 0]);
+    }
+    fs::write(dir.join("torus.stl"), stl).expect("write");
+
+    // Cube with two materials, Y-up.
+    fs::write(
+        dir.join("cube.mtl"),
+        "newmtl orange\nKd 1.0 0.5 0.1\nnewmtl teal\nKd 0.1 0.6 0.6\n",
+    )
+    .expect("write");
+    fs::write(
+        dir.join("cube.obj"),
+        "mtllib cube.mtl\n\
+         v -1 -1 -1\nv 1 -1 -1\nv 1 1 -1\nv -1 1 -1\nv -1 -1 1\nv 1 -1 1\nv 1 1 1\nv -1 1 1\n\
+         usemtl orange\nf 5 6 7 8\nf 2 1 4 3\nf 4 8 7 3\n\
+         usemtl teal\nf 1 2 6 5\nf 2 3 7 6\nf 1 5 8 4\n",
+    )
+    .expect("write");
+
+    // 3MF: a red box and a blue box side by side.
+    let model = r##"<?xml version="1.0" encoding="UTF-8"?>
+<model unit="millimeter" xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">
+ <resources>
+  <basematerials id="9"><base name="red" displaycolor="#D03030"/><base name="blue" displaycolor="#3060D0"/></basematerials>
+  <object id="1" type="model" pid="9" pindex="0"><mesh>
+   <vertices>
+    <vertex x="0" y="0" z="0"/><vertex x="20" y="0" z="0"/><vertex x="20" y="20" z="0"/><vertex x="0" y="20" z="0"/>
+    <vertex x="0" y="0" z="20"/><vertex x="20" y="0" z="20"/><vertex x="20" y="20" z="20"/><vertex x="0" y="20" z="20"/>
+   </vertices>
+   <triangles>
+    <triangle v1="0" v2="2" v3="1"/><triangle v1="0" v2="3" v3="2"/><triangle v1="4" v2="5" v3="6"/><triangle v1="4" v2="6" v3="7"/>
+    <triangle v1="0" v2="1" v3="5"/><triangle v1="0" v2="5" v3="4"/><triangle v1="1" v2="2" v3="6"/><triangle v1="1" v2="6" v3="5"/>
+    <triangle v1="2" v2="3" v3="7"/><triangle v1="2" v2="7" v3="6"/><triangle v1="3" v2="0" v3="4"/><triangle v1="3" v2="4" v3="7"/>
+   </triangles>
+  </mesh></object>
+  <object id="2" type="model"><components><component objectid="1"/></components></object>
+ </resources>
+ <build>
+  <item objectid="1"/>
+  <item objectid="1" transform="1 0 0 0 1 0 0 0 1.5 30 0 0"/>
+ </build>
+</model>"##;
+    // The second box is blue: a copy of the mesh object with the other
+    // material (a component keeps the material of the mesh it uses).
+    let start = model.find(r#"<object id="1""#).expect("object 1");
+    let end = start + model[start..].find("</object>").expect("end") + "</object>".len();
+    let blue = model[start..end]
+        .replacen(r#"id="1""#, r#"id="3""#, 1)
+        .replacen(r#"pindex="0""#, r#"pindex="1""#, 1);
+    let model = model
+        .replace(
+            r#"<item objectid="1" transform"#,
+            r#"<item objectid="3" transform"#,
+        )
+        .replace("</resources>", &format!("{blue}\n </resources>"));
+    fs::write(
+        dir.join("boxes.3mf"),
+        zip_stored(&[("3D/3dmodel.model", model.as_bytes())]),
+    )
+    .expect("write");
+}
+
+/// Minimal ZIP writer (stored entries) for the 3MF sample.
+fn zip_stored(files: &[(&str, &[u8])]) -> Vec<u8> {
+    let mut out = Vec::new();
+    let mut central = Vec::new();
+    for (name, data) in files {
+        let off = out.len() as u32;
+        let crc = crc32fast::hash(data);
+        let common = |h: &mut Vec<u8>| {
+            h.extend_from_slice(&20u16.to_le_bytes());
+            h.extend_from_slice(&0u16.to_le_bytes());
+            h.extend_from_slice(&0u16.to_le_bytes());
+            h.extend_from_slice(&0u32.to_le_bytes());
+            h.extend_from_slice(&crc.to_le_bytes());
+            h.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            h.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            h.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            h.extend_from_slice(&0u16.to_le_bytes());
+        };
+        out.extend_from_slice(&0x0403_4b50u32.to_le_bytes());
+        common(&mut out);
+        out.extend_from_slice(name.as_bytes());
+        out.extend_from_slice(data);
+        central.extend_from_slice(&0x0201_4b50u32.to_le_bytes());
+        central.extend_from_slice(&20u16.to_le_bytes());
+        common(&mut central);
+        central.extend_from_slice(&[0; 6]);
+        central.extend_from_slice(&0u32.to_le_bytes());
+        central.extend_from_slice(&off.to_le_bytes());
+        central.extend_from_slice(name.as_bytes());
+    }
+    let cd = out.len() as u32;
+    out.extend_from_slice(&central);
+    out.extend_from_slice(b"PK\x05\x06\0\0\0\0");
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(files.len() as u16).to_le_bytes());
+    out.extend_from_slice(&(central.len() as u32).to_le_bytes());
+    out.extend_from_slice(&cd.to_le_bytes());
+    out.extend_from_slice(&[0, 0]);
+    out
+}
+
 /// 30 000 × 20 000 PNG for tiling, streamed row by row.
 fn huge_png(path: &Path) {
     let (w, h) = (30_000u32, 20_000u32);
@@ -566,6 +697,7 @@ fn main() {
     .expect("copy");
 
     formats(&dir);
+    models(&dir);
     let huge = dir.join("huge_30000x20000.png");
     if !huge.exists() {
         println!("huge_30000x20000.png (takes a while)…");

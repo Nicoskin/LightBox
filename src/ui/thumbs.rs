@@ -138,7 +138,12 @@ fn worker(shared: &Shared, tx: &Sender<(String, Option<Thumb>)>, size: u32, noti
                 };
             }
         };
-        let thumb = shell_thumbnail(&path, size).or_else(|| decoded_thumbnail(&path, size));
+        // Models: our own rendering (the shell has no thumbnails for most).
+        let thumb = if crate::model::is_model(&path) {
+            model_thumbnail(&path, size)
+        } else {
+            shell_thumbnail(&path, size).or_else(|| decoded_thumbnail(&path, size))
+        };
         if tx.send((cache::key(&path), thumb)).is_err() {
             return;
         }
@@ -224,6 +229,23 @@ unsafe fn bitmap_pixels(hbmp: HBITMAP) -> Option<Thumb> {
         id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
         width: w,
         height: h,
+        bgra,
+    })
+}
+
+/// A 3D model rendered on the CPU.
+fn model_thumbnail(path: &Path, size: u32) -> Option<Thumb> {
+    let mesh = crate::model::load(path).ok()?;
+    let mut bgra = crate::model::raster::thumbnail(&mesh, size);
+    for p in bgra.as_chunks_mut::<4>().0 {
+        let a = u32::from(p[3]);
+        let pm = |c: u8| ((u32::from(c) * a + 127) / 255) as u8;
+        *p = [pm(p[2]), pm(p[1]), pm(p[0]), p[3]];
+    }
+    Some(Thumb {
+        id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+        width: size,
+        height: size,
         bgra,
     })
 }

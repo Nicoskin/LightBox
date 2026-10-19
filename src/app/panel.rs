@@ -277,11 +277,23 @@ impl App {
         if let Some(f) = self.frame_label() {
             parts.push(f);
         }
+        if let Some(m) = self.model_details() {
+            parts.push(m);
+        }
         parts.join("  ·  ")
     }
 
     /// Rotates / mirrors the current photo on screen (saved to the file in M2).
     pub(super) fn rotate(&mut self, op: Orientation) -> Result<()> {
+        let turn = match op {
+            Orientation::ROTATE_CW => 45.0,
+            Orientation::ROTATE_CCW => -45.0,
+            _ => 0.0,
+        };
+        if self.model_mode() {
+            self.turn_model(turn)?;
+            return Ok(());
+        }
         if !self.selected.is_empty() {
             return self.rotate_selection(op);
         }

@@ -44,6 +44,8 @@ pub struct Gpu {
     pub context: ID3D11DeviceContext,
     pub swap_chain: IDXGISwapChain1,
     renderer: Renderer,
+    /// 3D models, created on first use.
+    model: Option<super::model::ModelRenderer>,
     /// Direct2D overlay, created on first use.
     overlay: Option<Overlay>,
     adapter: Adapter,
@@ -80,6 +82,7 @@ impl Gpu {
             context,
             swap_chain,
             renderer,
+            model: None,
             overlay: None,
             adapter,
             rtv: None,
@@ -127,6 +130,22 @@ impl Gpu {
     pub fn draw(&mut self, p: &DrawParams, ui: &Ui) -> Result<()> {
         let rtv = self.rtv.as_ref().context("no render target")?;
         self.renderer.draw(&self.context, rtv, self.size, p)?;
+        if let Some(m) = &p.model {
+            if self.model.is_none() {
+                self.model = Some(super::model::ModelRenderer::new(&self.device)?);
+            }
+            // SAFETY: buffer 0 of our own swap chain.
+            let back: ID3D11Texture2D = unsafe { self.swap_chain.GetBuffer(0)? };
+            if let Some(r) = &mut self.model {
+                r.draw(&self.device, &self.context, &back, self.size, p.clear, m)?;
+            }
+            // The image renderer binds the back buffer again next frame.
+            // SAFETY: valid context.
+            unsafe {
+                self.context
+                    .OMSetRenderTargets(Some(&[Some(rtv.clone())]), None)
+            };
+        }
         if !ui.is_empty() {
             if self.overlay.is_none() {
                 self.overlay = Some(Overlay::new(&self.device, ui.scale)?);

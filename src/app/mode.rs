@@ -239,9 +239,10 @@ impl App {
     fn drag_moves_window(&self) -> bool {
         // SAFETY: no preconditions.
         let alt = unsafe { GetKeyState(i32::from(VK_MENU.0)) } < 0;
-        alt || self
-            .fit_view()
-            .is_none_or(|fit| self.view.scale <= fit.scale * 1.0001)
+        alt || (!self.model_mode()
+            && self
+                .fit_view()
+                .is_none_or(|fit| self.view.scale <= fit.scale * 1.0001))
     }
 
     fn hit_test(&self, lparam: LPARAM) -> LRESULT {

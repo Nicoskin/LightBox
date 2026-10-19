@@ -76,6 +76,8 @@ pub struct DrawParams<'a> {
     /// Drawn back to front.
     pub layers: &'a [Layer<'a>],
     pub filter: Filter,
+    /// A 3D model instead of image layers.
+    pub model: Option<crate::gfx::ModelDraw<'a>>,
 }
 
 /// Must match `cbuffer Params` in shaders/image.hlsl.

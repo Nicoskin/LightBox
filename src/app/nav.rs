@@ -240,6 +240,12 @@ impl App {
     /// decoded image); otherwise keeps showing what is there while it
     /// decodes. Returns `true` if a redraw is needed.
     pub(super) fn show_current(&mut self) -> Result<bool> {
+        if self.model_mode() {
+            return self.show_model();
+        }
+        // Leaving a model: free its GPU mesh.
+        self.model = None;
+        self.model_rx = None;
         let key = cache::key(&self.current);
         let img = match self.cache.get(&self.current) {
             Some(Slot::Image(img)) => Some(Arc::clone(img)),
@@ -403,6 +409,8 @@ impl App {
                 });
             }
         }
+        // 3D models are loaded by their own path (see model3d).
+        wanted.retain(|r| !crate::model::is_model(&r.path));
         loader.request(wanted);
         self.update_detail();
     }

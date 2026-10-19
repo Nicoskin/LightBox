@@ -8,6 +8,7 @@ mod chrome;
 mod compositor;
 mod device;
 mod inspector;
+mod model;
 mod overlay;
 mod panel;
 mod renderer;
@@ -15,6 +16,7 @@ mod texture;
 
 pub use compositor::Compositor;
 pub use device::{Adapter, Gpu};
+pub use model::{GpuMesh, ModelDraw};
 pub use overlay::{
     ButtonView, CaptionButtonView, CaptionView, CardView, CellView, DialView, HistogramView, Icon,
     InfoView, MenuItemView, MenuView, PanelView, SegmentView, TextStyle, TextView, Thumb, Ui,

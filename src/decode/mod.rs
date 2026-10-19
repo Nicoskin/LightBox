@@ -57,7 +57,8 @@ fn ext_of(path: &Path) -> String {
 
 /// `true` if the file name has one of the supported [`EXTENSIONS`].
 pub fn is_supported(path: &Path) -> bool {
-    EXTENSIONS.contains(&ext_of(path).as_str())
+    let ext = ext_of(path);
+    EXTENSIONS.contains(&ext.as_str()) || crate::model::EXTENSIONS.contains(&ext.as_str())
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -562,7 +563,14 @@ mod tests {
         for entry in std::fs::read_dir(dir).expect("testdata") {
             let path = entry.expect("entry").path();
             let name = path.file_name().unwrap_or_default().to_string_lossy();
-            if name.starts_with("broken_") || name.starts_with("huge") || name.ends_with(".md") {
+            let model = [".stl", ".obj", ".mtl", ".3mf"]
+                .iter()
+                .any(|e| name.ends_with(e));
+            if name.starts_with("broken_")
+                || name.starts_with("huge")
+                || name.ends_with(".md")
+                || model
+            {
                 continue;
             }
             let img = decode_file(&path, Some(SCREEN)).unwrap_or_else(|e| panic!("{name}: {e}"));
