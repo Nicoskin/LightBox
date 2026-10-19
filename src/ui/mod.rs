@@ -2,6 +2,7 @@
 //! thumbnail strip, the window caption, pop-ups and the straightening dial.
 
 pub mod caption;
+pub mod crop;
 pub mod dial;
 pub mod home;
 pub mod info;

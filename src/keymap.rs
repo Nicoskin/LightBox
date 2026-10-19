@@ -245,10 +245,11 @@ pub enum Command {
     RatingFilter,
     Tags,
     Batch,
+    Crop,
 }
 
 impl Command {
-    pub const ALL: [Command; 47] = {
+    pub const ALL: [Command; 48] = {
         use Command::*;
         [
             Prev,
@@ -298,6 +299,7 @@ impl Command {
             RatingFilter,
             Tags,
             Batch,
+            Crop,
         ]
     };
 
@@ -352,6 +354,7 @@ impl Command {
             RatingFilter => "rating_filter",
             Tags => "tags",
             Batch => "batch",
+            Crop => "crop",
         }
     }
 
@@ -406,6 +409,7 @@ impl Command {
             RatingFilter => "Фильтр по рейтингу",
             Tags => "Метки",
             Batch => "Пакетная обработка",
+            Crop => "Обрезать",
         }
     }
 
@@ -461,6 +465,7 @@ impl Command {
             RatingFilter => vec![Key::ctrl(c(b'F'))],
             Tags => vec![Key::ctrl(c(b'K'))],
             Batch => vec![Key::ctrl(c(b'B'))],
+            Crop => vec![Key::plain(c(b'X'))],
         }
     }
 

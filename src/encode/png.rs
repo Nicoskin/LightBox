@@ -57,9 +57,25 @@ fn samples_per_pixel(c: ColorType) -> usize {
 
 /// Rotates / mirrors a PNG so that it looks like `display` with no
 /// orientation metadata needed.
+#[cfg(test)]
 pub fn rotate(data: &[u8], display: Orientation) -> Result<Vec<u8>, EncodeError> {
+    transform(data, display, None)
+}
+
+/// [`rotate`], then keeps only `crop` (x, y, width, height in the turned
+/// image), losslessly.
+pub fn transform(
+    data: &[u8],
+    display: Orientation,
+    crop: Option<[u32; 4]>,
+) -> Result<Vec<u8>, EncodeError> {
     let list = chunks(data)?;
     if list.iter().any(|c| &c.kind == b"acTL") {
+        if crop.is_some() {
+            return Err(EncodeError::Unsupported(
+                "обрезка анимированных PNG не поддерживается",
+            ));
+        }
         return rotate_apng(&list, display);
     }
 
@@ -82,6 +98,10 @@ pub fn rotate(data: &[u8], display: Orientation) -> Result<Vec<u8>, EncodeError>
     let spp = samples_per_pixel(color);
     let (unpacked, bpp) = unpack(&raw, line, w, h, bits, spp);
     let (rot, nw, nh) = orient_pixels(&unpacked, w, h, bpp, display);
+    let (rot, nw, nh) = match crop {
+        Some(c) => crop_units(&rot, nw, nh, bpp, c)?,
+        None => (rot, nw, nh),
+    };
     let idat = pack(&rot, nw, nh, bits, spp, bpp);
 
     // Assemble: IHDR, chunks before the image data, IDAT, the rest, IEND.
@@ -157,6 +177,30 @@ fn unpack(
         }
         (v, bpp)
     }
+}
+
+/// The `c` = (x, y, width, height) part of a `w` × `h` grid of `bpp`-byte
+/// units, clamped to the grid.
+pub(super) fn crop_units(
+    px: &[u8],
+    w: usize,
+    h: usize,
+    bpp: usize,
+    c: [u32; 4],
+) -> Result<(Vec<u8>, usize, usize), EncodeError> {
+    let x0 = (c[0] as usize).min(w);
+    let y0 = (c[1] as usize).min(h);
+    let cw = (c[2] as usize).min(w - x0);
+    let ch = (c[3] as usize).min(h - y0);
+    if cw == 0 || ch == 0 {
+        return Err(EncodeError::Format("пустая область обрезки".into()));
+    }
+    let mut out = Vec::with_capacity(cw * ch * bpp);
+    for y in y0..y0 + ch {
+        let row = (y * w + x0) * bpp;
+        out.extend_from_slice(&px[row..row + cw * bpp]);
+    }
+    Ok((out, cw, ch))
 }
 
 /// Re-packs samples into rows (sub-byte depths), filters and compresses
@@ -634,6 +678,19 @@ mod tests {
         let back = rotate(&out, Orientation::ROTATE_CCW).unwrap();
         assert_eq!(frames(&back), frames(&src));
         assert!(decode_raw(&out).3.contains(&"parameters=a cat".to_string()));
+    }
+
+    #[test]
+    fn crop_after_turning() {
+        // 3×2: pixels numbered 0..5; turned clockwise [3 0 / 4 1 / 5 2].
+        let px: Vec<u8> = (0..6u8).flat_map(|i| [i, 0, 0]).collect();
+        let src = encode(3, 2, ColorType::Rgb, BitDepth::Eight, &px, None);
+        let out = transform(&src, Orientation::ROTATE_CW, Some([1, 1, 1, 2])).unwrap();
+        let (w, h, data, texts) = decode_raw(&out);
+        assert_eq!((w, h), (1, 2));
+        assert_eq!(data.chunks(3).map(|p| p[0]).collect::<Vec<_>>(), [1, 2]);
+        assert_eq!(texts, ["parameters=a cat, masterpiece"]);
+        assert!(transform(&apng(), Orientation::IDENTITY, Some([0, 0, 2, 2])).is_err());
     }
 
     #[test]

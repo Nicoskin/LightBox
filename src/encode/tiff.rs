@@ -227,6 +227,25 @@ pub fn normalize(
     let _ = t.set_value(el, new.len() as u32);
 }
 
+/// Sets the EXIF pixel dimensions (after a crop), where present.
+pub fn set_dims(d: &mut Vec<u8>, w: u32, h: u32) {
+    let Some(mut t) = Tiff::new(d) else {
+        return;
+    };
+    let Some(ifd0) = t.ifd0() else {
+        return;
+    };
+    if let Some(exif) = t
+        .entry(ifd0, EXIF_IFD)
+        .and_then(|e| t.u32(e + 8))
+        .map(|v| v as usize)
+        && let (Some(ex), Some(ey)) = (t.entry(exif, PIXEL_X), t.entry(exif, PIXEL_Y))
+    {
+        let _ = t.set_value(ex, w);
+        let _ = t.set_value(ey, h);
+    }
+}
+
 /// Orientation tag value, if present.
 #[cfg(test)]
 pub fn orientation(d: &mut Vec<u8>) -> Option<u16> {

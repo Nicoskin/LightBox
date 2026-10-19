@@ -91,6 +91,8 @@ impl App {
                 Action::FlipH => "Отразить по горизонтали (M)",
                 Action::FlipV => "Отразить по вертикали (Shift+M)",
                 Action::Straighten => "Повернуть на любой угол ( [ и ] )",
+                Action::Crop => "Обрезать (X)",
+                Action::Batch => "Переименовать или конвертировать выбранные (Ctrl+B)",
                 Action::Info => "Информация о файле (I)",
                 Action::Histogram => "Гистограмма (H)",
                 Action::Slideshow => "Слайд-шоу (S, F5)",

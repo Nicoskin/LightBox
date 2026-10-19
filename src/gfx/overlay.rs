@@ -66,6 +66,8 @@ pub struct Ui {
     pub labels: Vec<(Rect, String)>,
     /// Start screen buttons (`selected` = the main one).
     pub home: Vec<SegmentView>,
+    /// The crop tool.
+    pub crop: Option<CropView>,
 }
 
 impl Ui {
@@ -83,6 +85,7 @@ impl Ui {
             && self.tooltip.is_none()
             && self.labels.is_empty()
             && self.home.is_empty()
+            && self.crop.is_none()
     }
 }
 
@@ -299,6 +302,9 @@ impl Overlay {
             }
             if !ui.home.is_empty() {
                 self.home_buttons(&ui.home, ui.scale);
+            }
+            if let Some(c) = &ui.crop {
+                self.crop(c, ui.scale);
             }
             if let Some(caption) = &ui.caption {
                 self.caption(caption);
@@ -573,4 +579,13 @@ pub struct InfoView {
 pub struct HistogramView {
     pub rect: Rect,
     pub hist: Rc<crate::inspect::Histogram>,
+}
+
+/// The crop tool: the photo and the frame on screen, the frame's size in
+/// pixels, the bar (aspects, apply, cancel).
+pub struct CropView {
+    pub image: Rect,
+    pub frame: Rect,
+    pub size: String,
+    pub segments: Vec<SegmentView>,
 }

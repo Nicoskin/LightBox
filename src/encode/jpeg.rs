@@ -79,6 +79,77 @@ pub fn rotate(
     })))
 }
 
+/// Crops an upright JPEG to `c` (x, y, width, height) without re-encoding.
+/// The left and top edges move out to the block grid (8 or 16 pixels);
+/// returns the bytes and the rectangle kept. EXIF dimensions and the
+/// embedded thumbnail follow.
+pub fn crop(data: &[u8], c: [u32; 4]) -> Result<(Vec<u8>, [u32; 4]), EncodeError> {
+    let header = turbojpeg::read_header(data)?;
+    let (mw, mh) = (header.subsamp.mcu_width(), header.subsamp.mcu_height());
+    let x = (c[0] as usize).min(header.width.saturating_sub(1)) / mw * mw;
+    let y = (c[1] as usize).min(header.height.saturating_sub(1)) / mh * mh;
+    let w = (c[0] as usize + c[2] as usize).min(header.width) - x;
+    let h = (c[1] as usize + c[3] as usize).min(header.height) - y;
+    if w == 0 || h == 0 {
+        return Err(EncodeError::Format("пустая область обрезки".into()));
+    }
+    let mut t = Transform::op(TransformOp::None);
+    t.crop = Some(turbojpeg::TransformCrop {
+        x,
+        y,
+        width: Some(w),
+        height: Some(h),
+    });
+    t.progressive = header.is_progressive;
+    t.arithmetic = header.is_arithmetic;
+    t.optimize = !header.is_arithmetic;
+    let out = Transformer::new()?.transform_to_vec(&t, data)?;
+    let thumb = small_thumbnail(&out);
+    let out = edit_exif(&out, false, |t| {
+        tiff::set_dims(t, w as u32, h as u32);
+        tiff::normalize(t, false, |_| thumb.clone());
+    });
+    Ok((out, [x as u32, y as u32, w as u32, h as u32]))
+}
+
+/// A new EXIF thumbnail (at most 160 px) from a JPEG.
+fn small_thumbnail(jpeg: &[u8]) -> Option<Vec<u8>> {
+    let mut d = turbojpeg::Decompressor::new().ok()?;
+    d.set_scaling_factor(turbojpeg::ScalingFactor::ONE_EIGHTH)
+        .ok()?;
+    let header = d
+        .read_header(jpeg)
+        .ok()?
+        .scaled(turbojpeg::ScalingFactor::ONE_EIGHTH);
+    let (w, h) = (header.width, header.height);
+    let mut px = vec![0u8; w * h * 4];
+    d.decompress(
+        jpeg,
+        turbojpeg::Image {
+            pixels: px.as_mut_slice(),
+            width: w,
+            pitch: w * 4,
+            height: h,
+            format: turbojpeg::PixelFormat::RGBA,
+        },
+    )
+    .ok()?;
+    let img = image::RgbaImage::from_raw(w as u32, h as u32, px)?;
+    let k = 160.0 / w.max(h) as f64;
+    let img = if k < 1.0 {
+        image::imageops::resize(
+            &img,
+            ((w as f64 * k).round() as u32).max(1),
+            ((h as f64 * k).round() as u32).max(1),
+            image::imageops::FilterType::Triangle,
+        )
+    } else {
+        img
+    };
+    let (tw, th) = (img.width() as usize, img.height() as usize);
+    super::encode_jpeg(&img.into_raw(), tw, th, 80).ok()
+}
+
 /// Location of the EXIF block: (APP1 marker offset, TIFF start, TIFF end).
 fn find_exif(data: &[u8]) -> Option<(usize, usize, usize)> {
     let mut pos = 2;
@@ -177,6 +248,25 @@ mod tests {
     fn pixels(data: &[u8]) -> (usize, usize, Vec<u8>) {
         let img = turbojpeg::decompress(data, PixelFormat::RGB).unwrap();
         (img.width, img.height, img.pixels)
+    }
+
+    /// Cropping moves the left / top edges out to the 16-pixel grid of a
+    /// 4:2:0 JPEG and keeps the pixels: the kept part decodes like the
+    /// same part of the original.
+    #[test]
+    fn crop_snaps_to_blocks_and_keeps_pixels() {
+        let original = jpeg(96, 64);
+        let (out, kept) = crop(&original, [21, 18, 40, 30]).unwrap();
+        assert_eq!(kept, [16, 16, 45, 32]);
+        let (w, h, px) = pixels(&out);
+        assert_eq!((w, h), (45, 32));
+        let (ow, _, opx) = pixels(&original);
+        // Away from the block edges, the pixels match the original's.
+        for (x, y) in [(5, 5), (20, 10), (40, 30)] {
+            let a = &px[(y * w + x) * 3..][..3];
+            let b = &opx[((y + 16) * ow + x + 16) * 3..][..3];
+            assert!(a.iter().zip(b).all(|(p, q)| p.abs_diff(*q) <= 2), "{x},{y}");
+        }
     }
 
     #[test]

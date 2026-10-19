@@ -13,11 +13,25 @@ use crate::orientation::Orientation;
 
 /// Rotates `data` (file extension `ext`, lower case) so that it shows what
 /// `display` shows today.
+#[cfg(test)]
 pub fn rotate(data: &[u8], ext: &str, display: Orientation) -> Result<Vec<u8>, EncodeError> {
-    if data.starts_with(b"II*\0") || data.starts_with(b"MM\0*") {
-        if !matches!(ext, "tif" | "tiff") {
-            return Err(only_view());
-        }
+    transform(data, ext, display, None)
+}
+
+/// [`rotate`], then keeps only `crop` (x, y, width, height in the turned
+/// image). A cropped TIFF is written from its pixels (its metadata is not
+/// carried over); GIFs are not cropped.
+pub fn transform(
+    data: &[u8],
+    ext: &str,
+    display: Orientation,
+    crop: Option<[u32; 4]>,
+) -> Result<Vec<u8>, EncodeError> {
+    let is_tiff = data.starts_with(b"II*\0") || data.starts_with(b"MM\0*");
+    if is_tiff && !matches!(ext, "tif" | "tiff") {
+        return Err(only_view());
+    }
+    if is_tiff && crop.is_none() {
         let mut out = data.to_vec();
         if !tiff::set_orientation(&mut out, u16::from(display.exif())) {
             return Err(EncodeError::Format("повреждённый TIFF".into()));
@@ -25,12 +39,16 @@ pub fn rotate(data: &[u8], ext: &str, display: Orientation) -> Result<Vec<u8>, E
         return Ok(out);
     }
     if data.starts_with(b"GIF8") {
+        if crop.is_some() {
+            return Err(EncodeError::Unsupported("обрезка GIF не поддерживается"));
+        }
         return gif(data, display);
     }
     if data.len() > 16 && &data[0..4] == b"RIFF" && &data[8..12] == b"WEBP" {
-        return webp(data, display);
+        return webp(data, display, crop);
     }
     let format = match ext {
+        _ if is_tiff => ImageFormat::Tiff,
         "bmp" | "dib" if data.starts_with(b"BM") => ImageFormat::Bmp,
         "qoi" => ImageFormat::Qoi,
         "tga" => ImageFormat::Tga,
@@ -46,10 +64,27 @@ pub fn rotate(data: &[u8], ext: &str, display: Orientation) -> Result<Vec<u8>, E
     let img = image::load_from_memory_with_format(data, format)
         .map_err(|e| EncodeError::Format(e.to_string()))?;
     let mut out = Vec::new();
-    turn(img, display)
+    cut(turn(img, display), crop)
         .write_to(&mut Cursor::new(&mut out), format)
         .map_err(|e| EncodeError::Format(e.to_string()))?;
     Ok(out)
+}
+
+/// The `crop` part of `img` (clamped), or all of it.
+fn cut(img: DynamicImage, crop: Option<[u32; 4]>) -> DynamicImage {
+    match crop {
+        Some([x, y, w, h]) => {
+            let x = x.min(img.width().saturating_sub(1));
+            let y = y.min(img.height().saturating_sub(1));
+            img.crop_imm(
+                x,
+                y,
+                w.min(img.width() - x).max(1),
+                h.min(img.height() - y).max(1),
+            )
+        }
+        None => img,
+    }
 }
 
 fn only_view() -> EncodeError {
@@ -74,7 +109,7 @@ fn turn(img: DynamicImage, display: Orientation) -> DynamicImage {
 
 /// Lossless WebP (VP8L) stills only: lossy ones would be re-compressed, and
 /// animations are not encoded by the WebP library in use.
-fn webp(data: &[u8], display: Orientation) -> Result<Vec<u8>, EncodeError> {
+fn webp(data: &[u8], display: Orientation, crop: Option<[u32; 4]>) -> Result<Vec<u8>, EncodeError> {
     let mut lossless = false;
     let mut pos = 12;
     while pos + 8 <= data.len() {
@@ -108,7 +143,7 @@ fn webp(data: &[u8], display: Orientation) -> Result<Vec<u8>, EncodeError> {
         .map_err(|e| EncodeError::Format(e.to_string()))?;
     let icc = image::ImageDecoder::icc_profile(&mut dec).ok().flatten();
     let img = DynamicImage::from_decoder(dec).map_err(|e| EncodeError::Format(e.to_string()))?;
-    let img = turn(img, display);
+    let img = cut(turn(img, display), crop);
     // The encoder takes 8-bit RGB(A) only; lossless WebP is 8-bit anyway.
     let img = if img.color().has_alpha() {
         DynamicImage::ImageRgba8(img.into_rgba8())

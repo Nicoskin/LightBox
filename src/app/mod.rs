@@ -8,6 +8,7 @@ mod animation;
 mod batch;
 mod chrome;
 mod compare;
+mod crop;
 mod document;
 mod files;
 mod folder;
@@ -359,6 +360,8 @@ pub struct App {
     detail: Option<vector::Detail>,
     /// The open document (PDF, text): page shown and page textures.
     doc: Option<document::DocState>,
+    /// The crop tool, while open.
+    crop: Option<crop::CropState>,
 
     // Input.
     drag: Option<Drag>,
@@ -483,6 +486,7 @@ impl App {
             vector: None,
             detail: None,
             doc: None,
+            crop: None,
             drag: None,
             wheel_accum: 0,
             fast_nav: false,
@@ -916,6 +920,7 @@ impl App {
             tooltip: self.tooltip_view(),
             labels: self.compare_labels(),
             home: self.home_view(),
+            crop: self.crop_view(),
         };
         self.gpu.draw(&params, &ui)
     }

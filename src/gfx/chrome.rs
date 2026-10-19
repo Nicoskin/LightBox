@@ -7,7 +7,7 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows_numerics::Vector2;
 
-use super::overlay::{CaptionView, DialView, MenuView, Overlay, SegmentView, rgba};
+use super::overlay::{CaptionView, CropView, DialView, MenuView, Overlay, SegmentView, rgba};
 use super::panel::rf;
 use crate::view::Rect;
 
@@ -458,6 +458,134 @@ impl Overlay {
                     .FillRoundedRectangle(&rounded(r, 8.0 * s), &self.brush);
                 self.brush.SetColor(&rgba(1.0, 1.0, 1.0, text_a));
                 self.glyph_str(&b.text, r, &self.formats.option);
+            }
+        }
+    }
+}
+
+impl Overlay {
+    /// The crop tool: everything outside the frame darkened, the frame with
+    /// a rule-of-thirds grid and handles, its size, and the bar.
+    pub(super) unsafe fn crop(&self, c: &CropView, s: f32) {
+        let img = rf(c.image);
+        let f = rf(c.frame);
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.58));
+            for r in [
+                D2D_RECT_F {
+                    bottom: f.top,
+                    ..img
+                },
+                D2D_RECT_F {
+                    top: f.bottom,
+                    ..img
+                },
+                D2D_RECT_F {
+                    top: f.top,
+                    bottom: f.bottom,
+                    right: f.left,
+                    ..img
+                },
+                D2D_RECT_F {
+                    top: f.top,
+                    bottom: f.bottom,
+                    left: f.right,
+                    ..img
+                },
+            ] {
+                if r.right > r.left && r.bottom > r.top {
+                    self.ctx.FillRectangle(&r, &self.brush);
+                }
+            }
+            // Thirds.
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.35));
+            let (w, h) = (f.right - f.left, f.bottom - f.top);
+            for k in [1.0 / 3.0, 2.0 / 3.0] {
+                let x = f.left + w * k;
+                let y = f.top + h * k;
+                self.ctx.DrawLine(
+                    Vector2 { X: x, Y: f.top },
+                    Vector2 { X: x, Y: f.bottom },
+                    &self.brush,
+                    s.max(1.0),
+                    None::<&ID2D1StrokeStyle>,
+                );
+                self.ctx.DrawLine(
+                    Vector2 { X: f.left, Y: y },
+                    Vector2 { X: f.right, Y: y },
+                    &self.brush,
+                    s.max(1.0),
+                    None::<&ID2D1StrokeStyle>,
+                );
+            }
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+            self.ctx
+                .DrawRectangle(&f, &self.brush, 1.5 * s, None::<&ID2D1StrokeStyle>);
+            // Handles: corners and edge middles.
+            let hs = 5.0 * s;
+            let (cx, cy) = ((f.left + f.right) / 2.0, (f.top + f.bottom) / 2.0);
+            for (x, y) in [
+                (f.left, f.top),
+                (cx, f.top),
+                (f.right, f.top),
+                (f.right, cy),
+                (f.right, f.bottom),
+                (cx, f.bottom),
+                (f.left, f.bottom),
+                (f.left, cy),
+            ] {
+                let r = D2D_RECT_F {
+                    left: x - hs,
+                    top: y - hs,
+                    right: x + hs,
+                    bottom: y + hs,
+                };
+                self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.6));
+                self.ctx.FillRectangle(
+                    &D2D_RECT_F {
+                        left: r.left - s,
+                        top: r.top - s,
+                        right: r.right + s,
+                        bottom: r.bottom + s,
+                    },
+                    &self.brush,
+                );
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 1.0));
+                self.ctx.FillRectangle(&r, &self.brush);
+            }
+            // Size above the frame.
+            let label = D2D_RECT_F {
+                left: f.left,
+                top: (f.top - 26.0 * s).max(img.top),
+                right: f.left + 130.0 * s,
+                bottom: (f.top - 4.0 * s).max(img.top + 22.0 * s),
+            };
+            self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.6));
+            self.ctx
+                .FillRoundedRectangle(&rounded(label, 4.0 * s), &self.brush);
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+            self.glyph_str(&c.size, label, &self.formats.option);
+            // The bar.
+            for seg in &c.segments {
+                let r = rf(seg.rect);
+                let fill = if seg.selected {
+                    rgba(
+                        ACCENT.0,
+                        ACCENT.1,
+                        ACCENT.2,
+                        if seg.hot { 1.0 } else { 0.92 },
+                    )
+                } else if seg.hot {
+                    rgba(0.22, 0.22, 0.24, 0.96)
+                } else {
+                    rgba(0.13, 0.13, 0.14, 0.94)
+                };
+                self.brush.SetColor(&fill);
+                self.ctx
+                    .FillRoundedRectangle(&rounded(r, 6.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+                self.glyph_str(&seg.text, r, &self.formats.option);
             }
         }
     }

@@ -18,8 +18,9 @@ pub use compositor::Compositor;
 pub use device::{Adapter, Gpu};
 pub use model::{GpuMesh, ModelDraw};
 pub use overlay::{
-    ButtonView, CaptionButtonView, CaptionView, CardView, CellView, DialView, HistogramView, Icon,
-    InfoView, MenuItemView, MenuView, PanelView, SegmentView, TextStyle, TextView, Thumb, Ui,
+    ButtonView, CaptionButtonView, CaptionView, CardView, CellView, CropView, DialView,
+    HistogramView, Icon, InfoView, MenuItemView, MenuView, PanelView, SegmentView, TextStyle,
+    TextView, Thumb, Ui,
 };
 pub use renderer::{Background, DrawParams, Filter, Layer, Part};
 pub use texture::GpuImage;

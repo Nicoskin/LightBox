@@ -37,6 +37,8 @@ pub enum Job {
         edit: Orientation,
         keep_dates: bool,
         imperfect: Option<ImperfectJpeg>,
+        /// Then keep only this part (x, y, width, height of the turned image).
+        crop: Option<[u32; 4]>,
     },
     /// Write the photo as shown (`edit` on top of its own orientation) to `dst`.
     Export {
@@ -63,6 +65,8 @@ pub enum Outcome {
         path: PathBuf,
         edit: Orientation,
         undo: Undo,
+        /// The write also cropped the photo.
+        cropped: bool,
     },
     /// The JPEG cannot be rotated exactly; ask the user and resubmit.
     NeedsJpegChoice {
@@ -154,8 +158,14 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
             edit,
             keep_dates,
             imperfect,
-        } => match rotate_file(&path, display, keep_dates, imperfect, backups, n) {
-            Ok(Some(undo)) => Outcome::Rotated { path, edit, undo },
+            crop,
+        } => match rotate_file(&path, display, keep_dates, imperfect, crop, backups, n) {
+            Ok(Some(undo)) => Outcome::Rotated {
+                path,
+                edit,
+                undo,
+                cropped: crop.is_some(),
+            },
             Ok(None) => Outcome::NeedsJpegChoice {
                 path,
                 edit,
@@ -205,23 +215,30 @@ fn rotate_file(
     display: Orientation,
     keep_dates: bool,
     imperfect: Option<ImperfectJpeg>,
+    crop: Option<[u32; 4]>,
     backups: &Path,
     n: u32,
 ) -> Result<Option<Undo>, WriteError> {
     let data = fs::read(path)?;
     let out = if data.starts_with(&[0xFF, 0xD8, 0xFF]) {
-        match encode::jpeg::rotate(&data, display, imperfect)? {
+        // A crop removes the edges anyway: partial blocks may go.
+        let imperfect = imperfect.or(crop.map(|_| ImperfectJpeg::Trim));
+        let turned = match encode::jpeg::rotate(&data, display, imperfect)? {
             Some(v) => v,
             None => return Ok(None),
+        };
+        match crop {
+            Some(c) => encode::jpeg::crop(&turned, c)?.0,
+            None => turned,
         }
     } else if data.starts_with(b"\x89PNG\r\n\x1a\n") {
-        encode::png::rotate(&data, display)?
+        encode::png::transform(&data, display, crop)?
     } else {
         let ext = path
             .extension()
             .map(|e| e.to_string_lossy().to_ascii_lowercase())
             .unwrap_or_default();
-        encode::other::rotate(&data, &ext, display)?
+        encode::other::transform(&data, &ext, display, crop)?
     };
     let modified = fs::metadata(path).and_then(|m| m.modified()).ok();
     // Keep the original bytes for undo before touching the file.
@@ -380,7 +397,7 @@ mod tests {
         let original = sample_jpeg();
         fs::write(&p, &original).unwrap();
         let backups = d.join("backups");
-        let undo = rotate_file(&p, Orientation::ROTATE_CW, true, None, &backups, 1)
+        let undo = rotate_file(&p, Orientation::ROTATE_CW, true, None, None, &backups, 1)
             .unwrap()
             .unwrap();
         let rotated = fs::read(&p).unwrap();
@@ -404,6 +421,7 @@ mod tests {
             edit: Orientation::ROTATE_CCW,
             keep_dates: true,
             imperfect: None,
+            crop: None,
         });
         w.submit(Job::Export {
             src: p.clone(),

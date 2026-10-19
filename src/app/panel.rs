@@ -172,6 +172,7 @@ impl App {
                     Action::Smoothing => self.settings.smoothing,
                     Action::Filmstrip => self.settings.filmstrip,
                     Action::Straighten => self.dial_open,
+                    Action::Crop => self.crop.is_some(),
                     Action::Grid => self.settings.pixel_grid,
                     Action::Info => self.info_state.open,
                     Action::Histogram => self.hist_state.open,

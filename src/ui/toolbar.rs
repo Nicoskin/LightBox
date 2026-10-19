@@ -23,6 +23,10 @@ pub enum Action {
     FlipV,
     /// Shows / hides the straightening dial.
     Straighten,
+    /// The crop tool (X).
+    Crop,
+    /// Batch rename / convert (Ctrl+B).
+    Batch,
     /// Pixel grid (G), info panel (I), histogram (H).
     Grid,
     Info,
@@ -241,11 +245,13 @@ pub fn layout(
         Item::Button(FlipH, Icon::Text("\u{21C6}"), false),
         Item::Button(FlipV, Icon::Text("\u{21C5}"), false),
         Item::Button(Straighten, Icon::Angle, false),
+        Item::Button(Crop, Icon::Glyph('\u{E7A8}'), false),
     ];
     let files = [
         Item::Button(Save, Icon::Glyph('\u{E74E}'), false),
         Item::Button(SaveAs, Icon::Glyph('\u{E792}'), false),
         Item::Button(Reset, Icon::Glyph('\u{E7A7}'), false),
+        Item::Button(Batch, Icon::Glyph('\u{E762}'), false),
     ];
     let (tw, fw) = (width(&tools, s), width(&files, s));
     let split = c0 - gap - tw > pad && right_x > c1 + gap + fw + gap;
@@ -355,7 +361,7 @@ mod tests {
     fn fullscreen_layout() {
         let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false, true);
         no_overlaps(&l);
-        assert_eq!(l.buttons.len(), 24);
+        assert_eq!(l.buttons.len(), 26);
         assert!(l.caption.is_some() && l.zoom_text.is_some());
         let strip = l.strip.unwrap();
         assert_eq!(strip.y1, l.bar.y0);
@@ -377,7 +383,7 @@ mod tests {
             let l = layout((w, 1440.0), s, false, Some(64.0), false, true);
             no_overlaps(&l);
             let find = |a| l.buttons.iter().find(|b| b.action == a).unwrap().rect;
-            let (left, right) = (find(Action::FlipH), find(Action::Reset));
+            let (left, right) = (find(Action::FlipH), find(Action::Batch));
             let mid = (left.x0 + right.x1) / 2.0;
             assert!((mid - w / 2.0).abs() <= 1.0, "{w}×{s}: {mid}");
             assert!(l.buttons.iter().any(|b| b.action == Action::Settings));

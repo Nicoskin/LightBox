@@ -64,6 +64,12 @@ impl App {
                 return Ok(Some(LRESULT(0)));
             }
         }
+        if self.crop.is_some()
+            && msg != WM_MOUSEWHEEL
+            && self.crop_input(msg, wparam.0, client_point(lparam))?
+        {
+            return Ok(Some(LRESULT(0)));
+        }
         match msg {
             WM_KEYUP if wparam.0 as u16 == VK_SPACE.0 => {
                 self.hold_a(false)?;
@@ -244,6 +250,8 @@ impl App {
             Action::Reset => self.reset_current(),
             Action::Settings => self.open_settings(),
             Action::Straighten => self.toggle_dial(),
+            Action::Crop => self.toggle_crop(),
+            Action::Batch => self.batch_dialog(),
             Action::Grid => self.toggle_grid(),
             Action::Info => self.toggle_info(),
             Action::Histogram => self.toggle_histogram(),
@@ -388,6 +396,7 @@ impl App {
             Command::RatingFilter => self.cycle_rating_filter(),
             Command::Tags => self.edit_tags(),
             Command::Batch => self.batch_dialog(),
+            Command::Crop => self.toggle_crop(),
         }
     }
 

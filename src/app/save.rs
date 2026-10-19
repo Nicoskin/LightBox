@@ -31,7 +31,7 @@ impl App {
     }
 
     /// The file's own (EXIF) orientation, from whatever is decoded.
-    fn base_orientation(&self, path: &Path) -> Orientation {
+    pub(super) fn base_orientation(&self, path: &Path) -> Orientation {
         let key = cache::key(path);
         if let Some((k, t)) = &self.shown
             && *k == key
@@ -71,6 +71,7 @@ impl App {
             edit,
             keep_dates: self.settings.keep_file_dates,
             imperfect: self.settings.imperfect_jpeg,
+            crop: None,
         });
         self.saving.insert(key);
     }
@@ -197,7 +198,12 @@ impl App {
     pub(super) fn on_saved(&mut self) -> Result<()> {
         while let Some(outcome) = self.writer.as_ref().and_then(Writer::try_recv) {
             match outcome {
-                Outcome::Rotated { path, edit, undo } => {
+                Outcome::Rotated {
+                    path,
+                    edit,
+                    undo,
+                    cropped,
+                } => {
                     let key = cache::key(&path);
                     self.saving.remove(&key);
                     self.undo.push(undo);
@@ -209,7 +215,11 @@ impl App {
                     } else {
                         self.apply_saved_edit(&key, edit);
                     }
-                    self.notice("Поворот сохранён");
+                    self.notice(if cropped {
+                        "Обрезка сохранена · Ctrl+Z — вернуть"
+                    } else {
+                        "Поворот сохранён"
+                    });
                 }
                 Outcome::NeedsJpegChoice {
                     path,
@@ -253,6 +263,7 @@ impl App {
                             edit,
                             keep_dates: self.settings.keep_file_dates,
                             imperfect: Some(imperfect),
+                            crop: None,
                         });
                         self.saving.insert(key);
                     }
