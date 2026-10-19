@@ -106,9 +106,7 @@ impl App {
             self.pending_show = true;
         }
         self.update_title();
-        if !self.preview() {
-            self.rescan_folder();
-        }
+        self.rescan_folder();
         if self.show_current()? {
             if self.pending_show {
                 self.reveal()?;

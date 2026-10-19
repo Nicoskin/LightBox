@@ -69,6 +69,9 @@ impl App {
         if self.current.as_os_str().is_empty() {
             return; // started in the tray without a file
         }
+        if self.preview() {
+            return; // a preview shows only its one file
+        }
         let hwnd = self.hwnd.0 as isize;
         let current = self.current.clone();
         let dir = current
