@@ -9,12 +9,13 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::Controls::MARGINS;
 use windows::Win32::UI::WindowsAndMessaging::{
     CS_DBLCLKS, CreateWindowExW, DispatchMessageW, GWL_STYLE, GetCursorPos, GetSystemMetrics,
-    GetWindowRect, HICON, IDC_ARROW, IMAGE_ICON, LR_SHARED, LoadCursorW, LoadImageW, MSG,
-    PM_REMOVE, PeekMessageW, RegisterClassExW, SM_CXICON, SM_CXSMICON, SW_SHOWNA, SWP_FRAMECHANGED,
-    SWP_NOACTIVATE, SWP_NOZORDER, SetForegroundWindow, SetWindowLongPtrW, SetWindowPos,
-    SetWindowTextW, ShowWindow, TranslateMessage, WINDOW_STYLE, WM_QUIT, WNDCLASSEXW, WNDPROC,
-    WS_CAPTION, WS_EX_APPWINDOW, WS_EX_NOREDIRECTIONBITMAP, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU,
-    WS_THICKFRAME, WS_VISIBLE, WaitMessage,
+    GetWindowRect, HICON, HWND_NOTOPMOST, HWND_TOPMOST, IDC_ARROW, IMAGE_ICON, LR_SHARED,
+    LoadCursorW, LoadImageW, MSG, PM_REMOVE, PeekMessageW, RegisterClassExW, SM_CXICON,
+    SM_CXSMICON, SW_SHOWNA, SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    SetForegroundWindow, SetWindowLongPtrW, SetWindowPos, SetWindowTextW, ShowWindow,
+    TranslateMessage, WINDOW_STYLE, WM_QUIT, WNDCLASSEXW, WNDPROC, WS_CAPTION, WS_EX_APPWINDOW,
+    WS_EX_NOREDIRECTIONBITMAP, WS_MINIMIZEBOX, WS_POPUP, WS_SYSMENU, WS_THICKFRAME, WS_VISIBLE,
+    WaitMessage,
 };
 use windows::core::{BOOL, HSTRING, PCWSTR, w};
 
@@ -273,5 +274,22 @@ pub fn run_message_loop(mut frame: impl FnMut() -> bool) -> i32 {
             }
             animating = true;
         }
+    }
+}
+
+/// Keeps the window above all others (or not).
+pub fn set_topmost(hwnd: HWND, on: bool) {
+    let after = if on { HWND_TOPMOST } else { HWND_NOTOPMOST };
+    // SAFETY: own window; only the z-order changes.
+    unsafe {
+        let _ = SetWindowPos(
+            hwnd,
+            Some(after),
+            0,
+            0,
+            0,
+            0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+        );
     }
 }

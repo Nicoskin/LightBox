@@ -112,6 +112,7 @@ impl App {
         self.mode = Mode::Windowed;
         self.dim = 0.0;
         window::set_mode(self.hwnd, true, to_win32(r))?;
+        window::set_topmost(self.hwnd, self.on_top);
         self.gpu
             .resize(r.width().round() as u32, r.height().round() as u32)?;
         if let Some(v) = self.fit_view() {
@@ -145,6 +146,7 @@ impl App {
         self.mode = Mode::Fullscreen;
         self.monitor = mon;
         window::set_mode(self.hwnd, false, mon.rect)?;
+        window::set_topmost(self.hwnd, false);
         let (w, h) = mon.size();
         self.gpu.resize(w, h)?;
         self.request_thumbs();
@@ -199,6 +201,7 @@ impl App {
         self.mode = Mode::Windowed;
         self.dim = 0.0;
         window::set_mode(self.hwnd, true, to_win32(target))?;
+        window::set_topmost(self.hwnd, self.on_top);
         self.gpu.resize(
             target.width().round() as u32,
             target.height().round() as u32,
@@ -369,9 +372,11 @@ impl App {
     /// from the tray viewer without any animation.
     pub fn start_pinned(&mut self, r: RECT) -> Result<()> {
         self.pinned = true;
+        self.on_top = true;
         self.mode = Mode::Windowed;
         self.dim = 0.0;
         window::set_mode(self.hwnd, true, r)?;
+        window::set_topmost(self.hwnd, self.on_top);
         self.monitor = Monitor::of_window(self.hwnd);
         self.gpu
             .resize((r.right - r.left) as u32, (r.bottom - r.top) as u32)?;
@@ -416,6 +421,7 @@ impl App {
         self.mode = Mode::Windowed;
         self.dim = 0.0;
         window::set_mode(self.hwnd, true, to_win32(target))?;
+        window::set_topmost(self.hwnd, self.on_top);
         self.gpu.resize(
             target.width().round() as u32,
             target.height().round() as u32,

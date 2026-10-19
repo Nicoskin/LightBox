@@ -111,7 +111,9 @@ impl App {
                 CaptionButton::Minimize => "Свернуть",
                 CaptionButton::Fullscreen => "Во весь экран (F11)",
                 CaptionButton::Close => "Закрыть (Esc)",
-                CaptionButton::Pin => "Закрепить: оставить это фото в отдельном окне",
+                CaptionButton::Pin => "Закрепить поверх всех окон (в отдельном окне)",
+                CaptionButton::OnTop if self.on_top => "Открепить: обычное окно",
+                CaptionButton::OnTop => "Закрепить поверх всех окон",
                 CaptionButton::OpenFull => "Открыть в Lightbox (с папкой)",
             }
             .to_string(),

@@ -9,8 +9,10 @@ pub enum CaptionButton {
     Minimize,
     Fullscreen,
     Close,
-    /// Preview: keep this photo in its own window.
+    /// Preview: keep this photo in its own window, above the others.
     Pin,
+    /// Window: always on top (toggle).
+    OnTop,
     /// Preview: open in the viewer (with the folder).
     OpenFull,
 }
@@ -20,11 +22,11 @@ pub enum CaptionButton {
 pub enum CaptionStyle {
     /// Round close button in the corner.
     Fullscreen,
-    /// Viewer window: minimise, fullscreen, close.
+    /// Viewer window: on top, minimise, fullscreen, close.
     Window,
     /// Space-in-Explorer preview: pin, open in the viewer, close.
     Preview,
-    /// Pinned preview: minimise, open in the viewer, close.
+    /// Pinned preview: on top, minimise, open in the viewer, close.
     Pinned,
 }
 
@@ -74,27 +76,29 @@ pub fn layout(vp: (f64, f64), s: f64, style: CaptionStyle) -> CaptionLayout {
         x1: vp.0,
         y1: h,
     };
-    let mut buttons = Vec::with_capacity(3);
+    let mut buttons = Vec::with_capacity(4);
     let mut x1 = vp.0;
     // Right to left.
     let kinds = match style {
-        CaptionStyle::Preview => [
+        CaptionStyle::Preview => &[
             CaptionButton::Close,
             CaptionButton::OpenFull,
             CaptionButton::Pin,
-        ],
-        CaptionStyle::Pinned => [
+        ][..],
+        CaptionStyle::Pinned => &[
             CaptionButton::Close,
             CaptionButton::OpenFull,
             CaptionButton::Minimize,
+            CaptionButton::OnTop,
         ],
-        _ => [
+        _ => &[
             CaptionButton::Close,
             CaptionButton::Fullscreen,
             CaptionButton::Minimize,
+            CaptionButton::OnTop,
         ],
     };
-    for b in kinds {
+    for &b in kinds {
         buttons.push((
             b,
             Rect {
@@ -142,7 +146,11 @@ mod tests {
     #[test]
     fn windowed_buttons_sit_right() {
         let l = layout((800.0, 600.0), 1.5, CaptionStyle::Window);
-        assert_eq!(l.buttons.len(), 3);
+        assert_eq!(l.buttons.len(), 4);
+        assert_eq!(
+            l.hit((800.0 - 3.5 * 69.0, 10.0)),
+            Some(CaptionButton::OnTop)
+        );
         assert_eq!(l.hit((799.0, 10.0)), Some(CaptionButton::Close));
         assert_eq!(
             l.hit((800.0 - 69.0 - 30.0, 10.0)),

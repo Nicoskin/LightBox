@@ -17,6 +17,7 @@ use crate::ui::home::{self, HomeButton};
 use crate::ui::popup::{self, MenuLayout};
 use crate::ui::toolbar::Action;
 use crate::view::Rect;
+use crate::win::window;
 
 /// Hovering the transparency button this long opens its menu.
 const MENU_HOVER_MS: u32 = 450;
@@ -71,11 +72,14 @@ impl App {
                         CaptionButton::Fullscreen => '\u{E740}',
                         CaptionButton::Close => '\u{E8BB}',
                         CaptionButton::Pin => '\u{E718}',
+                        CaptionButton::OnTop if self.on_top => '\u{E841}',
+                        CaptionButton::OnTop => '\u{E718}',
                         CaptionButton::OpenFull => '\u{E8A7}',
                     },
                     close: *b == CaptionButton::Close,
                     hot: self.hot == Some(Hot::Caption(*b)),
                     pressed: self.pressed == Some(Hot::Caption(*b)),
+                    active: *b == CaptionButton::OnTop && self.on_top,
                 })
                 .collect(),
             round: l.round,
@@ -107,6 +111,11 @@ impl App {
             }
             CaptionButton::Fullscreen => self.toggle_mode(),
             CaptionButton::Pin => self.pin_preview(),
+            CaptionButton::OnTop => {
+                self.on_top = !self.on_top;
+                window::set_topmost(self.hwnd, self.on_top && self.mode == Mode::Windowed);
+                self.render()
+            }
             CaptionButton::OpenFull => self.open_full(),
             CaptionButton::Close => {
                 // SAFETY: posting to our own window.

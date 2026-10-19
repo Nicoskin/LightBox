@@ -78,7 +78,11 @@ impl Overlay {
                     self.ctx.FillRectangle(&r, &self.brush);
                 }
                 let a = if b.hot { 1.0 } else { 0.85 };
-                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, a * o));
+                if b.active {
+                    self.brush.SetColor(&rgba(ACCENT.0, ACCENT.1, ACCENT.2, o));
+                } else {
+                    self.brush.SetColor(&rgba(1.0, 1.0, 1.0, a * o));
+                }
                 self.glyph(b.glyph, r, &self.formats.small_icon);
             }
         }

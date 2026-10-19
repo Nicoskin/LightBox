@@ -1,6 +1,6 @@
 [package]
 name = "lightbox"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Fast image viewer for Windows in the spirit of Picasa Photo Viewer"
 license = "MIT"
@@ -120,3 +120,7 @@ debug = "line-tables-only"
 [profile.bench]
 inherits = "release"
 strip = false
+
+[[example]]
+name = "explorer_tabs"
+path = "tools/explorer_tabs.rs"

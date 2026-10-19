@@ -256,6 +256,8 @@ pub struct App {
     card_hot: Option<crate::ui::settings_card::Hit>,
     /// Settings page shown.
     card_tab: crate::ui::settings_card::Tab,
+    /// Window kept above all others (windowed mode only).
+    on_top: bool,
     /// Filmstrip scroll position (file index, fractional while gliding)
     /// and when its glide was last advanced.
     strip_pos: f64,
@@ -391,6 +393,7 @@ impl App {
             card_open: false,
             card_hot: None,
             card_tab: Default::default(),
+            on_top: false,
             strip_pos: 0.0,
             strip_tick: None,
             menu_open: false,

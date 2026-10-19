@@ -516,6 +516,8 @@ pub struct CaptionButtonView {
     pub close: bool,
     pub hot: bool,
     pub pressed: bool,
+    /// A toggle that is on (always on top).
+    pub active: bool,
 }
 
 pub struct MenuView {

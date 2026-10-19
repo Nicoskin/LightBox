@@ -139,6 +139,7 @@ impl App {
             false => {
                 self.mode = Mode::Fullscreen;
                 window::set_mode(self.hwnd, false, self.monitor.rect)?;
+                window::set_topmost(self.hwnd, false);
                 let (w, h) = self.monitor.size();
                 self.gpu.resize(w, h)?;
                 self.dim = self.settings.dim();
