@@ -701,6 +701,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "lightbox-thumbs"
+version = "0.2.0"
+dependencies = [
+ "crc32fast",
+ "miniz_oxide 0.8.9",
+ "png",
+ "roxmltree 0.21.1",
+ "windows",
+ "windows-core",
+]
+
+[[package]]
 name = "lock_api"
 version = "0.4.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"

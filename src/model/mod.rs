@@ -148,12 +148,27 @@ pub fn load(path: &Path) -> Result<Mesh, String> {
         .extension()
         .map(|e| e.to_string_lossy().to_ascii_lowercase())
         .unwrap_or_default();
-    match ext.as_str() {
-        "stl" => stl::parse(&data),
-        "obj" => obj::parse(&data, path.parent()),
-        "3mf" => threemf::parse(&data),
+    parse(&data, &ext, path.parent())
+}
+
+/// Parses a model file's bytes; `ext` is its lower-case extension, `dir`
+/// the folder an OBJ's material library is looked up in.
+pub fn parse(data: &[u8], ext: &str, dir: Option<&Path>) -> Result<Mesh, String> {
+    match ext {
+        "stl" => stl::parse(data),
+        "obj" => obj::parse(data, dir),
+        "3mf" => threemf::parse(data),
         _ => Err("неизвестный формат модели".into()),
     }
+}
+
+/// The preview image a slicer saved in a 3MF package (PNG or JPEG bytes).
+#[allow(
+    dead_code,
+    reason = "used by the Explorer thumbnail handler (shellext/)"
+)]
+pub fn embedded_thumbnail(data: &[u8]) -> Option<Vec<u8>> {
+    threemf::thumbnail(data)
 }
 
 #[cfg(test)]

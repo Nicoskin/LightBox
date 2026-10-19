@@ -1,5 +1,5 @@
-# Builds a release: the viewer, the installer that embeds it, and the
-# checksum the viewer's updater verifies.
+# Builds a release: the viewer, the Explorer thumbnail handler, the
+# installer that embeds both, and the checksum the viewer's updater verifies.
 #
 #   pwsh tools/release.ps1 -Repo owner/name
 #
@@ -18,10 +18,16 @@ if ($Repo) { $env:LIGHTBOX_UPDATE_REPO = $Repo } else { Remove-Item Env:LIGHTBOX
 
 # Separate target folders: a viewer running from target\release keeps its
 # exe locked.
+# The Explorer thumbnail handler (shellext/): its own profile, where a
+# panic unwinds to the COM boundary instead of aborting.
+cargo build --profile shellext -p lightbox-thumbs --manifest-path "$root\Cargo.toml" --target-dir "$root\target\dist"
+if ($LASTEXITCODE) { throw "thumbnail handler build failed" }
+
 cargo build --release --manifest-path "$root\Cargo.toml" --target-dir "$root\target\dist"
 if ($LASTEXITCODE) { throw "viewer build failed" }
 
 $env:LIGHTBOX_EXE = "$root\target\dist\release\lightbox.exe"
+$env:LIGHTBOX_THUMBS_DLL = "$root\target\dist\shellext\lightbox_thumbs.dll"
 $env:LIGHTBOX_VERSION = $version
 cargo build --release --manifest-path "$root\installer\Cargo.toml" --target-dir "$root\target\dist-setup"
 if ($LASTEXITCODE) { throw "installer build failed" }
