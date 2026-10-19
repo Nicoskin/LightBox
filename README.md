@@ -41,7 +41,7 @@
 
 ## Установка
 
-Скачайте `lightbox-…-setup.exe` со страницы [Releases](https://github.com/Nicoskin/LightBox/releases) и запустите.
+**[Скачать установщик](https://github.com/Nicoskin/LightBox/releases/latest/download/lightbox-setup.exe)** (`lightbox-setup.exe`, последняя версия) и запустите. Все версии — на странице [Releases](https://github.com/Nicoskin/LightBox/releases).
 
 - Устанавливается только для текущего пользователя, права администратора не нужны.
 - При установке можно сразу сделать Lightbox программой по умолчанию для всех форматов. Windows покажет страницу «Приложения по умолчанию», где выбор подтверждается одним нажатием.

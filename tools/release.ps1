@@ -5,7 +5,8 @@
 #
 # -Repo (or $env:LIGHTBOX_UPDATE_REPO) is the GitHub repository whose
 # Releases the viewer checks for updates; without it updates are off.
-# Output in dist/: lightbox-<version>-setup.exe and its .sha256. Publish
+# Output in dist/: lightbox-setup.exe and its .sha256 (a fixed name, so that
+# .../releases/latest/download/lightbox-setup.exe always works). Publish
 # with the command printed at the end (GitHub CLI).
 
 param([string]$Repo = $env:LIGHTBOX_UPDATE_REPO)
@@ -26,10 +27,10 @@ cargo build --release --manifest-path "$root\installer\Cargo.toml" --target-dir 
 if ($LASTEXITCODE) { throw "installer build failed" }
 
 $dist = New-Item -ItemType Directory -Force "$root\dist"
-$setup = Join-Path $dist "lightbox-$version-setup.exe"
+$setup = Join-Path $dist "lightbox-setup.exe"
 Copy-Item "$root\target\dist-setup\release\lightbox-setup.exe" $setup -Force
 $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
-Set-Content -Path "$setup.sha256" -Value "$hash  lightbox-$version-setup.exe" -NoNewline -Encoding ascii
+Set-Content -Path "$setup.sha256" -Value "$hash  lightbox-setup.exe" -NoNewline -Encoding ascii
 
 Write-Host ""
 Write-Host "Lightbox $version" -ForegroundColor Green
