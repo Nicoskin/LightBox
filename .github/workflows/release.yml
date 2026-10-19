@@ -1,0 +1,198 @@
+# A pushed tag v* builds a release and saves it as a draft GitHub release
+# with lightbox-setup.exe and lightbox-setup.exe.sha256 (see docs/SIGNING.md).
+#
+# Same steps as tools/release.ps1 (keep the two in sync), plus code signing
+# through SignPath in between: lightbox.exe is signed before the installer
+# embeds it, then the installer itself is signed. Without the SignPath
+# secret and variables the release is built unsigned, with a warning.
+#
+# Tags with a "-" (v0.3.0-rc1) are pre-releases: signed with the test
+# signing policy and allowed not to match the version in Cargo.toml.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write # the draft release
+  actions: read # SignPath downloads the unsigned artifacts with this token
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # The repository whose releases the viewer checks for updates.
+  LIGHTBOX_UPDATE_REPO: ${{ github.repository }}
+
+jobs:
+  release:
+    runs-on: windows-latest
+    timeout-minutes: 180
+    env:
+      SIGNPATH_ENABLED: ${{ secrets.SIGNPATH_API_TOKEN != '' && vars.SIGNPATH_ORGANIZATION_ID != '' }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: ilammy/setup-nasm@v1
+
+      # No build cache here: a signed release is built from scratch.
+
+      - name: Version
+        id: version
+        shell: pwsh
+        env:
+          RELEASE_POLICY: ${{ vars.SIGNPATH_SIGNING_POLICY_SLUG || 'release-signing' }}
+          TEST_POLICY: ${{ vars.SIGNPATH_TEST_SIGNING_POLICY_SLUG || 'test-signing' }}
+        run: |
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
+          $tag = $env:GITHUB_REF_NAME
+          $pre = $tag.Contains('-')
+          if ($tag -ne "v$version") {
+            if (-not $pre) {
+              Write-Output "::error::Tag $tag does not match the version in Cargo.toml ($version)"
+              exit 1
+            }
+            Write-Output "::warning::Pre-release tag $tag, Cargo.toml says ${version}, building ${version}"
+          }
+          $policy = if ($pre) { $env:TEST_POLICY } else { $env:RELEASE_POLICY }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          "prerelease=$($pre.ToString().ToLower())" >> $env:GITHUB_OUTPUT
+          "policy=$policy" >> $env:GITHUB_OUTPUT
+
+      - name: SignPath not configured
+        if: env.SIGNPATH_ENABLED != 'true'
+        run: >-
+          Write-Output "::warning title=Unsigned release::SIGNPATH_API_TOKEN
+          (secret) or SIGNPATH_ORGANIZATION_ID (variable) is not set, so this
+          release is NOT signed. See docs/SIGNING.md."
+
+      - name: Build viewer
+        run: cargo build --release --locked --target-dir target/dist
+
+      # --- lightbox.exe -> SignPath ---------------------------------------
+
+      - name: Upload unsigned lightbox.exe
+        id: unsigned-exe
+        if: env.SIGNPATH_ENABLED == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-lightbox-exe
+          path: target/dist/release/lightbox.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Sign lightbox.exe
+        if: env.SIGNPATH_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || github.event.repository.name }}
+          signing-policy-slug: ${{ steps.version.outputs.policy }}
+          github-artifact-id: ${{ steps.unsigned-exe.outputs.artifact-id }}
+          wait-for-completion: true
+          # Release signing waits for a manual approval in SignPath.
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed/exe
+
+      - name: Use signed lightbox.exe
+        if: env.SIGNPATH_ENABLED == 'true'
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature signed/exe/lightbox.exe
+          if (-not $sig.SignerCertificate) { throw "signed/exe/lightbox.exe has no signature" }
+          Write-Output "lightbox.exe: $($sig.Status), $($sig.SignerCertificate.Subject)"
+          Copy-Item signed/exe/lightbox.exe target/dist/release/lightbox.exe -Force
+
+      # --- installer embedding it -----------------------------------------
+
+      - name: Build installer
+        shell: pwsh
+        env:
+          LIGHTBOX_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $env:LIGHTBOX_EXE = "$PWD\target\dist\release\lightbox.exe"
+          cargo build --release --locked --manifest-path installer/Cargo.toml --target-dir target/dist-setup
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item target/dist-setup/release/lightbox-setup.exe dist/lightbox-setup.exe -Force
+
+      - name: Upload unsigned installer
+        id: unsigned-setup
+        if: env.SIGNPATH_ENABLED == 'true'
+        uses: actions/upload-artifact@v7
+        with:
+          name: unsigned-lightbox-setup
+          path: dist/lightbox-setup.exe
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Sign installer
+        if: env.SIGNPATH_ENABLED == 'true'
+        uses: signpath/github-action-submit-signing-request@v3
+        with:
+          api-token: ${{ secrets.SIGNPATH_API_TOKEN }}
+          organization-id: ${{ vars.SIGNPATH_ORGANIZATION_ID }}
+          project-slug: ${{ vars.SIGNPATH_PROJECT_SLUG || github.event.repository.name }}
+          signing-policy-slug: ${{ steps.version.outputs.policy }}
+          github-artifact-id: ${{ steps.unsigned-setup.outputs.artifact-id }}
+          wait-for-completion: true
+          wait-for-completion-timeout-in-seconds: 3600
+          output-artifact-directory: signed/setup
+
+      - name: Use signed installer
+        if: env.SIGNPATH_ENABLED == 'true'
+        shell: pwsh
+        run: |
+          $sig = Get-AuthenticodeSignature signed/setup/lightbox-setup.exe
+          if (-not $sig.SignerCertificate) { throw "signed/setup/lightbox-setup.exe has no signature" }
+          Write-Output "lightbox-setup.exe: $($sig.Status), $($sig.SignerCertificate.Subject)"
+          Copy-Item signed/setup/lightbox-setup.exe dist/lightbox-setup.exe -Force
+
+      # --- checksum and the draft release ---------------------------------
+
+      # The format the updater (src/update.rs) and release.ps1 use.
+      - name: SHA-256
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash dist/lightbox-setup.exe -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path dist/lightbox-setup.exe.sha256 -Value "$hash  lightbox-setup.exe" -NoNewline -Encoding ascii
+          Write-Output "sha256 $hash"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: lightbox-setup-${{ github.ref_name }}
+          path: dist/
+          retention-days: 30
+
+      - name: Draft release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $files = "dist/lightbox-setup.exe", "dist/lightbox-setup.exe.sha256"
+          $draft = gh release view $tag --json isDraft --jq .isDraft 2>$null
+          if ($LASTEXITCODE -eq 0) {
+            # A re-run: replace the files, but never in a published release.
+            if ($draft -ne 'true') {
+              Write-Output "::error::Release $tag is already published; delete it or use a new tag"
+              exit 1
+            }
+            gh release upload $tag @files --clobber
+          } else {
+            $flags = "--draft", "--verify-tag", "--generate-notes", "--title", "Lightbox $env:VERSION"
+            if ($env:PRERELEASE -eq 'true') { $flags += "--prerelease" }
+            gh release create $tag @files @flags
+          }
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          Write-Output "Draft release: $env:GITHUB_SERVER_URL/$env:GITHUB_REPOSITORY/releases (publish it there)"

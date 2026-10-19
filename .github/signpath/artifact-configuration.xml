@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  SignPath artifact configuration for Lightbox (paste it into the project's
+  default artifact configuration, see docs/SIGNING.md).
+
+  release.yml submits one GitHub Actions artifact per signing request: a ZIP
+  with a single exe, first lightbox.exe, then lightbox-setup.exe that embeds
+  the signed lightbox.exe. "*.exe" matches either one.
+-->
+<artifact-configuration xmlns="http://signpath.io/artifact-configuration/v1">
+  <zip-file>
+    <pe-file path="*.exe">
+      <authenticode-sign />
+    </pe-file>
+  </zip-file>
+</artifact-configuration>
