@@ -143,6 +143,8 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("lightbox-watch-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let w = Watcher::new(&dir, || {}).expect("watcher");
+        // The thread needs a moment to start listening.
+        std::thread::sleep(Duration::from_millis(200));
         let f = dir.join("a.png");
         std::fs::write(&f, b"x").unwrap();
         let got = w.rx.recv_timeout(Duration::from_secs(5)).expect("change");

@@ -389,3 +389,49 @@ impl Overlay {
         Ok(())
     }
 }
+
+impl Overlay {
+    /// Caption pill centred at the top of `r`.
+    pub(super) unsafe fn label(&self, r: Rect, text: &str, s: f32) -> Result<()> {
+        use windows::Win32::Graphics::DirectWrite::DWRITE_TEXT_METRICS;
+        let wide: Vec<u16> = text.encode_utf16().collect();
+        let mut m = DWRITE_TEXT_METRICS::default();
+        // SAFETY: plain DirectWrite calls; the layout lives for the call.
+        unsafe {
+            let layout = self.dwrite.CreateTextLayout(
+                &wide,
+                &self.formats.detail,
+                (r.x1 - r.x0) as f32,
+                100.0,
+            )?;
+            layout.GetMetrics(&mut m)?;
+        }
+        let pad = 10.0 * s;
+        let w = (m.width + 2.0 * pad).min((r.x1 - r.x0) as f32);
+        let cx = ((r.x0 + r.x1) / 2.0) as f32;
+        let pill = D2D_RECT_F {
+            left: cx - w / 2.0,
+            top: r.y0 as f32,
+            right: cx + w / 2.0,
+            bottom: r.y1 as f32,
+        };
+        let radius = (pill.bottom - pill.top) / 2.0;
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.62));
+            self.ctx
+                .FillRoundedRectangle(&rounded(pill, radius), &self.brush);
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+            self.glyph_str(
+                text,
+                D2D_RECT_F {
+                    left: pill.left + pad,
+                    right: pill.right - pad + 2.0,
+                    ..pill
+                },
+                &self.formats.detail,
+            );
+        }
+        Ok(())
+    }
+}

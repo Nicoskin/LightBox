@@ -171,7 +171,7 @@ impl App {
         if !is_vector(&self.current) || self.orientation_of(key, img) != Orientation::IDENTITY {
             return None;
         }
-        let vp = self.viewport();
+        let vp = self.image_vp();
         let disp = self.display_of(key, img);
         let k = view.scale * disp.0 / f64::from(img.width);
         Some((

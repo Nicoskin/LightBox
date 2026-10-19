@@ -5,7 +5,9 @@
 //! - `mode`: fullscreen ↔ windowed switching and window geometry.
 
 mod animation;
+mod batch;
 mod chrome;
+mod compare;
 mod files;
 mod folder;
 mod input;
@@ -262,6 +264,10 @@ pub struct App {
     /// Animated GIF / WebP / APNG: playback and frames being decoded.
     playback: Option<animation::Playback>,
     frames_rx: Option<animation::FramesRx>,
+    /// Photos picked in the filmstrip for batch rotation (cache keys).
+    selected: HashSet<String>,
+    /// Comparing with photo A (C).
+    compare: Option<compare::Compare>,
     /// Slideshow running.
     slideshow: bool,
     /// Watches the current folder; changes waiting to settle.
@@ -377,6 +383,8 @@ impl App {
             tooltip: None,
             playback: None,
             frames_rx: None,
+            selected: HashSet::new(),
+            compare: None,
             slideshow: false,
             watcher: None,
             changed: Vec::new(),
@@ -566,7 +574,7 @@ impl App {
     /// Screen area photos are fitted into; fullscreen keeps the bottom free
     /// for the panel (and the filmstrip), like Picasa.
     fn view_area(&self) -> Rect {
-        let (w, h) = self.viewport();
+        let (w, h) = self.image_vp();
         match self.mode {
             Mode::Fullscreen => {
                 let m = self.monitor.px(FIT_MARGIN_DIP);
@@ -600,7 +608,7 @@ impl App {
         Some(View::fit_in(
             d,
             self.view_area(),
-            self.viewport(),
+            self.image_vp(),
             false,
             self.angle,
         ))
@@ -609,14 +617,14 @@ impl App {
     /// Keeps a view on screen (centred in the view area where it fits).
     fn clamp(&self, v: View) -> View {
         match self.display() {
-            Some(d) => v.clamped_in(d, self.view_area(), self.viewport()),
+            Some(d) => v.clamped_in(d, self.view_area(), self.image_vp()),
             None => v,
         }
     }
 
     /// Image rectangle on screen (viewport coordinates), if an image is shown.
     fn image_rect(&self) -> Option<Rect> {
-        Some(self.view.image_rect(self.display()?, self.viewport()))
+        Some(self.view.image_rect(self.display()?, self.image_vp()))
     }
 
     /// One image layer: `view` placement at `opacity`. Huge images draw
@@ -629,7 +637,7 @@ impl App {
         opacity: f32,
         detail: Option<&'a GpuImage>,
     ) -> Option<Layer<'a>> {
-        let vp = self.viewport();
+        let vp = self.image_vp();
         let orient = self.orientation_of(key, img);
         let disp = self.display_of(key, img);
         let rect = view.image_rect(disp, vp);
@@ -741,7 +749,16 @@ impl App {
         let shown = self.shown.clone();
         let detail = self.detail_tex();
         let mut layers = Vec::with_capacity(2);
+        let cmp = self
+            .compare
+            .as_ref()
+            .map(|c| (c.key.clone(), Rc::clone(&c.tex), c.layout, c.held));
+        if let Some((a_key, a_tex, layout, held)) = &cmp {
+            let b = shown.as_ref().map(|(k, t)| (k.as_str(), &**t));
+            layers = self.compare_layers((a_key, a_tex, *layout, *held), b, detail.as_deref());
+        }
         match (&self.anim, &shown) {
+            _ if cmp.is_some() => {}
             (
                 Some(Anim {
                     kind: AnimKind::Turn { old, shift },
@@ -802,6 +819,7 @@ impl App {
             info: self.info_view(),
             histogram: self.histogram_view(),
             tooltip: self.tooltip_view(),
+            labels: self.compare_labels(),
         };
         self.gpu.draw(&params, &ui)
     }
@@ -855,7 +873,7 @@ impl App {
                 }
             } else {
                 let t = self.anim_t();
-                let vp = self.viewport();
+                let vp = self.image_vp();
                 match &anim.kind {
                     AnimKind::View { from, to, anchor } => {
                         self.view = from.interpolate(to, t, *anchor, vp);

@@ -38,9 +38,19 @@ impl App {
         {
             return t.orientation;
         }
-        self.cache
-            .image(path)
-            .map_or(Orientation::IDENTITY, |i| i.orientation)
+        if let Some(i) = self.cache.image(path) {
+            return i.orientation;
+        }
+        // Not decoded (rotated from the filmstrip): the JPEG's EXIF tag.
+        let mut head = vec![0u8; 128 * 1024];
+        let n = std::fs::File::open(path)
+            .and_then(|mut f| std::io::Read::read(&mut f, &mut head))
+            .unwrap_or(0);
+        if head[..n].starts_with(&[0xFF, 0xD8, 0xFF]) {
+            crate::metadata::jpeg_orientation(&head[..n])
+        } else {
+            Orientation::IDENTITY
+        }
     }
 
     /// Queues writing the user's edit of `path` into the file.

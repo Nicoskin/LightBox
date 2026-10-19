@@ -62,6 +62,8 @@ pub struct Ui {
     pub histogram: Option<HistogramView>,
     /// Tooltip: the control it belongs to and the text.
     pub tooltip: Option<(Rect, String)>,
+    /// Captions centred at the top of their rectangles (compare: A / B).
+    pub labels: Vec<(Rect, String)>,
 }
 
 impl Ui {
@@ -77,6 +79,7 @@ impl Ui {
             && self.info.is_none()
             && self.histogram.is_none()
             && self.tooltip.is_none()
+            && self.labels.is_empty()
     }
 }
 
@@ -143,6 +146,10 @@ pub struct CellView {
     pub thumb: Option<Rc<Thumb>>,
     pub current: bool,
     pub hot: bool,
+    /// Picked for batch rotation.
+    pub selected: bool,
+    /// The user's rotation of this photo (drawn turned).
+    pub turn: crate::orientation::Orientation,
 }
 
 /// The settings card.
@@ -305,6 +312,9 @@ impl Overlay {
             }
             if let Some(card) = &ui.card {
                 self.card(card, ui.scale);
+            }
+            for (r, text) in &ui.labels {
+                self.label(*r, text, ui.scale)?;
             }
             if let Some((anchor, text)) = &ui.tooltip {
                 self.tooltip(*anchor, text, ui.scale)?;

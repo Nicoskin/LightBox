@@ -94,6 +94,7 @@ impl App {
                 Action::Info => "Информация о файле (I)",
                 Action::Histogram => "Гистограмма (H)",
                 Action::Slideshow => "Слайд-шоу (S, F5)",
+                Action::Compare => "Сравнить с соседним фото (C) · V — вид",
                 Action::Save => "Сохранить поворот в файл (Ctrl+S)",
                 Action::SaveAs => "Сохранить как… (Ctrl+Shift+S)",
                 Action::Reset => "Отменить поворот",

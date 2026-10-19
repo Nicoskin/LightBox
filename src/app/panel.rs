@@ -169,6 +169,7 @@ impl App {
                     Action::Info => self.info_state.open,
                     Action::Histogram => self.hist_state.open,
                     Action::Slideshow => self.slideshow,
+                    Action::Compare => self.compare.is_some(),
                     _ => false,
                 },
                 enabled: match b.action {
@@ -239,6 +240,12 @@ impl App {
                     rect,
                     thumb: self.thumbs.as_ref().and_then(|t| t.get(&self.files[i])),
                     current: i == self.index,
+                    selected: self.selected.contains(&cache::key(&self.files[i])),
+                    turn: self
+                        .edits
+                        .get(&cache::key(&self.files[i]))
+                        .copied()
+                        .unwrap_or(Orientation::IDENTITY),
                     hot: self.hot == Some(Hot::Cell(i)),
                 })
                 .collect()
@@ -275,6 +282,9 @@ impl App {
 
     /// Rotates / mirrors the current photo on screen (saved to the file in M2).
     pub(super) fn rotate(&mut self, op: Orientation) -> Result<()> {
+        if !self.selected.is_empty() {
+            return self.rotate_selection(op);
+        }
         if self.shown.is_none() {
             return Ok(());
         }

@@ -423,24 +423,59 @@ impl Overlay {
                 let mut frame = r;
                 if let Some((bmp, w, h)) = bitmap {
                     let (cw, ch) = (r.right - r.left, r.bottom - r.top);
-                    let k = (cw / w as f32).min(ch / h as f32);
-                    let (dw, dh) = (w as f32 * k, h as f32 * k);
+                    // The user's rotation: the cell shows the photo turned.
+                    let swap = c.turn.swaps_axes();
+                    let (sw, sh) = if swap {
+                        (h as f32, w as f32)
+                    } else {
+                        (w as f32, h as f32)
+                    };
+                    let k = (cw / sw).min(ch / sh);
+                    let (dw, dh) = (sw * k, sh * k);
                     let dst = D2D_RECT_F {
                         left: r.left + (cw - dw) / 2.0,
                         top: r.top + (ch - dh) / 2.0,
                         right: r.left + (cw + dw) / 2.0,
                         bottom: r.top + (ch + dh) / 2.0,
                     };
-                    let dim = if c.current || c.hot { 1.0 } else { 0.72 };
+                    let dim = if c.current || c.hot || c.selected {
+                        1.0
+                    } else {
+                        0.72
+                    };
+                    let m = turn_matrix(c.turn, (w as f32, h as f32), dst);
+                    self.ctx.SetTransform(&m);
                     self.ctx.DrawBitmap(
                         &bmp,
-                        Some(&dst),
+                        Some(&D2D_RECT_F {
+                            left: 0.0,
+                            top: 0.0,
+                            right: w as f32,
+                            bottom: h as f32,
+                        }),
                         o * dim,
                         D2D1_INTERPOLATION_MODE_HIGH_QUALITY_CUBIC,
                         None,
                         None,
                     );
+                    self.ctx.SetTransform(&Matrix3x2::identity());
                     frame = dst;
+                }
+                if c.selected {
+                    // Picked for batch rotation: accent frame.
+                    self.brush.SetColor(&rgba(0.30, 0.56, 1.0, 0.95 * o));
+                    let w = 3.0 * s;
+                    self.ctx.DrawRectangle(
+                        &D2D_RECT_F {
+                            left: frame.left + w / 2.0,
+                            top: frame.top + w / 2.0,
+                            right: frame.right - w / 2.0,
+                            bottom: frame.bottom - w / 2.0,
+                        },
+                        &self.brush,
+                        w,
+                        None::<&ID2D1StrokeStyle>,
+                    );
                 }
                 if c.current || c.hot {
                     let a = if c.current { 0.95 } else { 0.5 };
@@ -587,5 +622,71 @@ impl Overlay {
                 self.glyph_str(&seg.text, inner, &self.formats.option);
             }
         }
+    }
+}
+
+/// Transform drawing a `size` bitmap (placed at the origin) into `dst`
+/// turned by `turn`: the inverse of the shader's display → stored mapping.
+fn turn_matrix(
+    turn: crate::orientation::Orientation,
+    size: (f32, f32),
+    dst: D2D_RECT_F,
+) -> Matrix3x2 {
+    // Display (x, y) in 0..1 as a + b·s + c·t of stored (s, t).
+    let (ax, ay): ([f32; 3], [f32; 3]) = match turn.exif() {
+        2 => ([1.0, -1.0, 0.0], [0.0, 0.0, 1.0]),
+        3 => ([1.0, -1.0, 0.0], [1.0, 0.0, -1.0]),
+        4 => ([0.0, 1.0, 0.0], [1.0, 0.0, -1.0]),
+        5 => ([0.0, 0.0, 1.0], [0.0, 1.0, 0.0]),
+        6 => ([1.0, 0.0, -1.0], [0.0, 1.0, 0.0]),
+        7 => ([1.0, 0.0, -1.0], [1.0, -1.0, 0.0]),
+        8 => ([0.0, 0.0, 1.0], [1.0, -1.0, 0.0]),
+        _ => ([0.0, 1.0, 0.0], [0.0, 0.0, 1.0]),
+    };
+    let (dw, dh) = (dst.right - dst.left, dst.bottom - dst.top);
+    let (w, h) = size;
+    Matrix3x2 {
+        M11: dw * ax[1] / w,
+        M12: dh * ay[1] / w,
+        M21: dw * ax[2] / h,
+        M22: dh * ay[2] / h,
+        M31: dst.left + dw * ax[0],
+        M32: dst.top + dh * ay[0],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::orientation::Orientation;
+
+    fn apply(m: &Matrix3x2, x: f32, y: f32) -> (f32, f32) {
+        (m.M11 * x + m.M21 * y + m.M31, m.M12 * x + m.M22 * y + m.M32)
+    }
+
+    #[test]
+    fn turned_thumbnail_corners() {
+        // A 4 × 2 thumbnail turned 90° clockwise into a 2 × 4 cell area.
+        let dst = D2D_RECT_F {
+            left: 10.0,
+            top: 20.0,
+            right: 12.0,
+            bottom: 24.0,
+        };
+        let m = turn_matrix(Orientation::ROTATE_CW, (4.0, 2.0), dst);
+        // Stored top-left lands top-right, stored top-right bottom-right.
+        assert_eq!(apply(&m, 0.0, 0.0), (12.0, 20.0));
+        assert_eq!(apply(&m, 4.0, 0.0), (12.0, 24.0));
+        assert_eq!(apply(&m, 0.0, 2.0), (10.0, 20.0));
+        let id = turn_matrix(
+            Orientation::IDENTITY,
+            (4.0, 2.0),
+            D2D_RECT_F {
+                right: 14.0,
+                bottom: 22.0,
+                ..dst
+            },
+        );
+        assert_eq!(apply(&id, 4.0, 2.0), (14.0, 22.0));
     }
 }

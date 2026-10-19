@@ -103,7 +103,7 @@ impl App {
         }
         let img = self.cache.image(&self.current)?;
         let disp = self.display_of(key, tex);
-        let (ix, iy) = self.view.image_point(p, self.viewport());
+        let (ix, iy) = self.view.image_point(p, self.image_vp());
         if ix < 0.0 || iy < 0.0 || ix >= disp.0 || iy >= disp.1 {
             return None;
         }
@@ -122,8 +122,8 @@ impl App {
     /// always with the info panel open).
     pub(super) fn update_probe(&mut self, p: (f64, f64)) -> Result<()> {
         let wanted = self.view.scale >= 1.0 - 1e-9 || self.info_state.open;
-        let probe = if wanted && !self.over_panel(p) && self.drag.is_none() {
-            self.probe_at(p)
+        let probe = if wanted && !self.over_panel(p) && !self.over_a(p) && self.drag.is_none() {
+            self.probe_at(self.to_image_space(p))
         } else {
             None
         };

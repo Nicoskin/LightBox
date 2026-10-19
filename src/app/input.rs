@@ -11,7 +11,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
     VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_SUBTRACT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    PostMessageW, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CLOSE, WM_KEYDOWN, WM_LBUTTONDBLCLK,
+    PostMessageW, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CLOSE, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDBLCLK,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_MOUSEWHEEL, WM_NCMOUSEMOVE, WM_RBUTTONUP,
     WM_XBUTTONUP, XBUTTON1,
 };
@@ -66,6 +66,10 @@ impl App {
             }
         }
         match msg {
+            WM_KEYUP if wparam.0 as u16 == VK_SPACE.0 => {
+                self.hold_a(false)?;
+                Ok(None)
+            }
             WM_KEYDOWN => {
                 // Bit 30: the key was already down (auto-repeat).
                 self.fast_nav = (lparam.0 >> 30) & 1 == 1;
@@ -195,7 +199,12 @@ impl App {
         self.fast_nav = false;
         match h {
             Hot::Button(a) => self.run_action(a),
-            Hot::Cell(i) => self.go_to(i),
+            Hot::Cell(i) => {
+                if self.select_cell(i, key_down(VK_CONTROL.0), key_down(VK_SHIFT.0))? {
+                    return Ok(());
+                }
+                self.go_to(i)
+            }
             Hot::Caption(b) => self.caption_action(b),
             Hot::Menu(bg) => self.choose_background(bg),
             Hot::DialReset => self.set_angle(0.0),
@@ -238,6 +247,7 @@ impl App {
             Action::Info => self.toggle_info(),
             Action::Histogram => self.toggle_histogram(),
             Action::Slideshow => self.toggle_slideshow(),
+            Action::Compare => self.toggle_compare(),
         }
     }
 
@@ -249,6 +259,8 @@ impl App {
             k if ctrl && k == ch(b'S') => {
                 if shift {
                     self.save_as()?;
+                } else if !self.selected.is_empty() {
+                    self.save_selection()?;
                 } else {
                     self.save_current()?;
                 }
@@ -276,11 +288,15 @@ impl App {
             // Space closes a QuickLook preview (as in Explorer).
             k if k == VK_SPACE.0 && self.quicklook => self.close_window(),
             // Space: pause / play an animation; "," / ".": frame by frame.
+            // Comparing in one place: hold Space to see A.
+            k if k == VK_SPACE.0 && self.hold_a(true)? => {}
             k if k == VK_SPACE.0 => {
                 self.toggle_playback()?;
             }
             k if k == VK_OEM_COMMA.0 => self.step_frame(-1)?,
             k if k == VK_OEM_PERIOD.0 => self.step_frame(1)?,
+            k if k == VK_ESCAPE.0 && !self.selected.is_empty() => self.clear_selection()?,
+            k if k == VK_ESCAPE.0 && self.compare.is_some() => self.toggle_compare()?,
             k if k == VK_ESCAPE.0 && self.slideshow => {
                 self.stop_slideshow();
                 self.render()?;
@@ -322,6 +338,8 @@ impl App {
             k if k == ch(b'G') => self.toggle_grid()?,
             k if k == ch(b'H') => self.toggle_histogram()?,
             k if k == ch(b'S') || k == VK_F5.0 => self.toggle_slideshow()?,
+            k if k == ch(b'C') => self.toggle_compare()?,
+            k if k == ch(b'V') => self.toggle_compare_layout()?,
             k if k == ch(b'I') => self.toggle_info()?,
             // [ and ]: turn by 1° (Shift: 0.1°).
             k if k == VK_OEM_4.0 || k == VK_OEM_6.0 => {
@@ -346,7 +364,8 @@ impl App {
         let browse = self.over_panel(p) || zooms == key_down(VK_CONTROL.0);
         if !browse {
             let notches = f64::from(delta) / f64::from(WHEEL_DELTA);
-            return self.zoom_by(ZOOM_STEP.powf(notches), p);
+            let anchor = self.to_image_space(p);
+            return self.zoom_by(ZOOM_STEP.powf(notches), anchor);
         }
         // Browsing: one file per full notch (high-resolution wheels send
         // smaller deltas that accumulate).
@@ -406,9 +425,11 @@ impl App {
 
     fn on_click(&mut self, p: (f64, f64)) -> Result<()> {
         // Click on the free (dimmed) area → windowed mode.
+        let ip = self.to_image_space(p);
         if self.mode == Mode::Fullscreen
+            && self.compare.is_none()
             && !self.over_panel(p)
-            && !self.image_rect().is_some_and(|r| r.contains(p))
+            && !self.image_rect().is_some_and(|r| r.contains(ip))
         {
             self.go_windowed()?;
         }
@@ -424,8 +445,9 @@ impl App {
         }
         match self.mode {
             Mode::Fullscreen => {
-                if self.image_rect().is_some_and(|r| r.contains(p)) {
-                    self.toggle_zoom(p)
+                let ip = self.to_image_space(p);
+                if self.image_rect().is_some_and(|r| r.contains(ip)) {
+                    self.toggle_zoom(ip)
                 } else {
                     self.on_click(p)
                 }
@@ -437,14 +459,14 @@ impl App {
     pub(super) fn zoom_by(&mut self, factor: f64, anchor: (f64, f64)) -> Result<()> {
         let base = self.zoom_target();
         self.zoom_to_view(
-            base.zoom_at(base.scale * factor, anchor, self.viewport()),
+            base.zoom_at(base.scale * factor, anchor, self.image_vp()),
             anchor,
         )
     }
 
     fn zoom_to(&mut self, scale: f64, anchor: (f64, f64)) -> Result<()> {
         let base = self.zoom_target();
-        self.zoom_to_view(base.zoom_at(scale, anchor, self.viewport()), anchor)
+        self.zoom_to_view(base.zoom_at(scale, anchor, self.image_vp()), anchor)
     }
 
     fn zoom_fit(&mut self) -> Result<()> {

@@ -29,6 +29,8 @@ pub enum Action {
     Histogram,
     /// Slideshow (S, F5).
     Slideshow,
+    /// Compare two photos (C).
+    Compare,
     Save,
     SaveAs,
     Reset,
@@ -221,6 +223,7 @@ pub fn layout(
         Item::Button(Info, Icon::Glyph('\u{E946}'), false),
         Item::Button(Histogram, Icon::Histogram, false),
         Item::Button(Slideshow, Icon::Glyph('\u{E786}'), false),
+        Item::Button(Compare, Icon::Text("A|B"), false),
         Item::Gap,
         Item::Button(Filmstrip, Icon::Filmstrip, false),
         Item::Button(ToggleMode, mode_icon, false),
@@ -334,7 +337,7 @@ mod tests {
     fn fullscreen_layout() {
         let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false, true);
         no_overlaps(&l);
-        assert_eq!(l.buttons.len(), 23);
+        assert_eq!(l.buttons.len(), 24);
         assert!(l.caption.is_some() && l.zoom_text.is_some());
         let strip = l.strip.unwrap();
         assert_eq!(strip.y1, l.bar.y0);

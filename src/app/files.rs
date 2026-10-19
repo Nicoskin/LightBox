@@ -270,6 +270,7 @@ impl App {
         self.textures.remove(&key);
         self.reloading.remove(&key);
         self.edits.remove(&key);
+        self.compare_key_removed(&key);
         let Some(i) = self.files.iter().position(|p| library::same_path(p, path)) else {
             return Ok(());
         };
