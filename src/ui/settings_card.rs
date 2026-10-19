@@ -17,6 +17,7 @@ pub enum Choice {
     Animations(bool),
     TurnAnimation(bool),
     Dim(u8),
+    Slideshow(u8),
     Resident(bool),
     QuickLook(bool),
     Autostart(bool),
@@ -102,6 +103,14 @@ pub fn rows() -> Vec<Row> {
             choices: vec![(Dim(60), "60 %"), (Dim(80), "80 %"), (Dim(92), "92 %")],
         },
         Row {
+            label: "Слайд-шоу (S, F5)",
+            choices: vec![
+                (Slideshow(2), "2 с"),
+                (Slideshow(4), "4 с"),
+                (Slideshow(8), "8 с"),
+            ],
+        },
+        Row {
             label: "Подтверждать удаление",
             choices: vec![(ConfirmDelete(true), "Да"), (ConfirmDelete(false), "Нет")],
         },
@@ -139,6 +148,7 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         Choice::Animations(v) => s.animations == v,
         Choice::TurnAnimation(v) => s.turn_animation == v,
         Choice::Dim(v) => s.dim_percent == v,
+        Choice::Slideshow(v) => s.slideshow_secs == v,
         Choice::Resident(v) => s.resident == v,
         // Only works while the viewer waits in the tray.
         Choice::QuickLook(v) => (s.quick_look && s.resident) == v,
@@ -160,6 +170,7 @@ pub fn apply(s: &mut Settings, c: Choice) {
         Choice::Animations(v) => s.animations = v,
         Choice::TurnAnimation(v) => s.turn_animation = v,
         Choice::Dim(v) => s.dim_percent = v,
+        Choice::Slideshow(v) => s.slideshow_secs = v,
         Choice::Resident(v) => s.resident = v,
         Choice::QuickLook(v) => {
             s.quick_look = v;

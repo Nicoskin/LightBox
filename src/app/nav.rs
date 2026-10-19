@@ -39,6 +39,13 @@ impl App {
         self.start_thumbs();
         self.start_writer();
         self.start_fileops();
+        // Drag & drop needs OLE on this thread; files dropped on the window.
+        // SAFETY: initialises OLE for the UI thread; registering the window
+        // for WM_DROPFILES has no other preconditions.
+        unsafe {
+            let _ = windows::Win32::System::Ole::OleInitialize(None);
+            windows::Win32::UI::Shell::DragAcceptFiles(self.hwnd, true);
+        }
         // A pinned preview is a plain window: the tray viewer stays the one
         // that receives files and Space.
         if !self.pinned {
@@ -86,15 +93,28 @@ impl App {
             return Ok(());
         };
         self.library_rx = None;
-        self.index = files
+        if files.is_empty() {
+            return Ok(()); // nothing left in the folder: keep what is shown
+        }
+        let pos = files
             .iter()
-            .position(|p| library::same_path(p, &self.current))
-            .unwrap_or(0);
+            .position(|p| library::same_path(p, &self.current));
+        // The current file vanished (deleted or renamed elsewhere): show the
+        // one now at its place.
+        let gone = pos.is_none() && self.files.len() > 1;
+        self.index = pos.unwrap_or_else(|| self.index.min(files.len() - 1));
         self.files = files;
         self.strip_pos = self.index as f64;
         if let Some(p) = self.files.get(self.index) {
             self.current = p.clone();
         }
+        if gone {
+            self.angle = 0.0;
+            if self.show_current()? {
+                self.render()?;
+            }
+        }
+        self.watch_folder();
         self.update_title();
         self.request_thumbs();
         self.schedule();

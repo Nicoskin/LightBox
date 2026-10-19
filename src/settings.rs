@@ -156,6 +156,8 @@ pub struct Settings {
     pub imperfect_jpeg: Option<ImperfectJpeg>,
     /// JPEG quality for "Save as".
     pub jpeg_quality: u8,
+    /// Seconds per photo in the slideshow.
+    pub slideshow_secs: u8,
     /// Ask before moving a photo to the recycle bin.
     pub confirm_delete: bool,
     /// Stay in the tray after closing (instant re-opening).
@@ -188,6 +190,7 @@ impl Default for Settings {
             keep_file_dates: true,
             imperfect_jpeg: None,
             jpeg_quality: 92,
+            slideshow_secs: 4,
             confirm_delete: true,
             resident: false,
             autostart: false,

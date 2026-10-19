@@ -7,12 +7,14 @@
 mod animation;
 mod chrome;
 mod files;
+mod folder;
 mod input;
 mod inspector;
 mod mode;
 mod nav;
 mod panel;
 mod save;
+mod slideshow;
 mod system;
 mod textures;
 mod tooltip;
@@ -98,6 +100,10 @@ const MENU_TIMER: usize = 3;
 const TOOLTIP_TIMER: usize = 4;
 /// Next animation frame.
 const ANIM_TIMER: usize = 5;
+/// Next slide.
+const SLIDE_TIMER: usize = 6;
+/// Folder changes settled.
+const WATCH_TIMER: usize = 7;
 /// Filmstrip glide: time constant of the exponential approach, seconds.
 const STRIP_TAU: f64 = 0.06;
 /// Posted by the thumbnail thread.
@@ -118,6 +124,8 @@ const WM_APP_QUICKLOOK: u32 = WM_APP + 10;
 const WM_APP_TRAY: u32 = WM_APP + 11;
 /// Posted by the frame decoder: all frames of an animation are ready.
 const WM_APP_FRAMES: u32 = WM_APP + 12;
+/// Posted by the folder watcher.
+const WM_APP_WATCH: u32 = WM_APP + 13;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -254,6 +262,11 @@ pub struct App {
     /// Animated GIF / WebP / APNG: playback and frames being decoded.
     playback: Option<animation::Playback>,
     frames_rx: Option<animation::FramesRx>,
+    /// Slideshow running.
+    slideshow: bool,
+    /// Watches the current folder; changes waiting to settle.
+    watcher: Option<crate::win::watch::Watcher>,
+    changed: Vec<PathBuf>,
     /// Pixel under the cursor (colour readout).
     probe: Option<inspector::Probe>,
     info_state: inspector::InfoState,
@@ -364,6 +377,9 @@ impl App {
             tooltip: None,
             playback: None,
             frames_rx: None,
+            slideshow: false,
+            watcher: None,
+            changed: Vec::new(),
             probe: None,
             info_state: inspector::InfoState::default(),
             hist_state: inspector::HistState::default(),
@@ -1008,6 +1024,16 @@ impl App {
     }
 
     fn on_timer(&mut self, id: usize) {
+        if id == SLIDE_TIMER
+            && let Err(e) = self.slide_timer()
+        {
+            tracing::error!("slideshow: {e:#}");
+        }
+        if id == WATCH_TIMER
+            && let Err(e) = self.watch_timer()
+        {
+            tracing::error!("folder: {e:#}");
+        }
         if id == ANIM_TIMER
             && let Err(e) = self.frame_timer()
         {
@@ -1082,6 +1108,14 @@ impl App {
             }
             WM_APP_FILEOP => {
                 self.on_fileop()?;
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_WATCH => {
+                self.on_watch();
+                Ok(Some(LRESULT(0)))
+            }
+            windows::Win32::UI::WindowsAndMessaging::WM_DROPFILES => {
+                self.on_drop(windows::Win32::UI::Shell::HDROP(wparam.0 as *mut _))?;
                 Ok(Some(LRESULT(0)))
             }
             WM_APP_FRAMES => {

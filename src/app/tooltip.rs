@@ -93,6 +93,7 @@ impl App {
                 Action::Straighten => "Повернуть на любой угол ( [ и ] )",
                 Action::Info => "Информация о файле (I)",
                 Action::Histogram => "Гистограмма (H)",
+                Action::Slideshow => "Слайд-шоу (S, F5)",
                 Action::Save => "Сохранить поворот в файл (Ctrl+S)",
                 Action::SaveAs => "Сохранить как… (Ctrl+Shift+S)",
                 Action::Reset => "Отменить поворот",

@@ -168,6 +168,7 @@ impl App {
                     Action::Grid => self.settings.pixel_grid,
                     Action::Info => self.info_state.open,
                     Action::Histogram => self.hist_state.open,
+                    Action::Slideshow => self.slideshow,
                     _ => false,
                 },
                 enabled: match b.action {

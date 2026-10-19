@@ -6,9 +6,9 @@ use anyhow::Result;
 use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetDoubleClickTime, GetKeyState, ReleaseCapture, SetCapture, VK_ADD, VK_CONTROL, VK_DELETE,
-    VK_END, VK_ESCAPE, VK_F1, VK_F9, VK_F11, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0, VK_NUMPAD1,
-    VK_OEM_4, VK_OEM_6, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PRIOR,
-    VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_SUBTRACT,
+    VK_END, VK_ESCAPE, VK_F1, VK_F5, VK_F9, VK_F11, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0,
+    VK_NUMPAD1, VK_OEM_4, VK_OEM_6, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS,
+    VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_SUBTRACT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     PostMessageW, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CLOSE, WM_KEYDOWN, WM_LBUTTONDBLCLK,
@@ -237,6 +237,7 @@ impl App {
             Action::Grid => self.toggle_grid(),
             Action::Info => self.toggle_info(),
             Action::Histogram => self.toggle_histogram(),
+            Action::Slideshow => self.toggle_slideshow(),
         }
     }
 
@@ -261,8 +262,9 @@ impl App {
                 }
             }
             k if k == VK_DELETE.0 => self.delete_current()?,
-            // F1..F9: quick folders (Ctrl: the other action, Shift: assign).
-            k if (VK_F1.0..=VK_F9.0).contains(&k) => {
+            // F1..F9 except F5 (slideshow): quick folders (Ctrl: the other
+            // action, Shift: assign).
+            k if (VK_F1.0..=VK_F9.0).contains(&k) && k != VK_F5.0 => {
                 let n = (k - VK_F1.0 + 1) as u8;
                 if shift {
                     self.assign_folder(n)?;
@@ -279,6 +281,10 @@ impl App {
             }
             k if k == VK_OEM_COMMA.0 => self.step_frame(-1)?,
             k if k == VK_OEM_PERIOD.0 => self.step_frame(1)?,
+            k if k == VK_ESCAPE.0 && self.slideshow => {
+                self.stop_slideshow();
+                self.render()?;
+            }
             k if k == VK_ESCAPE.0 && self.menu_open => self.close_menu()?,
             k if k == VK_ESCAPE.0 && self.info_state.open => self.toggle_info()?,
             k if k == VK_ESCAPE.0 && self.dial_open => self.toggle_dial()?,
@@ -315,6 +321,7 @@ impl App {
             k if k == ch(b'N') => self.run_action(Action::Smoothing)?,
             k if k == ch(b'G') => self.toggle_grid()?,
             k if k == ch(b'H') => self.toggle_histogram()?,
+            k if k == ch(b'S') || k == VK_F5.0 => self.toggle_slideshow()?,
             k if k == ch(b'I') => self.toggle_info()?,
             // [ and ]: turn by 1° (Shift: 0.1°).
             k if k == VK_OEM_4.0 || k == VK_OEM_6.0 => {
@@ -363,7 +370,24 @@ impl App {
                 return Ok(());
             }
             drag.moved = true;
+            // Dragging the photo itself out of the window: Ctrl + drag, or
+            // any drag of a fitted photo in fullscreen (it cannot pan).
+            let start = drag.start;
+            let on_image = self.image_rect().is_some_and(|r| r.contains(start));
+            let out = key_down(VK_CONTROL.0)
+                || (self.mode == Mode::Fullscreen && self.fitted && on_image);
+            if out && !self.files.is_empty() && self.shown.is_some() {
+                self.drag = None;
+                // SAFETY: releasing our own capture before the shell's loop.
+                unsafe {
+                    let _ = ReleaseCapture();
+                }
+                return self.drag_out();
+            }
         }
+        let Some(drag) = &mut self.drag else {
+            return Ok(());
+        };
         let (dx, dy) = (p.0 - drag.last.0, p.1 - drag.last.1);
         drag.last = p;
         if self.shown.is_none() {

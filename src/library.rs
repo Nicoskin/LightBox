@@ -45,7 +45,8 @@ pub fn scan(dir: &Path, current: &Path, mode: SortMode) -> Vec<PathBuf> {
             Vec::new()
         }
     };
-    if !entries.iter().any(|e| same_path(&e.path, current)) {
+    // (Unless it is gone: deleted or renamed meanwhile.)
+    if current.is_file() && !entries.iter().any(|e| same_path(&e.path, current)) {
         entries.push(Entry {
             path: current.to_path_buf(),
             modified: None,

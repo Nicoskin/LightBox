@@ -372,6 +372,7 @@ impl App {
             CMD_ASSIGN => {
                 // The first free key, else F1.
                 let n = (1..=9u8)
+                    .filter(|n| *n != 5) // F5 is the slideshow
                     .find(|n| !self.settings.quick_folders.iter().any(|q| q.key == *n))
                     .unwrap_or(1);
                 self.assign_folder(n)
