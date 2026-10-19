@@ -24,6 +24,7 @@ mod ipc;
 mod keymap;
 mod library;
 mod loader;
+mod map;
 mod metadata;
 mod model;
 mod orientation;

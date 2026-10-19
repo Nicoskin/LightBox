@@ -86,6 +86,8 @@ pub struct FileInfo {
     pub modified: Option<String>,
     /// EXIF rows: label, value.
     pub exif: Vec<(&'static str, String)>,
+    /// GPS position: latitude, longitude (degrees, south and west negative).
+    pub gps: Option<(f64, f64)>,
     pub ai: Option<AiMeta>,
 }
 
@@ -104,6 +106,7 @@ pub fn gather(path: &Path) -> FileInfo {
         .ok();
     if let Some(e) = &exif {
         info.exif = exif_rows(e);
+        info.gps = gps_coords(e);
     }
     info.ai = png_text(&data)
         .and_then(|chunks| ai_from_text(&chunks))
@@ -184,6 +187,16 @@ fn exif_rows(e: &exif::Exif) -> Vec<(&'static str, String)> {
 
 /// "55.75580° N, 37.61730° E".
 fn gps(e: &exif::Exif) -> Option<String> {
+    let (lat, lon) = gps_coords(e)?;
+    let (ns, ew) = (
+        if lat < 0.0 { "S" } else { "N" },
+        if lon < 0.0 { "W" } else { "E" },
+    );
+    Some(format!("{:.5}° {ns}, {:.5}° {ew}", lat.abs(), lon.abs()))
+}
+
+/// Latitude and longitude in degrees (south and west negative).
+fn gps_coords(e: &exif::Exif) -> Option<(f64, f64)> {
     use exif::{In, Tag, Value};
     let coord = |tag: Tag, reference: Tag| -> Option<(f64, String)> {
         let Value::Rational(v) = &e.get_field(tag, In::PRIMARY)?.value else {
@@ -198,7 +211,9 @@ fn gps(e: &exif::Exif) -> Option<String> {
     };
     let (lat, ns) = coord(Tag::GPSLatitude, Tag::GPSLatitudeRef)?;
     let (lon, ew) = coord(Tag::GPSLongitude, Tag::GPSLongitudeRef)?;
-    Some(format!("{lat:.5}° {ns}, {lon:.5}° {ew}"))
+    let lat = if ns.starts_with('S') { -lat } else { lat };
+    let lon = if ew.starts_with('W') { -lon } else { lon };
+    (lat.is_finite() && lon.is_finite() && (lat, lon) != (0.0, 0.0)).then_some((lat, lon))
 }
 
 /// EXIF UserComment as text (A1111 stores its parameters there in JPEG /

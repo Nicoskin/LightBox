@@ -565,6 +565,8 @@ pub struct InfoView {
     pub blocks: Vec<(Rect, String)>,
     /// Rect, label, hot.
     pub buttons: Vec<(Rect, String, bool)>,
+    /// GPS map: rect, image (once rendered), status text.
+    pub map: Option<(Rect, Option<Rc<Thumb>>, String)>,
 }
 
 /// Histogram overlay.

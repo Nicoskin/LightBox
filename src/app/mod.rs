@@ -11,6 +11,7 @@ mod compare;
 mod document;
 mod files;
 mod folder;
+mod geomap;
 mod input;
 mod inspector;
 mod mode;
@@ -143,6 +144,8 @@ const WM_APP_MODEL: u32 = WM_APP + 15;
 const WM_APP_RATING: u32 = WM_APP + 16;
 /// Posted by the batch worker (progress, done).
 const WM_APP_BATCH: u32 = WM_APP + 17;
+/// Posted by the map thread (info panel).
+const WM_APP_MAP: u32 = WM_APP + 18;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -218,6 +221,11 @@ pub struct App {
     rating_filter: u8,
     /// A running batch (rename / convert).
     batch_rx: Option<organize::BatchRx>,
+    /// The GPS map of the info panel: rendered (file key, image), on its
+    /// way, or failed.
+    map: Option<(String, Rc<crate::gfx::Thumb>)>,
+    map_rx: Option<geomap::MapRx>,
+    map_error: Option<(String, String)>,
     stars_tx: std::sync::mpsc::Sender<stars::RatingMsg>,
     stars_rx: Receiver<stars::RatingMsg>,
     index: usize,
@@ -393,6 +401,9 @@ impl App {
             ratings: HashMap::new(),
             rating_filter: 0,
             batch_rx: None,
+            map: None,
+            map_rx: None,
+            map_error: None,
             stars_tx,
             stars_rx,
             index: 0,
@@ -1239,6 +1250,10 @@ impl App {
             }
             m if m == self.quit_msg && m != 0 => {
                 self.quit();
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_MAP => {
+                self.on_map()?;
                 Ok(Some(LRESULT(0)))
             }
             WM_APP_BATCH => {

@@ -24,6 +24,8 @@ pub enum InfoButton {
     Prompt,
     Workflow,
     All,
+    /// The GPS position in the browser.
+    Map,
 }
 
 impl InfoButton {
@@ -32,9 +34,13 @@ impl InfoButton {
             InfoButton::Prompt => "Копировать промпт",
             InfoButton::Workflow => "Workflow",
             InfoButton::All => "Всё",
+            InfoButton::Map => "Открыть на карте",
         }
     }
 }
+
+/// Map of the GPS position: its height, 96-DPI pixels.
+const MAP_H: f64 = 190.0;
 
 /// What the AI section needs room for.
 #[derive(Clone, Copy, Debug, Default)]
@@ -56,10 +62,20 @@ pub struct InfoLayout {
     pub negative: Option<(Rect, Rect)>,
     pub params: Vec<(Rect, Rect)>,
     pub buttons: Vec<(InfoButton, Rect)>,
+    /// The map of the GPS position (photos with coordinates).
+    pub map: Option<Rect>,
 }
 
-/// The panel at the right edge of a `vp` viewport, starting at `top`.
-pub fn layout(vp: (f64, f64), s: f64, top: f64, rows: usize, ai: Option<AiShape>) -> InfoLayout {
+/// The panel at the right edge of a `vp` viewport, starting at `top`;
+/// `map`: room for a map and its button under the rows.
+pub fn layout(
+    vp: (f64, f64),
+    s: f64,
+    top: f64,
+    rows: usize,
+    map: bool,
+    ai: Option<AiShape>,
+) -> InfoLayout {
     let w = (WIDTH * s).min(vp.0 - 2.0 * GAP * s);
     let x1 = vp.0 - 12.0 * s;
     let x0 = x1 - w;
@@ -106,7 +122,28 @@ pub fn layout(vp: (f64, f64), s: f64, top: f64, rows: usize, ai: Option<AiShape>
         negative: None,
         params: Vec::new(),
         buttons: Vec::new(),
+        map: None,
     };
+    if map {
+        y += GAP * s;
+        out.map = Some(Rect {
+            x0: px0,
+            y0: y,
+            x1: px1,
+            y1: y + MAP_H * s,
+        });
+        y += (MAP_H + GAP) * s;
+        out.buttons.push((
+            InfoButton::Map,
+            Rect {
+                x0: px0,
+                y0: y,
+                x1: px1,
+                y1: y + BUTTON_H * s,
+            },
+        ));
+        y += BUTTON_H * s;
+    }
     if let Some(ai) = ai {
         y += GAP * s;
         out.ai_heading = Some(Rect {
@@ -208,18 +245,22 @@ mod tests {
             params: 5,
             workflow: true,
         };
-        let l = layout((2560.0, 1440.0), 1.0, 60.0, 9, Some(ai));
+        let l = layout((2560.0, 1440.0), 1.0, 60.0, 9, true, Some(ai));
+        assert!(l.map.is_some_and(|m| m.y1 < l.buttons[0].1.y0));
         assert_eq!(l.rows.len(), 9);
         assert!(l.card.x1 <= 2560.0 && l.card.x0 > 2000.0);
         let prompt = l.prompt.unwrap().1;
         let neg = l.negative.unwrap().0;
         assert!(prompt.y1 <= neg.y0);
-        assert_eq!(l.buttons.len(), 3);
-        let (b, r) = l.buttons[1];
+        // The map's button, then the three copy buttons.
+        assert_eq!(l.buttons.len(), 4);
+        assert_eq!(l.buttons[0].0, InfoButton::Map);
+        let (b, r) = l.buttons[2];
         assert_eq!(l.hit(r.center()), Some(b));
         assert!(l.card.y1 >= r.y1);
         // Without AI metadata: just the rows.
-        let plain = layout((800.0, 600.0), 1.0, 40.0, 3, None);
+        let plain = layout((800.0, 600.0), 1.0, 40.0, 3, false, None);
+        assert!(plain.map.is_none());
         assert!(plain.buttons.is_empty() && plain.prompt.is_none());
     }
 }

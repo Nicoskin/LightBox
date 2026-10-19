@@ -176,6 +176,8 @@ pub struct Settings {
     pub cache_mb: u32,
     /// Photos decoded ahead in the direction of travel.
     pub preload: u8,
+    /// Download OpenStreetMap tiles for the map of GPS positions.
+    pub map_tiles: bool,
     /// F1..F9 folders (tables follow the plain keys).
     pub quick_folders: Vec<QuickFolder>,
     /// Reassigned shortcuts (see `keymap`): action → keys.
@@ -210,6 +212,7 @@ impl Default for Settings {
             last_update_check: 0,
             cache_mb: 1536,
             preload: 3,
+            map_tiles: true,
             quick_folders: Vec::new(),
             keys: Default::default(),
         }

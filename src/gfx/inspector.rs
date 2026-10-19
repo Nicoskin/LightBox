@@ -1,9 +1,13 @@
 //! Drawing of the inspector overlays: histogram and info panel.
 
-use windows::Win32::Graphics::Direct2D::Common::D2D_RECT_F;
-use windows::Win32::Graphics::Direct2D::{
-    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_ROUNDED_RECT, ID2D1StrokeStyle,
+use windows::Win32::Graphics::Direct2D::Common::{
+    D2D_RECT_F, D2D_SIZE_U, D2D1_ALPHA_MODE_PREMULTIPLIED, D2D1_PIXEL_FORMAT,
 };
+use windows::Win32::Graphics::Direct2D::{
+    D2D1_ANTIALIAS_MODE_PER_PRIMITIVE, D2D1_BITMAP_OPTIONS_NONE, D2D1_BITMAP_PROPERTIES1,
+    D2D1_INTERPOLATION_MODE_LINEAR, D2D1_ROUNDED_RECT, ID2D1StrokeStyle,
+};
+use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 
 use super::overlay::{HistogramView, InfoView, Overlay, rgba};
 use super::panel::rf;
@@ -128,6 +132,62 @@ impl Overlay {
                     .FillRoundedRectangle(&rounded(br, 6.0 * s), &self.brush);
                 self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.92));
                 self.glyph_str(label, br, &self.formats.option);
+            }
+            if let Some((r, img, status)) = &v.map {
+                let mr = rf(*r);
+                let drawn = img.as_ref().and_then(|t| {
+                    let props = D2D1_BITMAP_PROPERTIES1 {
+                        pixelFormat: D2D1_PIXEL_FORMAT {
+                            format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                            alphaMode: D2D1_ALPHA_MODE_PREMULTIPLIED,
+                        },
+                        dpiX: 96.0,
+                        dpiY: 96.0,
+                        bitmapOptions: D2D1_BITMAP_OPTIONS_NONE,
+                        ..Default::default()
+                    };
+                    self.ctx
+                        .CreateBitmap(
+                            D2D_SIZE_U {
+                                width: t.width,
+                                height: t.height,
+                            },
+                            Some(t.bgra.as_ptr().cast()),
+                            t.width * 4,
+                            &props,
+                        )
+                        .ok()
+                });
+                match drawn {
+                    Some(bmp) => {
+                        self.ctx.DrawBitmap(
+                            &bmp,
+                            Some(&mr),
+                            1.0,
+                            D2D1_INTERPOLATION_MODE_LINEAR,
+                            None,
+                            None,
+                        );
+                        // The tile licence: credit OpenStreetMap.
+                        let credit = D2D_RECT_F {
+                            left: mr.right - 118.0 * s,
+                            top: mr.bottom - 18.0 * s,
+                            right: mr.right,
+                            bottom: mr.bottom,
+                        };
+                        self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.8));
+                        self.ctx.FillRectangle(&credit, &self.brush);
+                        self.brush.SetColor(&rgba(0.1, 0.1, 0.1, 1.0));
+                        self.glyph_str("© OpenStreetMap", credit, &self.formats.option);
+                    }
+                    None => {
+                        self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.06));
+                        self.ctx
+                            .FillRoundedRectangle(&rounded(mr, 6.0 * s), &self.brush);
+                        self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.55));
+                        self.glyph_str(status, mr, &self.formats.option);
+                    }
+                }
             }
         }
     }

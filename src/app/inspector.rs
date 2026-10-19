@@ -152,6 +152,7 @@ impl App {
 
     pub(super) fn toggle_info(&mut self) -> Result<()> {
         self.info_state.open = !self.info_state.open;
+        self.want_map();
         self.render()
     }
 
@@ -217,6 +218,7 @@ impl App {
         self.info_state.rx = None;
         self.info_state.pending = None;
         self.info_state.data = Some((key, Rc::new(info)));
+        self.want_map();
         self.render()
     }
 
@@ -297,6 +299,7 @@ impl App {
             self.ui_scale(),
             self.overlay_top(true),
             rows.len(),
+            self.gps().is_some(),
             ai,
         );
         Some((l, rows))
@@ -325,6 +328,7 @@ impl App {
             headings: Vec::new(),
             blocks: Vec::new(),
             buttons: Vec::new(),
+            map: None,
         };
         if let Some(ai) = self.file_info().and_then(|f| f.ai.as_ref()) {
             if let Some(h) = l.ai_heading {
@@ -342,12 +346,35 @@ impl App {
             for ((lr, vr), (k, val)) in l.params.iter().zip(&ai.params) {
                 v.rows.push((*lr, k.clone(), *vr, val.clone()));
             }
-            for (b, r) in &l.buttons {
-                v.buttons
-                    .push((*r, b.label().into(), self.hot == Some(Hot::Info(*b))));
-            }
+        }
+        for (b, r) in &l.buttons {
+            v.buttons
+                .push((*r, b.label().into(), self.hot == Some(Hot::Info(*b))));
+        }
+        if let Some(r) = l.map {
+            let (img, status) = self.map_view();
+            v.map = Some((r, img, status));
         }
         Some(v)
+    }
+
+    /// The GPS position of the current photo, once its metadata is read.
+    pub(super) fn gps(&self) -> Option<(f64, f64)> {
+        self.file_info().and_then(|f| f.gps)
+    }
+
+    /// Size of the map in the info panel, pixels (to render it for).
+    fn map_size(&self) -> Option<(u32, u32)> {
+        let (l, _) = self.info_layout()?;
+        let r = l.map?;
+        Some((r.width().round() as u32, r.height().round() as u32))
+    }
+
+    /// The panel shows a photo with coordinates: get its map.
+    pub(super) fn want_map(&mut self) {
+        if let Some(size) = self.map_size() {
+            self.request_map(size);
+        }
     }
 
     /// Info panel under `p`: `Some(button)` on a button, `Some(None)` on
@@ -358,6 +385,9 @@ impl App {
     }
 
     pub(super) fn info_action(&mut self, b: InfoButton) -> Result<()> {
+        if b == InfoButton::Map {
+            return self.open_map();
+        }
         let Some(ai) = self.file_info().and_then(|f| f.ai.clone()) else {
             return Ok(());
         };
@@ -365,6 +395,7 @@ impl App {
             InfoButton::Prompt => (ai.prompt, "Промпт скопирован"),
             InfoButton::Workflow => (ai.workflow.unwrap_or_default(), "Workflow скопирован"),
             InfoButton::All => (ai.raw, "Параметры скопированы"),
+            InfoButton::Map => return Ok(()),
         };
         match clipboard::set_text(self.hwnd, &text) {
             Ok(()) => self.notice(what),

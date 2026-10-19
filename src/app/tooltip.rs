@@ -123,6 +123,7 @@ impl App {
                 InfoButton::Prompt => "Скопировать промпт",
                 InfoButton::Workflow => "Скопировать workflow (JSON)",
                 InfoButton::All => "Скопировать все параметры",
+                InfoButton::Map => "Место съёмки на OpenStreetMap",
             }
             .to_string(),
         };

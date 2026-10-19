@@ -34,6 +34,7 @@ pub enum Choice {
     Cache(u32),
     /// Photos decoded ahead.
     Preload(u8),
+    MapTiles(bool),
 }
 
 /// Settings pages.
@@ -99,6 +100,10 @@ pub fn rows(tab: Tab) -> Vec<Row> {
             row(
                 "Затемнение фона",
                 vec![(Dim(60), "60 %"), (Dim(80), "80 %"), (Dim(92), "92 %")],
+            ),
+            row(
+                "Карты по GPS",
+                vec![(MapTiles(true), "Загружать"), (MapTiles(false), "Нет")],
             ),
             row(
                 "Слайд-шоу (S, F5)",
@@ -259,6 +264,7 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         Choice::JpegQuality(v) => s.jpeg_quality == v,
         Choice::Cache(v) => s.cache_mb == v,
         Choice::Preload(v) => s.preload == v,
+        Choice::MapTiles(v) => s.map_tiles == v,
     }
 }
 
@@ -290,6 +296,7 @@ pub fn apply(s: &mut Settings, c: Choice) {
         Choice::JpegQuality(v) => s.jpeg_quality = v,
         Choice::Cache(v) => s.cache_mb = v,
         Choice::Preload(v) => s.preload = v,
+        Choice::MapTiles(v) => s.map_tiles = v,
     }
 }
 
