@@ -98,12 +98,8 @@ impl App {
         } else {
             path
         };
-        let ext = target
-            .extension()
-            .map(|e| e.to_string_lossy().to_ascii_lowercase())
-            .unwrap_or_default();
-        if !decode::EXTENSIONS.contains(&ext.as_str()) {
-            self.notice("Этот файл не изображение");
+        if !decode::is_supported(&target) {
+            self.notice("Этот файл не изображение и не 3D-модель");
             return self.render();
         }
         self.quicklook = false;

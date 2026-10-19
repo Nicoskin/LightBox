@@ -293,17 +293,16 @@ impl App {
     }
 
     fn open_dialog(&mut self) -> Result<()> {
-        let spec: String = decode::EXTENSIONS
-            .iter()
+        let spec: String = decode::all_extensions()
             .map(|e| format!("*.{e}"))
             .collect::<Vec<_>>()
             .join(";");
         let start = self.current.parent().map(Path::to_path_buf);
         match dialogs::open(
             None,
-            "Открыть изображение",
+            "Открыть файл",
             false,
-            Some(("Изображения", &spec)),
+            Some(("Изображения и 3D-модели", &spec)),
             start.as_deref(),
         ) {
             Some(p) => self.open_external(&p),
@@ -336,11 +335,7 @@ impl App {
     /// Space in Explorer (posted by the hook, which swallowed the key):
     /// preview the selected image, or give the key back.
     pub(super) fn on_quick_look(&mut self, explorer: HWND) -> Result<()> {
-        let selected = selected_file(explorer).filter(|p| {
-            p.extension()
-                .and_then(|e| e.to_str())
-                .is_some_and(|e| decode::EXTENSIONS.contains(&e.to_ascii_lowercase().as_str()))
-        });
+        let selected = selected_file(explorer).filter(|p| decode::is_supported(p));
         let Some(path) = selected else {
             resend_space();
             return Ok(());

@@ -55,10 +55,16 @@ fn ext_of(path: &Path) -> String {
         .unwrap_or_default()
 }
 
-/// `true` if the file name has one of the supported [`EXTENSIONS`].
+/// Everything the viewer opens: image [`EXTENSIONS`] and 3D models.
+pub fn all_extensions() -> impl Iterator<Item = &'static str> {
+    EXTENSIONS.iter().chain(crate::model::EXTENSIONS).copied()
+}
+
+/// `true` if the file name has one of the supported extensions (images or
+/// 3D models).
 pub fn is_supported(path: &Path) -> bool {
     let ext = ext_of(path);
-    EXTENSIONS.contains(&ext.as_str()) || crate::model::EXTENSIONS.contains(&ext.as_str())
+    all_extensions().any(|e| e == ext)
 }
 
 #[derive(Debug, thiserror::Error)]

@@ -13,7 +13,7 @@ use windows::Win32::UI::Shell::{SHCNE_ASSOCCHANGED, SHCNF_IDLIST, SHChangeNotify
 use windows::core::HSTRING;
 
 use crate::APP_NAME;
-use crate::decode::EXTENSIONS;
+use crate::decode::all_extensions;
 
 const CLASSES: &str = r"Software\Classes";
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -135,7 +135,7 @@ pub fn register(exe: &Path) -> Result<()> {
         "Быстрый просмотрщик изображений",
     )?;
     set(&caps, "ApplicationIcon", &icon)?;
-    for ext in EXTENSIONS {
+    for ext in all_extensions() {
         let dot = format!(".{ext}");
         set(&format!(r"{CLASSES}\{dot}\OpenWithProgids"), &pid, "")?;
         set(&format!(r"{app}\SupportedTypes"), &dot, "")?;
@@ -149,7 +149,7 @@ pub fn register(exe: &Path) -> Result<()> {
 /// Removes everything [`register`] wrote.
 pub fn unregister(exe: &Path) -> Result<()> {
     let pid = prog_id();
-    for ext in EXTENSIONS {
+    for ext in all_extensions() {
         let owp = format!(r"{CLASSES}\.{ext}\OpenWithProgids");
         delete_value(&owp, &pid)?;
         delete_if_empty(&owp)?;
