@@ -7,8 +7,8 @@ use windows::Win32::Foundation::{LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetDoubleClickTime, GetKeyState, ReleaseCapture, SetCapture, VK_ADD, VK_CONTROL, VK_DELETE,
     VK_END, VK_ESCAPE, VK_F1, VK_F9, VK_F11, VK_HOME, VK_LEFT, VK_NEXT, VK_NUMPAD0, VK_NUMPAD1,
-    VK_OEM_4, VK_OEM_6, VK_OEM_MINUS, VK_OEM_PLUS, VK_PRIOR, VK_RETURN, VK_RIGHT, VK_SHIFT,
-    VK_SPACE, VK_SUBTRACT,
+    VK_OEM_4, VK_OEM_6, VK_OEM_COMMA, VK_OEM_MINUS, VK_OEM_PERIOD, VK_OEM_PLUS, VK_PRIOR,
+    VK_RETURN, VK_RIGHT, VK_SHIFT, VK_SPACE, VK_SUBTRACT,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     PostMessageW, WHEEL_DELTA, WM_CAPTURECHANGED, WM_CLOSE, WM_KEYDOWN, WM_LBUTTONDBLCLK,
@@ -273,6 +273,12 @@ impl App {
             k if k == ch(b'E') => self.open_in_editor(),
             // Space closes a QuickLook preview (as in Explorer).
             k if k == VK_SPACE.0 && self.quicklook => self.close_window(),
+            // Space: pause / play an animation; "," / ".": frame by frame.
+            k if k == VK_SPACE.0 => {
+                self.toggle_playback()?;
+            }
+            k if k == VK_OEM_COMMA.0 => self.step_frame(-1)?,
+            k if k == VK_OEM_PERIOD.0 => self.step_frame(1)?,
             k if k == VK_ESCAPE.0 && self.menu_open => self.close_menu()?,
             k if k == VK_ESCAPE.0 && self.info_state.open => self.toggle_info()?,
             k if k == VK_ESCAPE.0 && self.dial_open => self.toggle_dial()?,

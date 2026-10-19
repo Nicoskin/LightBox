@@ -266,6 +266,9 @@ impl App {
         if self.edits.contains_key(&cache::key(&self.current)) {
             parts.push("повёрнуто, не сохранено".into());
         }
+        if let Some(f) = self.frame_label() {
+            parts.push(f);
+        }
         parts.join("  ·  ")
     }
 

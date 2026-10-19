@@ -201,6 +201,40 @@ impl GpuImage {
         })
     }
 
+    /// Replaces the pixels of a single-texture 8-bit image (the next frame
+    /// of an animation): same size, premultiplied RGBA8.
+    pub fn update(&self, gpu: &Gpu, rgba: &[u8]) -> Result<()> {
+        let [tile] = self.tiles.as_slice() else {
+            anyhow::bail!("tiled images do not animate");
+        };
+        anyhow::ensure!(
+            rgba.len() == self.width as usize * self.height as usize * 4,
+            "frame size mismatch"
+        );
+        let dst = D3D11_BOX {
+            left: 0,
+            top: 0,
+            front: 0,
+            right: self.width,
+            bottom: self.height,
+            back: 1,
+        };
+        // SAFETY: the buffer holds exactly width × height pixels; the copy
+        // is made before UpdateSubresource returns.
+        unsafe {
+            gpu.context.UpdateSubresource(
+                &tile._texture,
+                0,
+                Some(&dst),
+                rgba.as_ptr().cast(),
+                self.width * 4,
+                0,
+            );
+            gpu.context.GenerateMips(&tile.srv);
+        }
+        Ok(())
+    }
+
     /// Texture size in display orientation.
     pub fn display_texels(&self) -> (f64, f64) {
         let (w, h) = self.orientation.apply_size(self.width, self.height);

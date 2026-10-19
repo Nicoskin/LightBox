@@ -9,6 +9,7 @@
 //! "overview" for images too large for a single GPU texture.
 
 mod alpha;
+pub mod anim;
 pub use alpha::{f16_to_straight_srgb8, unpremultiply};
 mod avif;
 mod generic;

@@ -289,6 +289,8 @@ impl App {
                 frames: 0,
             });
         }
+        // GIF / WebP / APNG: decode the other frames in the background.
+        self.start_animation();
         Ok(true)
     }
 

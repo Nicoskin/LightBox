@@ -4,6 +4,7 @@
 //! - `input`: keyboard and mouse;
 //! - `mode`: fullscreen ↔ windowed switching and window geometry.
 
+mod animation;
 mod chrome;
 mod files;
 mod input;
@@ -95,6 +96,8 @@ const PANEL_TIMER: usize = 2;
 const MENU_TIMER: usize = 3;
 /// Hover delay before a tooltip appears.
 const TOOLTIP_TIMER: usize = 4;
+/// Next animation frame.
+const ANIM_TIMER: usize = 5;
 /// Filmstrip glide: time constant of the exponential approach, seconds.
 const STRIP_TAU: f64 = 0.06;
 /// Posted by the thumbnail thread.
@@ -113,6 +116,8 @@ const WM_APP_OPEN: u32 = WM_APP + 9;
 const WM_APP_QUICKLOOK: u32 = WM_APP + 10;
 /// Tray icon events (lParam: the mouse message).
 const WM_APP_TRAY: u32 = WM_APP + 11;
+/// Posted by the frame decoder: all frames of an animation are ready.
+const WM_APP_FRAMES: u32 = WM_APP + 12;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -246,6 +251,9 @@ pub struct App {
     channel: u32,
     /// Control whose tooltip is shown.
     tooltip: Option<panel::Hot>,
+    /// Animated GIF / WebP / APNG: playback and frames being decoded.
+    playback: Option<animation::Playback>,
+    frames_rx: Option<animation::FramesRx>,
     /// Pixel under the cursor (colour readout).
     probe: Option<inspector::Probe>,
     info_state: inspector::InfoState,
@@ -354,6 +362,8 @@ impl App {
             dial_drag: None,
             channel: 0,
             tooltip: None,
+            playback: None,
+            frames_rx: None,
             probe: None,
             info_state: inspector::InfoState::default(),
             hist_state: inspector::HistState::default(),
@@ -998,6 +1008,11 @@ impl App {
     }
 
     fn on_timer(&mut self, id: usize) {
+        if id == ANIM_TIMER
+            && let Err(e) = self.frame_timer()
+        {
+            tracing::error!("animation: {e:#}");
+        }
         if id == TOOLTIP_TIMER
             && let Err(e) = self.tooltip_timer()
         {
@@ -1067,6 +1082,10 @@ impl App {
             }
             WM_APP_FILEOP => {
                 self.on_fileop()?;
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_FRAMES => {
+                self.on_frames()?;
                 Ok(Some(LRESULT(0)))
             }
             WM_APP_OPEN => {
