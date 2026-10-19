@@ -38,6 +38,7 @@ fn main() {
     );
 
     compile_resources(&manifest_dir, &out_dir);
+    build_stamp(&manifest_dir);
 
     // Graphics DLLs are loaded lazily on the GPU-init thread instead of by the
     // loader before `main`, so their load time overlaps with decoding.
@@ -172,4 +173,24 @@ fn find_sdk_tool(name: &str) -> Option<PathBuf> {
         .collect();
     versions.sort();
     versions.pop().map(|p| p.join("x64").join(name))
+}
+
+/// `LIGHTBOX_BUILD`: "485c787 от 19.10.2026" (commit and its date) for the
+/// settings card, so that it is clear which build is running.
+fn build_stamp(dir: &Path) {
+    let git = dir.join(".git");
+    println!("cargo:rerun-if-changed={}", git.join("HEAD").display());
+    println!(
+        "cargo:rerun-if-changed={}",
+        git.join("refs").join("heads").display()
+    );
+    let stamp = Command::new("git")
+        .args(["log", "-1", "--format=%h от %cd", "--date=format:%d.%m.%Y"])
+        .current_dir(dir)
+        .output()
+        .ok()
+        .filter(|o| o.status.success())
+        .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
+        .unwrap_or_default();
+    println!("cargo:rustc-env=LIGHTBOX_BUILD={stamp}");
 }

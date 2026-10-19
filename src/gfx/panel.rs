@@ -596,6 +596,48 @@ impl Overlay {
             self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.85));
             self.glyph('\u{E711}', close, &self.formats.icon);
 
+            // Pages: the shown one is a light pill, the others plain text.
+            for tab in &c.tabs {
+                let tr = rf(tab.rect);
+                let inner = D2D_RECT_F {
+                    left: tr.left + 2.0 * s,
+                    top: tr.top,
+                    right: tr.right - 2.0 * s,
+                    bottom: tr.bottom,
+                };
+                let (fill, text_a) = if tab.selected {
+                    (Some(rgba(1.0, 1.0, 1.0, 0.16)), 1.0)
+                } else if tab.hot {
+                    (Some(rgba(1.0, 1.0, 1.0, 0.07)), 0.9)
+                } else {
+                    (None, 0.6)
+                };
+                if let Some(fill) = fill {
+                    self.brush.SetColor(&fill);
+                    self.ctx
+                        .FillRoundedRectangle(&rounded(inner, 8.0 * s), &self.brush);
+                }
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, text_a));
+                self.glyph_str(&tab.text, inner, &self.formats.option);
+            }
+            // Separator under the pages.
+            if let Some(first) = c.tabs.first() {
+                let y = rf(first.rect).bottom + 6.0 * s;
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.08));
+                self.ctx.FillRectangle(
+                    &D2D_RECT_F {
+                        left: r.left + 24.0 * s,
+                        top: y,
+                        right: r.right - 24.0 * s,
+                        bottom: y + s,
+                    },
+                    &self.brush,
+                );
+            }
+
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.42));
+            self.glyph_str(&c.footer.1, rf(c.footer.0), &self.formats.label);
+
             for (rect, text) in &c.labels {
                 self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.78));
                 self.glyph_str(text, rf(*rect), &self.formats.label);

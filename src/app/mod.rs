@@ -254,6 +254,8 @@ pub struct App {
     /// Settings card shown, and the item under the mouse.
     card_open: bool,
     card_hot: Option<crate::ui::settings_card::Hit>,
+    /// Settings page shown.
+    card_tab: crate::ui::settings_card::Tab,
     /// Filmstrip scroll position (file index, fractional while gliding)
     /// and when its glide was last advanced.
     strip_pos: f64,
@@ -388,6 +390,7 @@ impl App {
             notice: None,
             card_open: false,
             card_hot: None,
+            card_tab: Default::default(),
             strip_pos: 0.0,
             strip_tick: None,
             menu_open: false,
@@ -543,6 +546,11 @@ impl App {
     /// A preview of one photo (Space in Explorer, pinned): no folder.
     fn preview(&self) -> bool {
         self.quicklook || self.pinned
+    }
+
+    /// Start screen: the window is shown without a file.
+    fn home(&self) -> bool {
+        self.current.as_os_str().is_empty() && !self.hidden
     }
 
     /// Filmstrip height (96-DPI pixels) if it is shown.
@@ -816,14 +824,18 @@ impl App {
         };
         let ui = Ui {
             scale: self.ui_scale() as f32,
-            message: self.error.as_ref().map(|e| {
-                let name = self
-                    .current
-                    .file_name()
-                    .map(|n| n.to_string_lossy().into_owned())
-                    .unwrap_or_default();
-                format!("Не удалось открыть файл\n{name}: {e}")
-            }),
+            message: if self.home() {
+                Some(crate::ui::home::MESSAGE.to_string())
+            } else {
+                self.error.as_ref().map(|e| {
+                    let name = self
+                        .current
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    format!("Не удалось открыть файл\n{name}: {e}")
+                })
+            },
             // The panel shows the zoom level itself; notices always show.
             badge: if self.panel_alpha < 0.5 || self.notice.is_some() {
                 self.badge_text()
@@ -845,6 +857,7 @@ impl App {
             histogram: self.histogram_view(),
             tooltip: self.tooltip_view(),
             labels: self.compare_labels(),
+            home: self.home_view(),
         };
         self.gpu.draw(&params, &ui)
     }

@@ -64,6 +64,8 @@ pub struct Ui {
     pub tooltip: Option<(Rect, String)>,
     /// Captions centred at the top of their rectangles (compare: A / B).
     pub labels: Vec<(Rect, String)>,
+    /// Start screen buttons (`selected` = the main one).
+    pub home: Vec<SegmentView>,
 }
 
 impl Ui {
@@ -80,6 +82,7 @@ impl Ui {
             && self.histogram.is_none()
             && self.tooltip.is_none()
             && self.labels.is_empty()
+            && self.home.is_empty()
     }
 }
 
@@ -157,7 +160,11 @@ pub struct CardView {
     pub rect: Rect,
     pub title: (Rect, String),
     pub close: (Rect, bool),
+    /// Page switcher (`selected` = the page shown).
+    pub tabs: Vec<SegmentView>,
     pub labels: Vec<(Rect, String)>,
+    /// Dim line at the bottom (version).
+    pub footer: (Rect, String),
     /// Segments: rect, text, selected, hot, first / last in its row.
     pub segments: Vec<SegmentView>,
 }
@@ -283,6 +290,9 @@ impl Overlay {
             self.ctx.BeginDraw();
             if let Some(msg) = &ui.message {
                 self.message(msg, ui.scale);
+            }
+            if !ui.home.is_empty() {
+                self.home_buttons(&ui.home, ui.scale);
             }
             if let Some(caption) = &ui.caption {
                 self.caption(caption);

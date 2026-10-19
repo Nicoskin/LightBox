@@ -1,5 +1,6 @@
-//! The settings card: rows of segmented choices drawn over the viewer.
-//! Pure layout / hit-testing / applying; drawing is in the overlay.
+//! The settings card: pages (tabs) of rows of segmented choices drawn over
+//! the viewer, with the version in the footer. Pure layout / hit-testing /
+//! applying; drawing is in the overlay.
 
 use crate::settings::{ImperfectJpeg, OpenMode, SaveMode, Settings, ThumbSize, Wheel};
 use crate::view::Rect;
@@ -29,122 +30,169 @@ pub enum Choice {
     Editor(bool),
 }
 
+/// Settings pages.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Tab {
+    #[default]
+    View,
+    Interface,
+    Files,
+    System,
+}
+
+impl Tab {
+    pub const ALL: [Tab; 4] = [Tab::View, Tab::Interface, Tab::Files, Tab::System];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Tab::View => "Просмотр",
+            Tab::Interface => "Интерфейс",
+            Tab::Files => "Файлы",
+            Tab::System => "Система",
+        }
+    }
+}
+
 pub struct Row {
     pub label: &'static str,
     pub choices: Vec<(Choice, &'static str)>,
 }
 
-pub fn rows() -> Vec<Row> {
+fn row(label: &'static str, choices: Vec<(Choice, &'static str)>) -> Row {
+    Row { label, choices }
+}
+
+/// The rows of one page.
+pub fn rows(tab: Tab) -> Vec<Row> {
     use Choice::*;
-    vec![
-        Row {
-            label: "Открывать фото",
-            choices: vec![
-                (Open(OpenMode::Fullscreen), "Во весь экран"),
-                (Open(OpenMode::Windowed), "В окне"),
-            ],
-        },
-        Row {
-            label: "Лента миниатюр",
-            choices: vec![
-                (Filmstrip(true), "Показывать"),
-                (Filmstrip(false), "Скрыть"),
-            ],
-        },
-        Row {
-            label: "Размер миниатюр",
-            choices: vec![
-                (Thumbs(ThumbSize::Tiny), "Крошечные"),
-                (Thumbs(ThumbSize::Small), "Мелкие"),
-                (Thumbs(ThumbSize::Medium), "Средние"),
-                (Thumbs(ThumbSize::Large), "Крупные"),
-            ],
-        },
-        Row {
-            label: "Колесо мыши",
-            choices: vec![
-                (Wheel(crate::settings::Wheel::Zoom), "Масштаб"),
-                (Wheel(crate::settings::Wheel::Browse), "Листание"),
-            ],
-        },
-        Row {
-            label: "Сохранять поворот",
-            choices: vec![
-                (Save(SaveMode::Auto), "Сразу"),
-                (Save(SaveMode::Ask), "Спрашивать"),
-                (Save(SaveMode::Manual), "Вручную"),
-            ],
-        },
-        Row {
-            label: "Дата изменения файла",
-            choices: vec![
-                (KeepDates(true), "Сохранять"),
-                (KeepDates(false), "Обновлять"),
-            ],
-        },
-        Row {
-            label: "JPEG не кратный 16 px",
-            choices: vec![
-                (Imperfect(None), "Спрашивать"),
-                (Imperfect(Some(ImperfectJpeg::Trim)), "Обрезать"),
-                (Imperfect(Some(ImperfectJpeg::ExifOnly)), "Только тег"),
-            ],
-        },
-        Row {
-            label: "Анимации интерфейса",
-            choices: vec![(Animations(true), "Вкл"), (Animations(false), "Выкл")],
-        },
-        Row {
-            label: "Смена фото",
-            choices: vec![
-                (TurnAnimation(true), "Плавно"),
-                (TurnAnimation(false), "Сразу"),
-            ],
-        },
-        Row {
-            label: "Затемнение фона",
-            choices: vec![(Dim(60), "60 %"), (Dim(80), "80 %"), (Dim(92), "92 %")],
-        },
-        Row {
-            label: "Слайд-шоу (S, F5)",
-            choices: vec![
-                (Slideshow(2), "2 с"),
-                (Slideshow(4), "4 с"),
-                (Slideshow(8), "8 с"),
-            ],
-        },
-        Row {
-            label: "Подтверждать удаление",
-            choices: vec![(ConfirmDelete(true), "Да"), (ConfirmDelete(false), "Нет")],
-        },
-        Row {
-            label: "Редактор (E)",
-            choices: vec![(Editor(false), "Системный"), (Editor(true), "Выбрать…")],
-        },
-        Row {
-            label: "После закрытия",
-            choices: vec![
-                (Resident(false), "Выходить"),
-                (Resident(true), "Остаться в трее"),
-            ],
-        },
-        Row {
-            label: "Пробел в проводнике",
-            choices: vec![(QuickLook(true), "Просмотр"), (QuickLook(false), "Выкл")],
-        },
-        Row {
-            label: "Запуск с Windows",
-            choices: vec![(Autostart(true), "В трее"), (Autostart(false), "Нет")],
-        },
-        Row {
-            label: "Обновления",
-            choices: vec![
-                (AutoUpdate(true), "Раз в день"),
-                (AutoUpdate(false), "Вручную"),
-                (CheckUpdates, "Проверить"),
-            ],
-        },
-    ]
+    match tab {
+        Tab::View => vec![
+            row(
+                "Открывать фото",
+                vec![
+                    (Open(OpenMode::Fullscreen), "Во весь экран"),
+                    (Open(OpenMode::Windowed), "В окне"),
+                ],
+            ),
+            row(
+                "Колесо мыши",
+                vec![
+                    (Wheel(crate::settings::Wheel::Zoom), "Масштаб"),
+                    (Wheel(crate::settings::Wheel::Browse), "Листание"),
+                ],
+            ),
+            row(
+                "Затемнение фона",
+                vec![(Dim(60), "60 %"), (Dim(80), "80 %"), (Dim(92), "92 %")],
+            ),
+            row(
+                "Слайд-шоу (S, F5)",
+                vec![
+                    (Slideshow(2), "2 с"),
+                    (Slideshow(4), "4 с"),
+                    (Slideshow(8), "8 с"),
+                ],
+            ),
+        ],
+        Tab::Interface => vec![
+            row(
+                "Лента миниатюр",
+                vec![
+                    (Filmstrip(true), "Показывать"),
+                    (Filmstrip(false), "Скрыть"),
+                ],
+            ),
+            row(
+                "Размер миниатюр",
+                vec![
+                    (Thumbs(ThumbSize::Tiny), "Крошечные"),
+                    (Thumbs(ThumbSize::Small), "Мелкие"),
+                    (Thumbs(ThumbSize::Medium), "Средние"),
+                    (Thumbs(ThumbSize::Large), "Крупные"),
+                ],
+            ),
+            row(
+                "Анимации интерфейса",
+                vec![(Animations(true), "Вкл"), (Animations(false), "Выкл")],
+            ),
+            row(
+                "Смена фото",
+                vec![
+                    (TurnAnimation(true), "Плавно"),
+                    (TurnAnimation(false), "Сразу"),
+                ],
+            ),
+        ],
+        Tab::Files => vec![
+            row(
+                "Сохранять поворот",
+                vec![
+                    (Save(SaveMode::Auto), "Сразу"),
+                    (Save(SaveMode::Ask), "Спрашивать"),
+                    (Save(SaveMode::Manual), "Вручную"),
+                ],
+            ),
+            row(
+                "Дата изменения файла",
+                vec![
+                    (KeepDates(true), "Сохранять"),
+                    (KeepDates(false), "Обновлять"),
+                ],
+            ),
+            row(
+                "JPEG не кратный 16 px",
+                vec![
+                    (Imperfect(None), "Спрашивать"),
+                    (Imperfect(Some(ImperfectJpeg::Trim)), "Обрезать"),
+                    (Imperfect(Some(ImperfectJpeg::ExifOnly)), "Только тег"),
+                ],
+            ),
+            row(
+                "Подтверждать удаление",
+                vec![(ConfirmDelete(true), "Да"), (ConfirmDelete(false), "Нет")],
+            ),
+            row(
+                "Редактор (E)",
+                vec![(Editor(false), "Системный"), (Editor(true), "Выбрать…")],
+            ),
+        ],
+        Tab::System => vec![
+            row(
+                "После закрытия",
+                vec![
+                    (Resident(false), "Выходить"),
+                    (Resident(true), "Остаться в трее"),
+                ],
+            ),
+            row(
+                "Пробел в проводнике",
+                vec![(QuickLook(true), "Просмотр"), (QuickLook(false), "Выкл")],
+            ),
+            row(
+                "Запуск с Windows",
+                vec![(Autostart(true), "В трее"), (Autostart(false), "Нет")],
+            ),
+            row(
+                "Обновления",
+                vec![
+                    (AutoUpdate(true), "Раз в день"),
+                    (AutoUpdate(false), "Вручную"),
+                    (CheckUpdates, "Проверить"),
+                ],
+            ),
+        ],
+    }
+}
+
+/// "Lightbox 0.1.0 · сборка 485c787 от 19.10.2026".
+pub fn version_text() -> String {
+    let build = env!("LIGHTBOX_BUILD");
+    let mut s = format!("{} {}", crate::APP_NAME, crate::update::VERSION);
+    if !build.is_empty() {
+        s.push_str(" · сборка ");
+        s.push_str(build);
+    }
+    s
 }
 
 pub fn is_selected(s: &Settings, c: Choice) -> bool {
@@ -209,20 +257,35 @@ pub struct CardLayout {
     pub card: Rect,
     pub title: Rect,
     pub close: Rect,
+    /// Page switcher under the title.
+    pub tabs: Vec<(Tab, Rect)>,
     pub rows: Vec<RowLayout>,
+    /// Version line at the bottom.
+    pub footer: Rect,
 }
 
 /// Sizes in 96-DPI pixels.
 const CARD_W: f64 = 640.0;
 const TITLE_H: f64 = 56.0;
+const TABS_H: f64 = 36.0;
+/// Space between the page switcher and the first row.
+const TABS_GAP: f64 = 14.0;
 const ROW_H: f64 = 46.0;
 const LABEL_W: f64 = 220.0;
 const PAD: f64 = 24.0;
+const FOOTER_H: f64 = 40.0;
 
-/// The card centred in a `vp` viewport at UI scale `s` (shrunk to fit).
-pub fn layout(vp: (f64, f64), s: f64) -> CardLayout {
-    let rows = rows();
-    let natural_h = TITLE_H + ROW_H * rows.len() as f64 + PAD;
+/// Rows on the longest page: every page gets this height, so the card does
+/// not jump when switching pages.
+fn max_rows() -> usize {
+    Tab::ALL.iter().map(|t| rows(*t).len()).max().unwrap_or(0)
+}
+
+/// The card for page `tab`, centred in a `vp` viewport at UI scale `s`
+/// (shrunk to fit).
+pub fn layout(vp: (f64, f64), s: f64, tab: Tab) -> CardLayout {
+    let page = rows(tab);
+    let natural_h = TITLE_H + TABS_H + TABS_GAP + ROW_H * max_rows() as f64 + FOOTER_H;
     // Scale down on small windows so that the card always fits.
     let s = s
         .min((vp.0 - 16.0) / CARD_W)
@@ -250,10 +313,30 @@ pub fn layout(vp: (f64, f64), s: f64) -> CardLayout {
         x1: card.x1 - 16.0 * s,
         y1: y0 + (TITLE_H * s + c) / 2.0,
     };
-    let mut out = Vec::with_capacity(rows.len());
-    for (i, row) in rows.into_iter().enumerate() {
+    let (tx0, tx1) = (x0 + PAD * s, card.x1 - PAD * s);
+    let tw = (tx1 - tx0) / Tab::ALL.len() as f64;
+    let ty = y0 + TITLE_H * s;
+    let tabs = Tab::ALL
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let a = tx0 + tw * i as f64;
+            (
+                *t,
+                Rect {
+                    x0: a.round(),
+                    y0: ty,
+                    x1: (a + tw).round(),
+                    y1: ty + TABS_H * s,
+                },
+            )
+        })
+        .collect();
+    let rows_y = ty + (TABS_H + TABS_GAP) * s;
+    let mut out = Vec::with_capacity(page.len());
+    for (i, row) in page.into_iter().enumerate() {
         let row_label = row.label;
-        let ry = y0 + (TITLE_H + ROW_H * i as f64) * s;
+        let ry = rows_y + ROW_H * i as f64 * s;
         let label = Rect {
             x0: x0 + PAD * s,
             y0: ry,
@@ -289,17 +372,26 @@ pub fn layout(vp: (f64, f64), s: f64) -> CardLayout {
             choices,
         });
     }
+    let footer = Rect {
+        x0: x0 + PAD * s,
+        y0: card.y1 - FOOTER_H * s,
+        x1: card.x1 - PAD * s,
+        y1: card.y1,
+    };
     CardLayout {
         card,
         title,
         close,
+        tabs,
         rows: out,
+        footer,
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Hit {
     Close,
+    Tab(Tab),
     Choice(Choice),
     /// Inside the card but on nothing clickable.
     Card,
@@ -309,6 +401,9 @@ impl CardLayout {
     pub fn hit(&self, p: (f64, f64)) -> Option<Hit> {
         if self.close.contains(p) {
             return Some(Hit::Close);
+        }
+        if let Some((t, _)) = self.tabs.iter().find(|(_, r)| r.contains(p)) {
+            return Some(Hit::Tab(*t));
         }
         for r in &self.rows {
             for (c, _, rect) in &r.choices {
@@ -325,10 +420,14 @@ impl CardLayout {
 mod tests {
     use super::*;
 
+    fn every_row() -> impl Iterator<Item = Row> {
+        Tab::ALL.into_iter().flat_map(rows)
+    }
+
     #[test]
     fn every_choice_applies_and_reads_back() {
         let mut s = Settings::default();
-        for row in rows() {
+        for row in every_row() {
             for (c, _) in row.choices {
                 if c == Choice::Editor(true) || c == Choice::CheckUpdates {
                     continue; // actions, not settings
@@ -343,7 +442,7 @@ mod tests {
     fn defaults_are_offered() {
         // Each row has exactly one choice selected with default settings.
         let s = Settings::default();
-        for row in rows() {
+        for row in every_row() {
             let n = row
                 .choices
                 .iter()
@@ -356,15 +455,24 @@ mod tests {
     #[test]
     fn layout_fits_and_hits() {
         for vp in [(2560.0, 1440.0), (800.0, 500.0)] {
-            let l = layout(vp, 1.5);
-            assert!(
-                l.card.x0 >= 0.0 && l.card.x1 <= vp.0 && l.card.y1 <= vp.1,
-                "{vp:?}"
-            );
-            let (c, _, r) = l.rows[1].choices[1];
-            assert_eq!(l.hit(r.center()), Some(Hit::Choice(c)));
-            assert_eq!(l.hit(l.close.center()), Some(Hit::Close));
-            assert_eq!(l.hit((1.0, 1.0)), None);
+            for tab in Tab::ALL {
+                let l = layout(vp, 1.5, tab);
+                assert!(
+                    l.card.x0 >= 0.0 && l.card.x1 <= vp.0 && l.card.y1 <= vp.1,
+                    "{vp:?}"
+                );
+                let (c, _, r) = l.rows[1].choices[1];
+                assert_eq!(l.hit(r.center()), Some(Hit::Choice(c)));
+                assert_eq!(l.hit(l.close.center()), Some(Hit::Close));
+                assert_eq!(l.hit(l.tabs[2].1.center()), Some(Hit::Tab(Tab::Files)));
+                assert_eq!(l.hit((1.0, 1.0)), None);
+                // The last row stays above the footer.
+                assert!(l.rows.last().unwrap().label.y1 <= l.footer.y0 + 0.5);
+            }
         }
+        // Every page has the same card.
+        let a = layout((1920.0, 1080.0), 1.0, Tab::View).card;
+        let b = layout((1920.0, 1080.0), 1.0, Tab::Files).card;
+        assert_eq!((a.y0, a.y1), (b.y0, b.y1));
     }
 }

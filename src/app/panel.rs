@@ -34,6 +34,8 @@ pub enum Hot {
     DialReset,
     /// Button of the info panel.
     Info(InfoButton),
+    /// Button of the start screen.
+    Home(crate::ui::home::HomeButton),
 }
 
 /// Thumbnails requested beyond the visible cells, each side.
@@ -100,6 +102,7 @@ impl App {
             || self.caption_hit(p).is_some()
             || self.dial_hit(p).is_some()
             || self.info_hit(p).is_some()
+            || (self.home() && crate::ui::home::hit(self.viewport(), self.ui_scale(), p).is_some())
             || (self.panel_target > 0.5 && self.panel_layout().contains(p))
     }
 
@@ -111,6 +114,9 @@ impl App {
         }
         if let Some(b) = self.caption_hit(p) {
             return Some(Hot::Caption(b));
+        }
+        if self.home() {
+            return crate::ui::home::hit(self.viewport(), self.ui_scale(), p).map(Hot::Home);
         }
         if let Some(h) = self.dial_hit(p) {
             return Some(h);
@@ -143,7 +149,7 @@ impl App {
 
     /// Builds what the overlay draws; `None` when the panel is hidden.
     pub(super) fn panel_view(&self) -> Option<PanelView> {
-        if self.panel_alpha <= 0.0 {
+        if self.panel_alpha <= 0.0 || self.home() {
             return None;
         }
         let l = self.panel_layout();
@@ -391,7 +397,7 @@ pub fn zoom_label(scale: f64) -> String {
 
 impl App {
     fn card_layout(&self) -> settings_card::CardLayout {
-        settings_card::layout(self.viewport(), self.ui_scale())
+        settings_card::layout(self.viewport(), self.ui_scale(), self.card_tab)
     }
 
     pub(super) fn card_view(&self) -> Option<CardView> {
@@ -419,7 +425,20 @@ impl App {
             rect: l.card,
             title: (l.title, "Настройки".to_string()),
             close: (l.close, self.card_hot == Some(settings_card::Hit::Close)),
+            tabs: l
+                .tabs
+                .iter()
+                .map(|(t, rect)| SegmentView {
+                    rect: *rect,
+                    text: t.label().to_string(),
+                    selected: *t == self.card_tab,
+                    hot: self.card_hot == Some(settings_card::Hit::Tab(*t)),
+                    first: false,
+                    last: false,
+                })
+                .collect(),
             labels,
+            footer: (l.footer, settings_card::version_text()),
             segments,
         })
     }
@@ -453,6 +472,10 @@ impl App {
             WM_LBUTTONDOWN | WM_LBUTTONDBLCLK | WM_MOUSEWHEEL => {}
             WM_LBUTTONUP => match l.hit(p) {
                 None | Some(settings_card::Hit::Close) => self.close_settings()?,
+                Some(settings_card::Hit::Tab(t)) => {
+                    self.card_tab = t;
+                    self.render()?;
+                }
                 Some(settings_card::Hit::Choice(c)) => self.choose(c)?,
                 Some(settings_card::Hit::Card) => {}
             },

@@ -44,6 +44,10 @@ fn pipe_name() -> HSTRING {
     ))
 }
 
+/// Sent instead of a path: "show the start screen" (launched without a
+/// file). Not a valid file name on Windows.
+pub const SHOW_HOME: &str = "*";
+
 /// `true` if a viewer of this user is listening.
 pub fn is_running() -> bool {
     // SAFETY: NUL-terminated name.

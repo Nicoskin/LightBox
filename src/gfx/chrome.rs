@@ -7,7 +7,7 @@ use windows::Win32::Graphics::Direct2D::{
 };
 use windows_numerics::Vector2;
 
-use super::overlay::{CaptionView, DialView, MenuView, Overlay, rgba};
+use super::overlay::{CaptionView, DialView, MenuView, Overlay, SegmentView, rgba};
 use super::panel::rf;
 use crate::view::Rect;
 
@@ -433,5 +433,28 @@ impl Overlay {
             );
         }
         Ok(())
+    }
+}
+
+impl Overlay {
+    /// Start screen buttons: the main one in the accent colour.
+    pub(super) unsafe fn home_buttons(&self, buttons: &[SegmentView], s: f32) {
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            for b in buttons {
+                let r = rf(b.rect);
+                let (fill, text_a) = match (b.selected, b.hot) {
+                    (true, true) => (rgba(0.38, 0.62, 1.0, 1.0), 1.0),
+                    (true, false) => (rgba(ACCENT.0, ACCENT.1, ACCENT.2, 0.95), 1.0),
+                    (false, true) => (rgba(1.0, 1.0, 1.0, 0.16), 1.0),
+                    (false, false) => (rgba(1.0, 1.0, 1.0, 0.09), 0.85),
+                };
+                self.brush.SetColor(&fill);
+                self.ctx
+                    .FillRoundedRectangle(&rounded(r, 8.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, text_a));
+                self.glyph_str(&b.text, r, &self.formats.option);
+            }
+        }
     }
 }

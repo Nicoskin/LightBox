@@ -430,6 +430,8 @@ impl App {
                 self.index + 1,
                 self.files.len()
             )
+        } else if name.is_empty() {
+            "Lightbox".to_string()
         } else {
             format!("{name} — Lightbox")
         };

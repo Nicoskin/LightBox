@@ -72,6 +72,7 @@ pub fn reserved_height(strip_h: Option<f64>) -> f64 {
     BAR_H + strip_h.unwrap_or(0.0)
 }
 
+#[derive(Clone, Copy)]
 enum Item {
     Button(Action, Icon, bool),
     ZoomText,
@@ -231,25 +232,42 @@ pub fn layout(
     ];
     let rw = width(&right, s);
     let right_x = vp.0 - pad - rw;
-    // Drop the right group on narrow screens rather than overlap.
-    if right_x > (vp.0 + cw) / 2.0 + GROUP_GAP * s {
-        row(&right, right_x, cy, s, &mut out);
-    }
-    // Editing tools to the left of the centre group.
-    let edit = [
+    let gap = GROUP_GAP * s;
+    let (c0, c1) = ((vp.0 - cw) / 2.0, (vp.0 + cw) / 2.0);
+    // Editing tools: turning on the left of the centre group, saving on its
+    // right, so that the middle stays symmetric around previous / next.
+    // Without room on the right both go left.
+    let tools = [
         Item::Button(FlipH, Icon::Text("\u{21C6}"), false),
         Item::Button(FlipV, Icon::Text("\u{21C5}"), false),
         Item::Button(Straighten, Icon::Angle, false),
-        Item::Gap,
+    ];
+    let files = [
         Item::Button(Save, Icon::Glyph('\u{E74E}'), false),
         Item::Button(SaveAs, Icon::Glyph('\u{E792}'), false),
         Item::Button(Reset, Icon::Glyph('\u{E7A7}'), false),
     ];
-    let ew = width(&edit, s);
-    let mut caption_right = (vp.0 - cw) / 2.0 - GROUP_GAP * s;
-    if caption_right - ew > pad {
-        row(&edit, caption_right - ew, cy, s, &mut out);
-        caption_right -= ew + GROUP_GAP * s;
+    let (tw, fw) = (width(&tools, s), width(&files, s));
+    let split = c0 - gap - tw > pad && right_x > c1 + gap + fw + gap;
+    let mut caption_right = c0 - gap;
+    if split {
+        row(&files, c1 + gap, cy, s, &mut out);
+        row(&right, right_x, cy, s, &mut out);
+        row(&tools, caption_right - tw, cy, s, &mut out);
+        caption_right -= tw + gap;
+    } else {
+        // Drop the right group on narrow screens rather than overlap.
+        if right_x > c1 + gap {
+            row(&right, right_x, cy, s, &mut out);
+        }
+        let mut edit = tools.to_vec();
+        edit.push(Item::Gap);
+        edit.extend(files);
+        let ew = width(&edit, s);
+        if caption_right - ew > pad {
+            row(&edit, caption_right - ew, cy, s, &mut out);
+            caption_right -= ew + gap;
+        }
     }
     if caption_right > pad + 80.0 * s {
         out.caption = Some(Rect {
@@ -349,6 +367,21 @@ mod tests {
         assert_eq!(l.hit((5.0, 5.0)), None);
         assert!(l.contains((10.0, 1430.0)));
         assert!(!l.contains((10.0, 100.0)));
+    }
+
+    /// The middle (editing tools, turning, previous / next, saving) is
+    /// symmetric, so the arrows also look centred.
+    #[test]
+    fn middle_group_is_symmetric() {
+        for (w, s) in [(2560.0, 1.0), (1920.0, 1.0), (2560.0, 1.25), (3840.0, 1.5)] {
+            let l = layout((w, 1440.0), s, false, Some(64.0), false, true);
+            no_overlaps(&l);
+            let find = |a| l.buttons.iter().find(|b| b.action == a).unwrap().rect;
+            let (left, right) = (find(Action::FlipH), find(Action::Reset));
+            let mid = (left.x0 + right.x1) / 2.0;
+            assert!((mid - w / 2.0).abs() <= 1.0, "{w}×{s}: {mid}");
+            assert!(l.buttons.iter().any(|b| b.action == Action::Settings));
+        }
     }
 
     #[test]

@@ -9,10 +9,11 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::panel::Hot;
 use super::{App, MENU_TIMER, Mode};
-use crate::gfx::{CaptionButtonView, CaptionView, DialView, MenuItemView, MenuView};
+use crate::gfx::{CaptionButtonView, CaptionView, DialView, MenuItemView, MenuView, SegmentView};
 use crate::settings::AlphaBg;
 use crate::ui::caption::{self, CaptionButton, CaptionLayout, CaptionStyle};
 use crate::ui::dial::{self, DialLayout};
+use crate::ui::home::{self, HomeButton};
 use crate::ui::popup::{self, MenuLayout};
 use crate::ui::toolbar::Action;
 use crate::view::Rect;
@@ -49,7 +50,7 @@ impl App {
                 .current
                 .file_name()
                 .map(|n| n.to_string_lossy().into_owned())
-                .unwrap_or_default();
+                .unwrap_or_else(|| crate::APP_NAME.to_string());
             // The colour readout follows the name while hovering the picture.
             let name = match &self.probe {
                 Some(p) => format!("{name}      {}", p.text()),
@@ -279,5 +280,25 @@ impl App {
     pub(super) fn drag_dial(&mut self, start: (f64, f64), x: f64, fine: bool) -> Result<()> {
         let a = dial::dragged(start.1, x - start.0, self.ui_scale(), fine);
         self.set_angle(a)
+    }
+}
+
+// Start screen (no file).
+impl App {
+    pub(super) fn home_view(&self) -> Vec<SegmentView> {
+        if !self.home() || self.card_open {
+            return Vec::new();
+        }
+        home::layout(self.viewport(), self.ui_scale())
+            .into_iter()
+            .map(|(b, rect)| SegmentView {
+                rect,
+                text: b.label().to_string(),
+                selected: b == HomeButton::Open,
+                hot: self.hot == Some(Hot::Home(b)),
+                first: true,
+                last: true,
+            })
+            .collect()
     }
 }

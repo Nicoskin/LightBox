@@ -144,7 +144,15 @@ fn main() {
         }
         // Already running: nothing to do.
         Command::Background if ipc::is_running() => Ok(()),
-        Command::Background => run_background(),
+        Command::Background => run_background(false),
+        // No file: the start screen (in the running viewer if there is one).
+        Command::View if args.path.is_none() && args.pinned.is_none() && !args.bench => {
+            if ipc::send_to_running(std::path::Path::new(ipc::SHOW_HOME)) {
+                Ok(())
+            } else {
+                run_background(true)
+            }
+        }
         Command::View => {
             // A running viewer takes the file: no second window.
             let handed = !args.bench
@@ -338,7 +346,8 @@ fn init_logging() {
 
 /// Resident start (`--background`, at sign-in): window, GPU and app are
 /// ready but hidden until a file arrives through the pipe or the tray.
-fn run_background() -> Result<()> {
+/// Starts hidden (tray), or with the start screen when `home`.
+fn run_background(home: bool) -> Result<()> {
     let monitor = Monitor::under_cursor();
     let (mw, mh) = monitor.size();
     let gpu = gfx::Gpu::new(gfx::Adapter::Hardware, mw, mh)
@@ -358,6 +367,9 @@ fn run_background() -> Result<()> {
     )?;
     app.start_hidden()?;
     app.start_background();
+    if home {
+        app.show_home()?;
+    }
     app.install();
     win::window::run_message_loop(app::frame);
     finish()

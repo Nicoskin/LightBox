@@ -210,6 +210,8 @@ impl App {
             Hot::DialReset => self.set_angle(0.0),
             Hot::DialRuler => Ok(()),
             Hot::Info(b) => self.info_action(b),
+            Hot::Home(crate::ui::home::HomeButton::Open) => self.open_dialog(),
+            Hot::Home(crate::ui::home::HomeButton::Settings) => self.open_settings(),
         }
     }
 

@@ -55,6 +55,9 @@ pub(super) fn lparam_point(lparam: LPARAM) -> (i32, i32) {
 
 impl App {
     pub(super) fn toggle_mode(&mut self) -> Result<()> {
+        if self.home() {
+            return Ok(());
+        }
         match self.mode {
             Mode::Fullscreen => self.go_windowed(),
             Mode::Windowed => self.go_fullscreen(),
@@ -262,6 +265,8 @@ impl App {
             (_, _, true, _) => HTTOP,
             (.., true) => HTBOTTOM,
             _ if self.over_panel((x, y)) => HTCLIENT,
+            // The settings card takes every click (outside it: close).
+            _ if self.card_open => HTCLIENT,
             _ if self.over_title_bar((x, y)) => HTCAPTION,
             _ if self.drag_moves_window() => HTCAPTION,
             _ => HTCLIENT,
@@ -374,6 +379,51 @@ impl App {
             self.view = v;
         }
         self.fitted = true;
+        Ok(())
+    }
+}
+
+/// Start screen window size, 96-DPI pixels.
+const HOME_SIZE: (f64, f64) = (960.0, 620.0);
+
+impl App {
+    /// Shows the start screen (launched without a file, or from the tray):
+    /// a mid-sized window with "Open file…" and "Settings".
+    pub fn show_home(&mut self) -> Result<()> {
+        if !self.hidden {
+            // Already showing a photo or the start screen.
+            self.bring_to_front();
+            return Ok(());
+        }
+        self.current = std::path::PathBuf::new();
+        self.files.clear();
+        self.index = 0;
+        self.shown = None;
+        self.model = None;
+        self.error = None;
+        self.notice = None;
+        self.quicklook = false;
+        self.pending_show = false;
+        self.hidden = false;
+        self.monitor = Monitor::under_cursor();
+        let s = self.ui_scale();
+        let work = to_rect(self.monitor.work);
+        let size = (
+            (HOME_SIZE.0 * s).min(work.width()),
+            (HOME_SIZE.1 * s).min(work.height()),
+        );
+        let target = view::place_within(size, work.center(), work);
+        self.mode = Mode::Windowed;
+        self.dim = 0.0;
+        window::set_mode(self.hwnd, true, to_win32(target))?;
+        self.gpu.resize(
+            target.width().round() as u32,
+            target.height().round() as u32,
+        )?;
+        self.update_title();
+        self.render()?;
+        window::show(self.hwnd);
+        self.bring_to_front();
         Ok(())
     }
 }

@@ -24,9 +24,9 @@ use windows::Win32::UI::Shell::{
     ShellWindows,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, DispatchMessageW, GUITHREADINFO, GetClassNameW, GetForegroundWindow,
-    GetGUIThreadInfo, GetMessageW, GetParent, GetWindowThreadProcessId, HHOOK, IsIconic,
-    IsWindowVisible, KBDLLHOOKSTRUCT, MSG, PostMessageW, RegisterWindowMessageW, SW_HIDE,
+    CallNextHookEx, DispatchMessageW, FindWindowExW, GUITHREADINFO, GetClassNameW,
+    GetForegroundWindow, GetGUIThreadInfo, GetMessageW, GetParent, GetWindowThreadProcessId, HHOOK,
+    IsIconic, IsWindowVisible, KBDLLHOOKSTRUCT, MSG, PostMessageW, RegisterWindowMessageW, SW_HIDE,
     SW_RESTORE, SW_SHOW, SetForegroundWindow, SetWindowsHookExW, ShowWindow, TranslateMessage,
     UnhookWindowsHookEx, WH_KEYBOARD_LL, WM_KEYDOWN, WM_LBUTTONDBLCLK, WM_LBUTTONUP, WM_RBUTTONUP,
 };
@@ -75,6 +75,7 @@ impl App {
             last = Some(p);
         }
         match last {
+            Some(p) if p.as_os_str() == ipc::SHOW_HOME => self.show_home(),
             Some(p) => {
                 self.quicklook = false;
                 self.open_external(&p)
@@ -87,7 +88,10 @@ impl App {
     /// hidden in the tray — in a window that appears once it is decoded.
     pub(super) fn open_external(&mut self, path: &Path) -> Result<()> {
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
-        if !self.hidden {
+        // From the start screen the window opens like from the tray: sized
+        // to the photo once it is decoded.
+        let from_home = self.home();
+        if !self.hidden && !from_home {
             if let Some(i) = self.files.iter().position(|p| library::same_path(p, &path)) {
                 self.go_to(i)?;
                 self.bring_to_front();
@@ -101,7 +105,7 @@ impl App {
         self.strip_pos = 0.0;
         self.angle = 0.0;
         self.error = None;
-        if self.hidden {
+        if self.hidden || from_home {
             self.shown = None;
             self.pending_show = true;
         }
@@ -292,7 +296,7 @@ impl App {
         }
     }
 
-    fn open_dialog(&mut self) -> Result<()> {
+    pub(super) fn open_dialog(&mut self) -> Result<()> {
         let spec: String = decode::all_extensions()
             .map(|e| format!("*.{e}"))
             .collect::<Vec<_>>()
@@ -337,7 +341,7 @@ impl App {
     pub(super) fn on_quick_look(&mut self, explorer: HWND) -> Result<()> {
         let selected = selected_file(explorer).filter(|p| decode::is_supported(p));
         let Some(path) = selected else {
-            resend_space();
+            resend_space(explorer);
             return Ok(());
         };
         // Space again on the same file while it is shown: close.
@@ -384,7 +388,11 @@ fn selected_file(explorer: HWND) -> Option<PathBuf> {
                 }
             }
         }
-        // Several tabs share the window: the active one has a visible view.
+        // Several tabs share the window (Windows 11). The active tab is the
+        // first "ShellTabWindowClass" child, and a tab's browser reports
+        // that window; inactive tabs may still look visible, so the
+        // visibility test is only a fallback for older Explorers.
+        let active_tab = FindWindowExW(Some(explorer), None, w!("ShellTabWindowClass"), None).ok();
         for d in views {
             let Ok(sp) = d.cast::<IServiceProvider>() else {
                 continue;
@@ -392,10 +400,16 @@ fn selected_file(explorer: HWND) -> Option<PathBuf> {
             let Ok(browser) = sp.QueryService::<IShellBrowser>(&SID_STopLevelBrowser) else {
                 continue;
             };
+            if let Some(tab) = active_tab
+                && browser.GetWindow().ok() != Some(tab)
+            {
+                continue;
+            }
             let Ok(view) = browser.QueryActiveShellView() else {
                 continue;
             };
-            if let Ok(w) = view.GetWindow()
+            if active_tab.is_none()
+                && let Ok(w) = view.GetWindow()
                 && !IsWindowVisible(w).as_bool()
             {
                 continue;
@@ -415,8 +429,13 @@ fn selected_file(explorer: HWND) -> Option<PathBuf> {
     }
 }
 
-/// Gives a declined Space back to Explorer.
-fn resend_space() {
+/// Gives a declined Space back to `explorer`, only while it is still in front (the
+/// key must never land in another program).
+fn resend_space(explorer: HWND) {
+    // SAFETY: plain query.
+    if unsafe { GetForegroundWindow() } != explorer {
+        return;
+    }
     let key = |flags| INPUT {
         r#type: INPUT_KEYBOARD,
         Anonymous: INPUT_0 {

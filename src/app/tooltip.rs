@@ -65,7 +65,7 @@ impl App {
                 .find(|(c, _)| *c == b)
                 .map(|(_, r)| *r),
             Hot::DialReset => self.dial_view().map(|d| d.reset),
-            Hot::DialRuler | Hot::Menu(_) | Hot::Info(_) => None,
+            Hot::DialRuler | Hot::Menu(_) | Hot::Info(_) | Hot::Home(_) => None,
         }
     }
 
@@ -116,7 +116,7 @@ impl App {
             }
             .to_string(),
             Hot::DialReset => "Сбросить угол (двойной клик по шкале)".to_string(),
-            Hot::DialRuler | Hot::Menu(_) => return None,
+            Hot::DialRuler | Hot::Menu(_) | Hot::Home(_) => return None,
             Hot::Info(b) => match b {
                 InfoButton::Prompt => "Скопировать промпт",
                 InfoButton::Workflow => "Скопировать workflow (JSON)",
