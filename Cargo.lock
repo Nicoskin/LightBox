@@ -675,6 +675,7 @@ dependencies = [
  "bytemuck",
  "crc32fast",
  "criterion",
+ "gif",
  "half",
  "image",
  "kamadak-exif",

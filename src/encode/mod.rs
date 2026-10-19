@@ -1,6 +1,7 @@
 //! Writing images: lossless rotation of existing files and "Save as".
 
 pub mod jpeg;
+pub mod other;
 pub mod png;
 pub mod tiff;
 

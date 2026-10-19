@@ -217,7 +217,11 @@ fn rotate_file(
     } else if data.starts_with(b"\x89PNG\r\n\x1a\n") {
         encode::png::rotate(&data, display)?
     } else {
-        return Err(EncodeError::Unsupported("этот формат пока нельзя поворачивать").into());
+        let ext = path
+            .extension()
+            .map(|e| e.to_string_lossy().to_ascii_lowercase())
+            .unwrap_or_default();
+        encode::other::rotate(&data, &ext, display)?
     };
     let modified = fs::metadata(path).and_then(|m| m.modified()).ok();
     // Keep the original bytes for undo before touching the file.

@@ -237,7 +237,13 @@ fn unfilter(data: &[u8], w: usize, h: usize, bits: usize, spp: usize) -> Option<
 
 /// Where stored pixel (`sx`, `sy`) of a `w` × `h` image ends up when shown
 /// with orientation `o` (the inverse of the mapping in `orient_pixels`).
-fn display_of(o: Orientation, w: usize, h: usize, sx: usize, sy: usize) -> (usize, usize) {
+pub(super) fn display_of(
+    o: Orientation,
+    w: usize,
+    h: usize,
+    sx: usize,
+    sy: usize,
+) -> (usize, usize) {
     match o.exif() {
         2 => (w - 1 - sx, sy),
         3 => (w - 1 - sx, h - 1 - sy),
