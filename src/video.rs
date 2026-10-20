@@ -364,8 +364,11 @@ mod tests {
                         let st = st.unwrap();
                         gpu.context.CopyResource(&st, &tex);
                         let mut m = D3D11_MAPPED_SUBRESOURCE::default();
-                        gpu.context.Map(&st, 0, D3D11_MAP_READ, 0, Some(&mut m)).unwrap();
-                        let row = std::slice::from_raw_parts(m.pData as *const u8, (w * 4) as usize);
+                        gpu.context
+                            .Map(&st, 0, D3D11_MAP_READ, 0, Some(&mut m))
+                            .unwrap();
+                        let row =
+                            std::slice::from_raw_parts(m.pData as *const u8, (w * 4) as usize);
                         let mid = std::slice::from_raw_parts(
                             (m.pData as *const u8).add((h / 2 * m.RowPitch) as usize),
                             (w * 4) as usize,

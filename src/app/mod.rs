@@ -892,8 +892,14 @@ impl App {
             (_, None) => {}
         }
         // Mode transitions run in fullscreen geometry, so they use `dim`.
+        // A 3D model gets an opaque background (the desktop behind a model
+        // is only clutter): faded in and out with the dimming.
         let clear = match self.mode {
             Mode::Windowed => WINDOW_BG,
+            Mode::Fullscreen if self.model_mode() => {
+                let a = (self.dim / self.settings.dim().max(0.01)).min(1.0);
+                WINDOW_BG.map(|c| c * a)
+            }
             Mode::Fullscreen => [0.0, 0.0, 0.0, self.dim],
         };
         let model = self.model_draw();
