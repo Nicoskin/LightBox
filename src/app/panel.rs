@@ -7,15 +7,15 @@ use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 
 use super::{App, Mode, PANEL_HOLD_MS, PANEL_TIMER, WM_APP_THUMB, post, stars};
 use crate::cache;
-use crate::gfx::Icon;
 use crate::gfx::{ButtonView, CardView, CellView, PanelView, SegmentView, TextStyle, TextView};
 use crate::i18n::tr;
 use crate::keymap::{self, Command, Key, Keymap};
 use crate::orientation::Orientation;
-use crate::settings::AlphaBg;
+use crate::settings::SaveMode;
 use crate::t;
 use crate::ui::caption::CaptionButton;
 use crate::ui::info::InfoButton;
+use crate::ui::popup::MenuItem;
 use crate::ui::settings_card;
 use crate::ui::thumbs::Thumbnails;
 use crate::ui::toolbar::{self, Action, Layout};
@@ -30,8 +30,8 @@ pub enum Hot {
     Cell(usize),
     /// Title bar / corner button.
     Caption(CaptionButton),
-    /// Item of the transparency-background menu.
-    Menu(AlphaBg),
+    /// Item of a pop-up menu.
+    Menu(MenuItem),
     /// The straightening dial's ruler and its "0°" button.
     DialRuler,
     DialReset,
@@ -50,11 +50,15 @@ impl App {
         toolbar::layout(
             self.viewport(),
             self.ui_scale(),
-            windowed,
-            self.strip_height(),
-            windowed,
-            !self.preview(),
-            self.model_mode(),
+            toolbar::Opts {
+                compact: windowed,
+                strip_h: self.strip_height(),
+                windowed,
+                browse: !self.preview(),
+                model: self.model_mode(),
+                // With "save at once" there is never anything to save.
+                can_save: self.dirty() && self.settings.save_mode != SaveMode::Auto,
+            },
         )
     }
 
@@ -86,7 +90,7 @@ impl App {
         let wr = window::rect(self.hwnd);
         let p = (f64::from(c.x - wr.left), f64::from(c.y - wr.top));
         let inside = c.x >= wr.left && c.x < wr.right && c.y >= wr.top && c.y < wr.bottom;
-        if self.pressed.is_some() || self.menu_open || (inside && self.over_panel(p)) {
+        if self.pressed.is_some() || self.menu.is_some() || (inside && self.over_panel(p)) {
             self.show_panel();
         } else {
             self.hide_panel();
@@ -162,11 +166,7 @@ impl App {
             .iter()
             .map(|b| ButtonView {
                 rect: b.rect,
-                // The transparency button shows the chosen background.
-                icon: match (b.action, self.settings.alpha_bg.gray()) {
-                    (Action::Checker, Some(g)) => Icon::Swatch(g),
-                    _ => b.icon,
-                },
+                icon: b.icon,
                 round: b.round,
                 hot: self.hot == Some(Hot::Button(b.action)),
                 pressed: self.pressed == Some(Hot::Button(b.action)),
@@ -435,13 +435,24 @@ impl App {
         let l = self.card_layout();
         let mut labels = Vec::new();
         let mut segments = Vec::new();
+        let mut sliders = Vec::new();
         for row in &l.rows {
             labels.push((row.label, row.text.to_string()));
             let n = row.choices.len();
             for (i, (c, text, rect)) in row.choices.iter().enumerate() {
+                let hot = self.card_hot == Some(settings_card::Hit::Choice(*c));
+                if *c == settings_card::Choice::DimSlider {
+                    sliders.push((*rect, f32::from(self.settings.dim_percent) / 100.0, hot));
+                    continue;
+                }
+                let text = if *c == settings_card::Choice::DimValue {
+                    format!("{} %", self.settings.dim_percent)
+                } else {
+                    (*text).to_string()
+                };
                 segments.push(SegmentView {
                     rect: *rect,
-                    text: (*text).to_string(),
+                    text,
                     selected: settings_card::is_selected(&self.settings, *c),
                     hot: self.card_hot == Some(settings_card::Hit::Choice(*c)),
                     first: i == 0,
@@ -495,6 +506,7 @@ impl App {
             labels,
             footer: (l.footer, footer),
             segments,
+            sliders,
             clip: keys_page.then_some(l.list),
             button: l.reset.map(|r| {
                 (
@@ -557,6 +569,17 @@ impl App {
                 }
                 self.render()?;
             }
+            // Dragging the dimming slider: the value follows; saved on
+            // release.
+            WM_LBUTTONDOWN if l.hit(p) == Some(Hit::Choice(settings_card::Choice::DimSlider)) => {
+                self.card_drag = true;
+                self.drag_dim(&l, p.0)?;
+            }
+            WM_MOUSEMOVE if self.card_drag => self.drag_dim(&l, p.0)?,
+            WM_LBUTTONUP if self.card_drag => {
+                self.card_drag = false;
+                self.settings.save();
+            }
             WM_MOUSEMOVE => {
                 let hot = l.hit(p).filter(|h| *h != Hit::Card);
                 if hot != self.card_hot {
@@ -588,6 +611,8 @@ impl App {
                     self.card_capture = None;
                     self.render()?;
                 }
+                Some(Hit::Choice(settings_card::Choice::DimValue)) => self.type_dim()?,
+                Some(Hit::Choice(settings_card::Choice::DimSlider)) => {}
                 Some(Hit::Choice(c)) => self.choose(c)?,
                 Some(Hit::KeySlot(cmd, slot)) => {
                     self.card_capture = Some((cmd, slot));
@@ -627,6 +652,44 @@ impl App {
     }
 
     /// Applies a choice from the card, with its immediate effects.
+    /// Background dimming in percent; the open fullscreen view follows.
+    fn set_dim(&mut self, percent: u8) -> Result<()> {
+        self.settings.dim_percent = percent.min(100);
+        if self.mode == Mode::Fullscreen && self.anim.is_none() {
+            self.dim = self.settings.dim();
+        }
+        self.render()
+    }
+
+    /// The dimming slider under the pointer at `x`.
+    fn drag_dim(&mut self, l: &settings_card::CardLayout, x: f64) -> Result<()> {
+        let track = l
+            .rows
+            .iter()
+            .flat_map(|r| &r.choices)
+            .find(|(c, ..)| *c == settings_card::Choice::DimSlider)
+            .map(|(_, _, r)| *r);
+        match track {
+            Some(t) => self.set_dim(settings_card::slider_value(t, x)),
+            None => Ok(()),
+        }
+    }
+
+    /// A click on the dimming value: type it.
+    fn type_dim(&mut self) -> Result<()> {
+        let Some(value) = crate::win::form::ask_number(
+            self.hwnd,
+            tr("Затемнение фона"),
+            tr("Затемнение фона, % (0–100)"),
+            u32::from(self.settings.dim_percent),
+        ) else {
+            return Ok(());
+        };
+        self.set_dim(value.min(100) as u8)?;
+        self.settings.save();
+        Ok(())
+    }
+
     fn choose(&mut self, c: settings_card::Choice) -> Result<()> {
         use settings_card::Choice;
         settings_card::apply(&mut self.settings, c);
@@ -639,9 +702,6 @@ impl App {
                     self.view = v;
                 }
                 self.request_thumbs();
-            }
-            Choice::Dim(_) if self.mode == Mode::Fullscreen && self.anim.is_none() => {
-                self.dim = self.settings.dim();
             }
             // Starting with Windows only makes sense in the tray, and the
             // tray without it is still useful: they go off together only.

@@ -22,9 +22,8 @@ A fast image and 3D model viewer for Windows 10/11 in the spirit of Picasa Photo
 - **Model tools:** a ruler between two points (D), wireframe (W), a section by height (P, ↑/↓ move it), lay flat on a face (B), project objects (O): contrast colours, hide and show any object.
 - **G-code** (.gcode, .gcode.3mf): the toolpath coloured by line type, layers with ↑/↓, print time and filament use.
 - **Inspector:** histogram, single R/G/B/A channels, an info panel (EXIF, camera, GPS with a map, ICC). For PNGs from ComfyUI and A1111 it shows the prompt and generation parameters with copy buttons.
-- **Ratings and tags** (Ctrl+1…5, Ctrl+K) written the Windows way, so Explorer and Lightroom see them; a filter by rating.
-- **Batch rename and convert** of the selected photos (Ctrl+B).
-- **Compare two photos** side by side with synced zoom, in one place by turns, or as a difference map.
+- **Ratings** (Ctrl+1…5) written the Windows way, so Explorer and Lightroom see them; a filter by rating.
+- **Compare two photos** side by side with synced zoom, in one place by turns, or as a difference map; on-screen buttons or keys switch them.
 - **Slideshow, filmstrip, folder watching, drag & drop** into and out of the window.
 - **File handling:** delete to the Recycle Bin, copy the image or its path, quick folders F1–F9, open in an editor, show in Explorer.
 - **Space in Explorer** previews the selected file (like Quick Look on macOS); a window can be pinned on top of the others.
@@ -91,7 +90,6 @@ Time from starting a program with a file to the photo on screen, ms (median of f
 | Ctrl+S / Ctrl+Shift+S / Ctrl+Z | save / save as / undo the save |
 | Ctrl+C / Ctrl+Shift+C | copy the image / path |
 | Ctrl+1…5 / Ctrl+0 / Ctrl+F | rating / clear rating / filter by rating |
-| Ctrl+K / Ctrl+B | tags / batch rename and convert |
 | Delete | to the Recycle Bin |
 | E | open in an editor |
 | F1–F4, F6–F9 | quick folders |

@@ -19,7 +19,6 @@ mod mode;
 mod model3d;
 mod nav;
 mod objects;
-mod organize;
 mod panel;
 mod save;
 mod slideshow;
@@ -107,8 +106,6 @@ const BADGE_TIMER: usize = 1;
 const PANEL_HOLD_MS: u32 = 2000;
 const PANEL_FADE: Duration = Duration::from_millis(180);
 const PANEL_TIMER: usize = 2;
-/// Hover delay before the transparency menu opens.
-const MENU_TIMER: usize = 3;
 /// Hover delay before a tooltip appears.
 const TOOLTIP_TIMER: usize = 4;
 /// Next animation frame.
@@ -145,8 +142,6 @@ const WM_APP_UPDATE: u32 = WM_APP + 14;
 const WM_APP_MODEL: u32 = WM_APP + 15;
 /// Posted by the rating threads (read or written stars).
 const WM_APP_RATING: u32 = WM_APP + 16;
-/// Posted by the batch worker (progress, done).
-const WM_APP_BATCH: u32 = WM_APP + 17;
 /// Posted by the map thread (info panel).
 const WM_APP_MAP: u32 = WM_APP + 18;
 
@@ -223,7 +218,6 @@ pub struct App {
     ratings: HashMap<String, u8>,
     rating_filter: u8,
     /// A running batch (rename / convert).
-    batch_rx: Option<organize::BatchRx>,
     /// The GPS map of the info panel: rendered (file key, image), on its
     /// way, or failed.
     map: Option<(String, Rc<crate::gfx::Thumb>)>,
@@ -286,6 +280,8 @@ pub struct App {
     card_tab: crate::ui::settings_card::Tab,
     /// The shortcut being reassigned on the keys page (action, slot).
     card_capture: Option<(crate::keymap::Command, usize)>,
+    /// The dimming slider is being dragged.
+    card_drag: bool,
     /// Scroll offset of the keys page, pixels.
     card_scroll: f64,
     /// Keyboard shortcuts (rebuilt when reassigned).
@@ -297,7 +293,8 @@ pub struct App {
     strip_pos: f64,
     strip_tick: Option<Instant>,
     /// Transparency-background menu shown.
-    menu_open: bool,
+    /// The open pop-up menu: the panel button it belongs to.
+    menu: Option<crate::ui::toolbar::Action>,
     /// Straightening dial shown, the current free rotation (degrees, view
     /// only) and an ongoing ruler drag (start x, angle then).
     dial_open: bool,
@@ -407,7 +404,6 @@ impl App {
             all_files: vec![path.clone()],
             ratings: HashMap::new(),
             rating_filter: 0,
-            batch_rx: None,
             map: None,
             map_rx: None,
             map_error: None,
@@ -450,11 +446,12 @@ impl App {
             card_hot: None,
             card_tab: Default::default(),
             card_capture: None,
+            card_drag: false,
             card_scroll: 0.0,
             on_top: false,
             strip_pos: 0.0,
             strip_tick: None,
-            menu_open: false,
+            menu: None,
             dial_open: false,
             angle: 0.0,
             dial_drag: None,
@@ -939,6 +936,7 @@ impl App {
             home: self.home_view(),
             crop: self.crop_view(),
             objects: self.objects_view(),
+            bar: self.compare_bar_view(),
             adjust: self.tone_view(),
             marks: self.model_marks(),
         };
@@ -1184,11 +1182,6 @@ impl App {
         {
             tracing::error!("tooltip: {e:#}");
         }
-        if id == MENU_TIMER
-            && let Err(e) = self.menu_timer()
-        {
-            tracing::error!("menu: {e:#}");
-        }
         if id == PANEL_TIMER {
             self.panel_timer();
         }
@@ -1280,10 +1273,6 @@ impl App {
             }
             WM_APP_MAP => {
                 self.on_map()?;
-                Ok(Some(LRESULT(0)))
-            }
-            WM_APP_BATCH => {
-                self.on_batch()?;
                 Ok(Some(LRESULT(0)))
             }
             WM_APP_RATING => {

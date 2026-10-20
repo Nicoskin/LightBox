@@ -19,7 +19,10 @@ pub enum Choice {
     Imperfect(Option<ImperfectJpeg>),
     Animations(bool),
     TurnAnimation(bool),
-    Dim(u8),
+    /// The dimming slider (0–100 %) and its value, which opens a field to
+    /// type it.
+    DimSlider,
+    DimValue,
     Slideshow(u8),
     Resident(bool),
     QuickLook(bool),
@@ -115,10 +118,7 @@ fn all_rows(tab: Tab) -> Vec<Row> {
                     (Wheel(crate::settings::Wheel::Browse), tr("Листание")),
                 ],
             ),
-            row(
-                tr("Затемнение фона"),
-                vec![(Dim(60), "60 %"), (Dim(80), "80 %"), (Dim(92), "92 %")],
-            ),
+            row(tr("Затемнение фона"), vec![(DimSlider, ""), (DimValue, "")]),
             row(
                 tr("Карты по GPS"),
                 vec![
@@ -295,7 +295,7 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         Choice::Imperfect(v) => s.imperfect_jpeg == v,
         Choice::Animations(v) => s.animations == v,
         Choice::TurnAnimation(v) => s.turn_animation == v,
-        Choice::Dim(v) => s.dim_percent == v,
+        Choice::DimSlider | Choice::DimValue => false,
         Choice::Slideshow(v) => s.slideshow_secs == v,
         Choice::Resident(v) => s.resident == v,
         // Only works while the viewer waits in the tray.
@@ -324,7 +324,7 @@ pub fn apply(s: &mut Settings, c: Choice) {
         Choice::Imperfect(v) => s.imperfect_jpeg = v,
         Choice::Animations(v) => s.animations = v,
         Choice::TurnAnimation(v) => s.turn_animation = v,
-        Choice::Dim(v) => s.dim_percent = v,
+        Choice::DimSlider | Choice::DimValue => {}
         Choice::Slideshow(v) => s.slideshow_secs = v,
         Choice::Resident(v) => s.resident = v,
         Choice::QuickLook(v) => {
@@ -379,6 +379,24 @@ pub struct KeyRowLayout {
 
 /// Sizes in 96-DPI pixels.
 const CARD_W: f64 = 640.0;
+/// The value next to a slider.
+const VALUE_W: f64 = 84.0;
+/// How far inside its rectangle a slider's ends are (the knob fits).
+pub fn slider_inset(track: Rect) -> f64 {
+    track.height() * 0.45
+}
+
+/// The percentage at `x` on the slider `track`.
+pub fn slider_value(track: Rect, x: f64) -> u8 {
+    let (a, b) = (
+        track.x0 + slider_inset(track),
+        track.x1 - slider_inset(track),
+    );
+    ((x - a) / (b - a).max(1.0) * 100.0)
+        .round()
+        .clamp(0.0, 100.0) as u8
+}
+
 const TITLE_H: f64 = 56.0;
 const TABS_H: f64 = 36.0;
 /// Space between the page switcher and the first row.
@@ -465,24 +483,42 @@ pub fn layout(vp: (f64, f64), s: f64, tab: Tab, scroll: f64) -> CardLayout {
         let n = row.choices.len() as f64;
         let seg_w = (seg_x1 - seg_x0) / n;
         let (sy0, sy1) = (ry + 7.0 * s, ry + (ROW_H - 7.0) * s);
-        let choices = row
+        let choices = if row
             .choices
-            .into_iter()
-            .enumerate()
-            .map(|(k, (c, text))| {
-                let a = seg_x0 + seg_w * k as f64;
-                (
-                    c,
-                    text,
-                    Rect {
-                        x0: a.round(),
-                        y0: sy0,
-                        x1: (a + seg_w).round(),
-                        y1: sy1,
-                    },
-                )
-            })
-            .collect();
+            .first()
+            .is_some_and(|c| c.0 == Choice::DimSlider)
+        {
+            // A slider and, on its right, the value.
+            let value_x0 = (seg_x1 - VALUE_W * s).round();
+            let span = |x0: f64, x1: f64| Rect {
+                x0,
+                y0: sy0,
+                x1,
+                y1: sy1,
+            };
+            vec![
+                (Choice::DimSlider, "", span(seg_x0, value_x0 - 12.0 * s)),
+                (Choice::DimValue, "", span(value_x0, seg_x1)),
+            ]
+        } else {
+            row.choices
+                .into_iter()
+                .enumerate()
+                .map(|(k, (c, text))| {
+                    let a = seg_x0 + seg_w * k as f64;
+                    (
+                        c,
+                        text,
+                        Rect {
+                            x0: a.round(),
+                            y0: sy0,
+                            x1: (a + seg_w).round(),
+                            y1: sy1,
+                        },
+                    )
+                })
+                .collect()
+        };
         out.push(RowLayout {
             label,
             text: row_label,
@@ -623,8 +659,14 @@ mod tests {
         let mut s = Settings::default();
         for row in every_row() {
             for (c, _) in row.choices {
-                if c == Choice::Editor(true) || c == Choice::CheckUpdates {
-                    continue; // actions, not settings
+                if matches!(
+                    c,
+                    Choice::Editor(true)
+                        | Choice::CheckUpdates
+                        | Choice::DimSlider
+                        | Choice::DimValue
+                ) {
+                    continue; // actions and the slider, not choices
                 }
                 apply(&mut s, c);
                 assert!(is_selected(&s, c), "{c:?}");
@@ -636,7 +678,7 @@ mod tests {
     fn defaults_are_offered() {
         // Each row has exactly one choice selected with default settings.
         let s = Settings::default();
-        for row in every_row() {
+        for row in every_row().filter(|r| r.choices[0].0 != Choice::DimSlider) {
             let n = row
                 .choices
                 .iter()
@@ -644,6 +686,21 @@ mod tests {
                 .count();
             assert_eq!(n, 1, "{}", row.label);
         }
+    }
+
+    #[test]
+    fn slider_maps_its_track() {
+        let t = Rect {
+            x0: 100.0,
+            y0: 0.0,
+            x1: 320.0,
+            y1: 20.0,
+        };
+        let inset = slider_inset(t);
+        assert_eq!(slider_value(t, 0.0), 0);
+        assert_eq!(slider_value(t, t.x0 + inset), 0);
+        assert_eq!(slider_value(t, 210.0), 50);
+        assert_eq!(slider_value(t, 1000.0), 100);
     }
 
     #[test]

@@ -247,7 +247,7 @@ impl App {
             );
             b.apply.y0
         } else {
-            return None;
+            self.compare_bar_top()?
         };
         Some((self.viewport().1 - top + 6.0 * self.ui_scale()) as f32)
     }

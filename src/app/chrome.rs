@@ -1,26 +1,23 @@
-//! Window caption buttons, the transparency-background pop-up menu and the
+//! Window caption buttons, the pop-up menus of the panel and the
 //! straightening dial (free rotation, view only).
 
 use anyhow::Result;
 use windows::Win32::Foundation::{LPARAM, WPARAM};
-use windows::Win32::UI::WindowsAndMessaging::{
-    KillTimer, PostMessageW, SW_MINIMIZE, SetTimer, ShowWindow, WM_CLOSE,
-};
+use windows::Win32::UI::WindowsAndMessaging::{PostMessageW, SW_MINIMIZE, ShowWindow, WM_CLOSE};
 
 use super::panel::Hot;
-use super::{App, MENU_TIMER, Mode};
+use super::{App, Mode};
 use crate::gfx::{CaptionButtonView, CaptionView, DialView, MenuItemView, MenuView, SegmentView};
+use crate::i18n::tr;
+use crate::keymap::Command;
 use crate::settings::AlphaBg;
 use crate::ui::caption::{self, CaptionButton, CaptionLayout, CaptionStyle};
 use crate::ui::dial::{self, DialLayout};
 use crate::ui::home::{self, HomeButton};
-use crate::ui::popup::{self, MenuLayout};
+use crate::ui::popup::{self, MenuItem, MenuLayout};
 use crate::ui::toolbar::Action;
 use crate::view::Rect;
 use crate::win::window;
-
-/// Hovering the transparency button this long opens its menu.
-const MENU_HOVER_MS: u32 = 450;
 
 impl App {
     pub(super) fn caption_layout(&self) -> CaptionLayout {
@@ -126,98 +123,161 @@ impl App {
     }
 }
 
-// Transparency background menu.
+// Pop-up menus: editing and "more".
 impl App {
-    /// The transparency toggle on the panel, if it is laid out.
-    fn checker_button(&self) -> Option<Rect> {
+    /// The panel button a menu opens from, if it is laid out.
+    fn menu_button(&self, a: Action) -> Option<Rect> {
         self.panel_layout()
             .buttons
             .iter()
-            .find(|b| b.action == Action::Checker)
+            .find(|b| b.action == a)
             .map(|b| b.rect)
     }
 
     fn menu_layout(&self) -> Option<(MenuLayout, Rect)> {
-        if !self.menu_open {
-            return None;
-        }
-        let anchor = self.checker_button()?;
+        let a = self.menu?;
+        let anchor = self.menu_button(a)?;
         Some((
-            popup::layout(anchor, self.viewport(), self.ui_scale()),
+            popup::layout(anchor, self.viewport(), self.ui_scale(), &popup::items(a)),
             anchor,
         ))
     }
 
+    /// The command behind a menu item: its name and its first key.
+    fn menu_command(a: Action) -> Option<Command> {
+        Some(match a {
+            Action::Crop => Command::Crop,
+            Action::Adjust => Command::Adjust,
+            Action::FlipH => Command::FlipH,
+            Action::FlipV => Command::FlipV,
+            Action::SaveAs => Command::SaveAs,
+            Action::Grid => Command::Grid,
+            Action::Histogram => Command::Histogram,
+            Action::Compare => Command::Compare,
+            Action::Slideshow => Command::Slideshow,
+            Action::Checker => Command::Checker,
+            _ => return None,
+        })
+    }
+
     pub(super) fn menu_view(&self) -> Option<MenuView> {
         let (l, _) = self.menu_layout()?;
+        let item_view = |item: MenuItem, rect: Rect| {
+            let hot = self.hot == Some(Hot::Menu(item));
+            let base = MenuItemView {
+                rect,
+                label: String::new(),
+                hint: String::new(),
+                swatch: None,
+                separator: false,
+                selected: false,
+                hot,
+            };
+            match item {
+                MenuItem::Separator => MenuItemView {
+                    separator: true,
+                    hot: false,
+                    ..base
+                },
+                MenuItem::Background(bg) => MenuItemView {
+                    label: bg.label().to_string(),
+                    swatch: Some(bg.gray()),
+                    selected: self.settings.checker && self.settings.alpha_bg == bg,
+                    ..base
+                },
+                MenuItem::Do(a) => {
+                    let (label, hint) = match Self::menu_command(a) {
+                        Some(c) => (
+                            c.label().to_string(),
+                            self.keymap
+                                .keys(c)
+                                .first()
+                                .map(|k| k.label())
+                                .unwrap_or_default(),
+                        ),
+                        None => (tr("Повернуть на любой угол").to_string(), "[ ]".into()),
+                    };
+                    MenuItemView {
+                        label,
+                        hint,
+                        selected: match a {
+                            Action::Crop => self.crop.is_some(),
+                            Action::Adjust => self.tone.is_some(),
+                            Action::Straighten => self.dial_open,
+                            Action::Grid => self.settings.pixel_grid,
+                            Action::Histogram => self.hist_state.open,
+                            Action::Compare => self.compare.is_some(),
+                            Action::Slideshow => self.slideshow,
+                            Action::Checker => self.settings.checker,
+                            _ => false,
+                        },
+                        ..base
+                    }
+                }
+            }
+        };
         Some(MenuView {
             rect: l.rect,
             items: l
                 .items
                 .iter()
-                .map(|(bg, rect)| MenuItemView {
-                    rect: *rect,
-                    label: bg.label().to_string(),
-                    swatch: bg.gray(),
-                    selected: self.settings.checker && self.settings.alpha_bg == *bg,
-                    hot: self.hot == Some(Hot::Menu(*bg)),
-                })
+                .map(|(item, rect)| item_view(*item, *rect))
                 .collect(),
         })
     }
 
-    pub(super) fn menu_hit(&self, p: (f64, f64)) -> Option<Option<AlphaBg>> {
+    /// `true` over the button of the open menu (its click closes it).
+    pub(super) fn over_menu_button(&self, p: (f64, f64)) -> bool {
+        self.menu
+            .and_then(|a| self.menu_button(a))
+            .is_some_and(|r| r.contains(p))
+    }
+
+    pub(super) fn menu_hit(&self, p: (f64, f64)) -> Option<Option<MenuItem>> {
         let (l, _) = self.menu_layout()?;
         l.rect.contains(p).then(|| l.hit(p))
     }
 
-    pub(super) fn open_menu(&mut self) -> Result<()> {
-        if self.checker_button().is_none() {
-            return Ok(());
+    /// A click on a menu button: opens its menu, or closes it.
+    pub(super) fn toggle_menu(&mut self, a: Action) -> Result<()> {
+        if self.menu == Some(a) || self.menu_button(a).is_none() {
+            return self.close_menu();
         }
-        self.menu_open = true;
+        self.menu = Some(a);
         self.show_panel();
         self.render()
     }
 
     pub(super) fn close_menu(&mut self) -> Result<()> {
-        if self.menu_open {
-            self.menu_open = false;
+        if self.menu.take().is_some() {
             self.render()?;
         }
         Ok(())
     }
 
-    pub(super) fn choose_background(&mut self, bg: AlphaBg) -> Result<()> {
+    /// A menu item was clicked: the menu closes and the item runs.
+    pub(super) fn menu_item(&mut self, item: MenuItem) -> Result<()> {
+        self.close_menu()?;
+        match item {
+            MenuItem::Do(a) => self.run_action(a),
+            MenuItem::Background(bg) => self.choose_background(bg),
+            MenuItem::Separator => Ok(()),
+        }
+    }
+
+    fn choose_background(&mut self, bg: AlphaBg) -> Result<()> {
         self.settings.alpha_bg = bg;
         self.settings.checker = true;
         self.settings.save();
-        self.close_menu()?;
         self.render()
     }
 
-    /// Hover tracking: arms the menu timer over the transparency button and
-    /// closes the menu once the pointer has left it.
+    /// Hover tracking: closes the menu once the pointer has left it.
     pub(super) fn menu_hover(&mut self, p: (f64, f64)) -> Result<()> {
-        if self.hot == Some(Hot::Button(Action::Checker)) && !self.menu_open {
-            // SAFETY: own window; re-arming resets the timer.
-            unsafe { SetTimer(Some(self.hwnd), MENU_TIMER, MENU_HOVER_MS, None) };
-        }
         if let Some((l, anchor)) = self.menu_layout()
             && !l.keeps_open(anchor, p, self.ui_scale())
         {
             self.close_menu()?;
-        }
-        Ok(())
-    }
-
-    pub(super) fn menu_timer(&mut self) -> Result<()> {
-        // SAFETY: own window and timer.
-        unsafe {
-            let _ = KillTimer(Some(self.hwnd), MENU_TIMER);
-        }
-        if self.hot == Some(Hot::Button(Action::Checker)) && !self.menu_open {
-            self.open_menu()?;
         }
         Ok(())
     }

@@ -70,6 +70,8 @@ pub struct Ui {
     pub crop: Option<CropView>,
     /// The objects card of a 3D project (O).
     pub objects: Option<ObjectsView>,
+    /// A row of buttons above the panel (comparing).
+    pub bar: Option<BarView>,
     /// The adjustments card.
     pub adjust: Option<AdjustView>,
     /// Points picked on a model (the ruler), joined by a line.
@@ -93,6 +95,7 @@ impl Ui {
             && self.home.is_empty()
             && self.crop.is_none()
             && self.objects.is_none()
+            && self.bar.is_none()
             && self.adjust.is_none()
             && self.marks.is_empty()
     }
@@ -107,17 +110,10 @@ pub enum Icon {
     Mirrored(char),
     Text(&'static str),
     /// Drawn shapes for which no glyph fits.
-    Checker,
     Smoothing,
     Filmstrip,
-    /// An angle (straightening dial).
-    Angle,
-    /// Solid swatch of an sRGB grey level.
-    Swatch(f32),
-    /// A 3 × 3 grid (pixel grid).
+    /// A 3 × 3 grid (wireframe).
     Grid,
-    /// Three bars (histogram).
-    Histogram,
 }
 
 /// Premultiplied BGRA thumbnail; `id` identifies it for bitmap caching.
@@ -185,6 +181,8 @@ pub struct CardView {
     pub button: Option<(Rect, String, bool)>,
     /// Segments: rect, text, selected, hot, first / last in its row.
     pub segments: Vec<SegmentView>,
+    /// Sliders: track, value 0…1, hot.
+    pub sliders: Vec<(Rect, f32, bool)>,
 }
 
 pub struct SegmentView {
@@ -320,6 +318,9 @@ impl Overlay {
             }
             if let Some(o) = &ui.objects {
                 self.objects_card(o, ui.scale);
+            }
+            if let Some(b) = &ui.bar {
+                self.button_bar(b, ui.scale);
             }
             if let Some(a) = &ui.adjust {
                 self.adjust_card(a, ui.scale);
@@ -558,8 +559,13 @@ pub struct MenuView {
 pub struct MenuItemView {
     pub rect: Rect,
     pub label: String,
-    /// sRGB grey of a solid swatch; `None` = checkerboard.
-    pub swatch: Option<f32>,
+    /// The key, on the right.
+    pub hint: String,
+    /// A colour swatch: sRGB grey, `Some(None)` = checkerboard.
+    pub swatch: Option<Option<f32>>,
+    /// A thin line between groups (nothing else is drawn).
+    pub separator: bool,
+    /// Ticked: the option is on.
     pub selected: bool,
     pub hot: bool,
 }
@@ -575,6 +581,12 @@ pub struct DialView {
     pub px_per_deg: f64,
     pub reset_hot: bool,
     pub opacity: f32,
+}
+
+/// A row of buttons on a dark card (the compare bar).
+pub struct BarView {
+    pub card: Rect,
+    pub buttons: Vec<SegmentView>,
 }
 
 /// The objects card of a 3D project: title, buttons and one row per

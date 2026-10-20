@@ -34,10 +34,11 @@ pub enum Action {
     LayFlat,
     /// The objects of a project (O).
     Objects,
-    /// Tags (Ctrl+K).
-    Tags,
-    /// Batch rename / convert (Ctrl+B).
-    Batch,
+    /// The editing menu: crop, adjust, flip, any angle, save as.
+    EditMenu,
+    /// The other view options: grid, histogram, compare, slideshow,
+    /// transparency.
+    More,
     /// Pixel grid (G), info panel (I), histogram (H).
     Grid,
     Info,
@@ -152,28 +153,33 @@ fn width(items: &[Item], s: f64) -> f64 {
         - GAP * s
 }
 
-/// Panel layout for a `vp`-sized viewport at UI scale `s`. `compact` is the
-/// windowed-mode variant (no caption, no strip, fewer buttons if narrow);
-/// `strip_h` is the filmstrip height (96-DPI pixels) when it is shown;
-/// `model`: a 3D model is shown, with its own tools instead of the photo ones.
-pub fn layout(
-    vp: (f64, f64),
-    s: f64,
-    compact: bool,
-    strip_h: Option<f64>,
-    windowed: bool,
-    browse: bool,
-    model: bool,
-) -> Layout {
+/// What the panel shows besides the viewport size.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct Opts {
+    /// The windowed-mode variant: no caption, no strip, fewer buttons.
+    pub compact: bool,
+    /// Filmstrip height (96-DPI pixels) when it is shown.
+    pub strip_h: Option<f64>,
+    pub windowed: bool,
+    /// Browsing a folder (not a single-file preview).
+    pub browse: bool,
+    /// A 3D model: its own tools instead of the photo ones.
+    pub model: bool,
+    /// An unsaved edit: the save and undo buttons show.
+    pub can_save: bool,
+}
+
+/// Panel layout for a `vp`-sized viewport at UI scale `s`.
+pub fn layout(vp: (f64, f64), s: f64, o: Opts) -> Layout {
     use Action::*;
-    let bar_h = if compact { BAR_H_COMPACT } else { BAR_H } * s;
+    let bar_h = if o.compact { BAR_H_COMPACT } else { BAR_H } * s;
     let bar = Rect {
         x0: 0.0,
         y0: vp.1 - bar_h,
         x1: vp.0,
         y1: vp.1,
     };
-    let strip = strip_h.filter(|_| !compact).map(|h| Rect {
+    let strip = o.strip_h.filter(|_| !o.compact).map(|h| Rect {
         x0: 0.0,
         y0: bar.y0 - h * s,
         x1: vp.0,
@@ -188,7 +194,9 @@ pub fn layout(
     };
     let cy = (bar.y0 + bar.y1) / 2.0;
     let pad = 12.0 * s;
-    let mode_icon = Icon::Glyph(if windowed { '\u{E740}' } else { '\u{E73F}' });
+    let mode_icon = Icon::Glyph(if o.windowed { '\u{E740}' } else { '\u{E73F}' });
+    let edit_menu = Item::Button(EditMenu, Icon::Glyph('\u{E70F}'), false);
+    let more = Item::Button(More, Icon::Glyph('\u{E712}'), false);
 
     let center = [
         Item::Button(RotateCcw, Icon::Mirrored('\u{E7AD}'), false),
@@ -201,19 +209,19 @@ pub fn layout(
         Item::Button(RotateCcw, Icon::Mirrored('\u{E7AD}'), false),
         Item::Button(RotateCw, Icon::Glyph('\u{E7AD}'), false),
     ];
-    let center: &[Item] = if browse { &center } else { &still };
+    let center: &[Item] = if o.browse { &center } else { &still };
     let zoom = [
         Item::Button(ZoomOut, Icon::Glyph('\u{E71F}'), false),
         Item::ZoomText,
         Item::Button(ZoomIn, Icon::Glyph('\u{E8A3}'), false),
     ];
 
-    if compact {
-        // Windowed: centre group; zoom on the left and the mode toggle on
-        // the right when there is room.
+    if o.compact {
+        // Windowed: centre group; zoom on the left and the menus and the
+        // mode toggle on the right when there is room.
         let cw = width(center, s);
         let roomy = vp.0 >= cw + 2.0 * (width(&zoom, s) + 2.0 * pad);
-        let centre_items: &[Item] = if vp.0 >= cw + 2.0 * pad || !browse {
+        let centre_items: &[Item] = if vp.0 >= cw + 2.0 * pad || !o.browse {
             center
         } else {
             &center[1..3]
@@ -222,13 +230,15 @@ pub fn layout(
         row(centre_items, (vp.0 - w) / 2.0, cy, s, &mut out);
         if roomy {
             row(&zoom, pad, cy, s, &mut out);
-            let right = [
-                Item::Button(Checker, Icon::Checker, false),
-                Item::Button(Straighten, Icon::Angle, false),
-                Item::Button(ToggleMode, mode_icon, false),
-            ];
-            let right = if browse { &right[..] } else { &right[..2] };
-            row(right, vp.0 - pad - width(right, s), cy, s, &mut out);
+            let mut right = Vec::new();
+            if !o.model {
+                right.push(edit_menu);
+            }
+            right.push(more);
+            if o.browse {
+                right.push(Item::Button(ToggleMode, mode_icon, false));
+            }
+            row(&right, vp.0 - pad - width(&right, s), cy, s, &mut out);
         }
         return out;
     }
@@ -240,14 +250,9 @@ pub fn layout(
         Item::ZoomText,
         Item::Button(ZoomIn, Icon::Glyph('\u{E8A3}'), false),
         Item::Gap,
-        Item::Button(Checker, Icon::Checker, false),
         Item::Button(Smoothing, Icon::Smoothing, false),
-        Item::Button(Grid, Icon::Grid, false),
-        Item::Gap,
         Item::Button(Info, Icon::Glyph('\u{E946}'), false),
-        Item::Button(Histogram, Icon::Histogram, false),
-        Item::Button(Slideshow, Icon::Glyph('\u{E786}'), false),
-        Item::Button(Compare, Icon::Text("A|B"), false),
+        more,
         Item::Gap,
         Item::Button(Filmstrip, Icon::Filmstrip, false),
         Item::Button(ToggleMode, mode_icon, false),
@@ -257,16 +262,8 @@ pub fn layout(
     let right_x = vp.0 - pad - rw;
     let gap = GROUP_GAP * s;
     let (c0, c1) = ((vp.0 - cw) / 2.0, (vp.0 + cw) / 2.0);
-    // Editing tools: turning on the left of the centre group, saving on its
-    // right, so that the middle stays symmetric around previous / next.
-    // Without room on the right both go left.
-    let tools = [
-        Item::Button(FlipH, Icon::Text("\u{21C6}"), false),
-        Item::Button(FlipV, Icon::Text("\u{21C5}"), false),
-        Item::Button(Straighten, Icon::Angle, false),
-        Item::Button(Crop, Icon::Glyph('\u{E7A8}'), false),
-        Item::Button(Adjust, Icon::Glyph('\u{E706}'), false),
-    ];
+    // Editing on the left of the centre group, saving (only with something
+    // to save) on its right, so that the middle stays where it is.
     let model_tools = [
         Item::Button(Wireframe, Icon::Grid, false),
         Item::Button(Section, Icon::Glyph('\u{E8C6}'), false),
@@ -274,19 +271,18 @@ pub fn layout(
         Item::Button(LayFlat, Icon::Glyph('\u{E74B}'), false),
         Item::Button(Objects, Icon::Glyph('\u{E8FD}'), false),
     ];
-    let tools: &[Item] = if model { &model_tools } else { &tools };
-    let files = [
+    let photo_tools = [edit_menu];
+    let tools: &[Item] = if o.model { &model_tools } else { &photo_tools };
+    let save = [
         Item::Button(Save, Icon::Glyph('\u{E74E}'), false),
-        Item::Button(SaveAs, Icon::Glyph('\u{E792}'), false),
         Item::Button(Reset, Icon::Glyph('\u{E7A7}'), false),
-        Item::Button(Tags, Icon::Glyph('\u{E8EC}'), false),
-        Item::Button(Batch, Icon::Glyph('\u{E762}'), false),
     ];
-    let (tw, fw) = (width(tools, s), width(&files, s));
+    let files: &[Item] = if o.can_save && !o.model { &save } else { &[] };
+    let (tw, fw) = (width(tools, s), width(files, s));
     let split = c0 - gap - tw > pad && right_x > c1 + gap + fw + gap;
     let mut caption_right = c0 - gap;
     if split {
-        row(&files, c1 + gap, cy, s, &mut out);
+        row(files, c1 + gap, cy, s, &mut out);
         row(&right, right_x, cy, s, &mut out);
         row(tools, caption_right - tw, cy, s, &mut out);
         caption_right -= tw + gap;
@@ -296,8 +292,10 @@ pub fn layout(
             row(&right, right_x, cy, s, &mut out);
         }
         let mut edit = tools.to_vec();
-        edit.push(Item::Gap);
-        edit.extend(files);
+        if !files.is_empty() {
+            edit.push(Item::Gap);
+            edit.extend_from_slice(files);
+        }
         let ew = width(&edit, s);
         if caption_right - ew > pad {
             row(&edit, caption_right - ew, cy, s, &mut out);
@@ -386,17 +384,36 @@ mod tests {
         }
     }
 
+    fn full(model: bool, can_save: bool) -> Opts {
+        Opts {
+            strip_h: Some(78.0),
+            browse: true,
+            model,
+            can_save,
+            ..Default::default()
+        }
+    }
+
     #[test]
     fn fullscreen_layout() {
-        let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false, true, false);
+        let l = layout((2560.0, 1440.0), 1.0, full(false, false));
         no_overlaps(&l);
-        assert_eq!(l.buttons.len(), 27);
+        let has = |l: &Layout, a| l.buttons.iter().any(|b| b.action == a);
+        // Editing and the rarer options are in menus; saving shows only
+        // with something to save.
+        assert!(has(&l, Action::EditMenu) && has(&l, Action::More));
+        assert!(has(&l, Action::Info) && has(&l, Action::Smoothing));
+        assert!(has(&l, Action::Filmstrip) && has(&l, Action::Settings));
+        assert!(!has(&l, Action::Crop) && !has(&l, Action::Save) && !has(&l, Action::Grid));
+        let dirty = layout((2560.0, 1440.0), 1.0, full(false, true));
+        no_overlaps(&dirty);
+        assert!(has(&dirty, Action::Save) && has(&dirty, Action::Reset));
         assert!(l.caption.is_some() && l.zoom_text.is_some());
         // A model: its own tools in place of the photo ones.
-        let m = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false, true, true);
+        let m = layout((2560.0, 1440.0), 1.0, full(true, true));
         no_overlaps(&m);
-        let has = |a| m.buttons.iter().any(|b| b.action == a);
-        assert!(has(Action::Measure) && has(Action::LayFlat) && !has(Action::Crop));
+        assert!(has(&m, Action::Measure) && has(&m, Action::LayFlat));
+        assert!(!has(&m, Action::EditMenu) && !has(&m, Action::Save));
         let strip = l.strip.unwrap();
         assert_eq!(strip.y1, l.bar.y0);
         // Previous / next sit around the centre.
@@ -409,39 +426,25 @@ mod tests {
         assert!(!l.contains((10.0, 100.0)));
     }
 
-    /// The middle (editing tools, turning, previous / next, saving) is
-    /// symmetric, so the arrows also look centred.
-    #[test]
-    fn middle_group_is_symmetric() {
-        for (w, s) in [(2560.0, 1.0), (1920.0, 1.0), (2560.0, 1.25), (3840.0, 1.5)] {
-            let l = layout((w, 1440.0), s, false, Some(64.0), false, true, false);
-            no_overlaps(&l);
-            let find = |a| l.buttons.iter().find(|b| b.action == a).unwrap().rect;
-            let (left, right) = (find(Action::FlipH), find(Action::Batch));
-            let mid = (left.x0 + right.x1) / 2.0;
-            assert!((mid - w / 2.0).abs() <= 1.0, "{w}×{s}: {mid}");
-            assert!(l.buttons.iter().any(|b| b.action == Action::Settings));
-        }
-    }
-
     #[test]
     fn compact_layouts_fit() {
         for w in [160.0, 300.0, 500.0, 1400.0] {
-            let l = layout((w, 400.0), 1.0, true, Some(78.0), true, true, false);
+            let o = Opts {
+                compact: true,
+                windowed: true,
+                ..full(false, true)
+            };
+            let l = layout((w, 400.0), 1.0, o);
             no_overlaps(&l);
             assert!(l.strip.is_none());
             assert!(l.buttons.iter().any(|b| b.action == Action::Next), "w={w}");
         }
         // Narrow screens drop the right group instead of overlapping.
-        no_overlaps(&layout(
-            (700.0, 400.0),
-            1.5,
-            false,
-            None,
-            false,
-            true,
-            false,
-        ));
+        let narrow = Opts {
+            strip_h: None,
+            ..full(false, true)
+        };
+        no_overlaps(&layout((700.0, 400.0), 1.5, narrow));
     }
 
     /// Previous / next sit exactly in the middle at every width and scale,
@@ -451,7 +454,14 @@ mod tests {
         for s in [1.0, 1.25, 1.5, 2.0] {
             for w in [320.0, 640.0, 900.0, 1280.0, 1920.0, 2560.0, 3840.0] {
                 for compact in [false, true] {
-                    let l = layout((w * s, 900.0), s, compact, Some(64.0), compact, true, false);
+                    let o = Opts {
+                        compact,
+                        windowed: compact,
+                        strip_h: Some(64.0),
+                        browse: true,
+                        ..Default::default()
+                    };
+                    let l = layout((w * s, 900.0), s, o);
                     let find = |a| l.buttons.iter().find(|b| b.action == a).map(|b| b.rect);
                     let (Some(p), Some(n)) = (find(Action::Prev), find(Action::Next)) else {
                         panic!("no prev/next at {w}×{s}");

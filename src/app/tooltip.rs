@@ -31,7 +31,7 @@ impl App {
         unsafe {
             let _ = KillTimer(Some(self.hwnd), TOOLTIP_TIMER);
         }
-        if self.hot.is_some() && self.pressed.is_none() && !self.menu_open {
+        if self.hot.is_some() && self.pressed.is_none() && self.menu.is_none() {
             self.tooltip = self.hot;
             self.render()?;
         }
@@ -98,8 +98,12 @@ impl App {
                 Action::Measure => tr("Линейка: две точки на модели (D)"),
                 Action::LayFlat => tr("Положить гранью на стол: щёлкните грань (B)"),
                 Action::Objects => tr("Объекты проекта: цвета, скрыть и показать (O)"),
-                Action::Tags => tr("Метки (Ctrl+K)"),
-                Action::Batch => tr("Переименовать или конвертировать выбранные (Ctrl+B)"),
+                Action::EditMenu => {
+                    tr("Правка: обрезка, коррекция, отражение, поворот на любой угол")
+                }
+                Action::More => {
+                    tr("Ещё: сетка, гистограмма, сравнение, слайд-шоу, фон прозрачности")
+                }
                 Action::Info => tr("Информация о файле (I)"),
                 Action::Histogram => tr("Гистограмма (H)"),
                 Action::Slideshow => tr("Слайд-шоу (S, F5)"),

@@ -86,6 +86,15 @@ impl App {
                 return Ok(Some(LRESULT(0)));
             }
         }
+        if self.compare.is_some()
+            && matches!(
+                msg,
+                WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK
+            )
+            && self.compare_input(msg, client_point(lparam))?
+        {
+            return Ok(Some(LRESULT(0)));
+        }
         if self.crop.is_some()
             && msg != WM_MOUSEWHEEL
             && self.crop_input(msg, wparam.0, client_point(lparam))?
@@ -173,12 +182,9 @@ impl App {
                 Ok(Some(LRESULT(0)))
             }
             WM_RBUTTONUP => {
-                // On the transparency button: choose the background; on the
-                // picture: the context menu.
+                // On the picture: the context menu.
                 let p = client_point(lparam);
-                if self.panel_hit(p) == Some(Hot::Button(Action::Checker)) {
-                    self.open_menu()?;
-                } else if !self.over_panel(p) {
+                if !self.over_panel(p) {
                     self.context_menu()?;
                 }
                 Ok(Some(LRESULT(0)))
@@ -195,7 +201,7 @@ impl App {
 
     fn on_button_down(&mut self, p: (f64, f64)) -> Result<()> {
         // A click outside the open menu only closes it.
-        if self.menu_open && self.menu_hit(p).is_none() {
+        if self.menu.is_some() && self.menu_hit(p).is_none() && !self.over_menu_button(p) {
             return self.close_menu();
         }
         if let Some(h) = self.panel_hit(p) {
@@ -233,7 +239,7 @@ impl App {
                 self.go_to(i)
             }
             Hot::Caption(b) => self.caption_action(b),
-            Hot::Menu(bg) => self.choose_background(bg),
+            Hot::Menu(item) => self.menu_item(item),
             Hot::DialReset => self.set_angle(0.0),
             Hot::DialRuler => Ok(()),
             Hot::Info(b) => self.info_action(b),
@@ -278,10 +284,9 @@ impl App {
             Action::Measure => self.toggle_model_tool(Tool::Measure),
             Action::LayFlat => self.toggle_model_tool(Tool::LayFlat),
             Action::Objects => self.toggle_objects(),
-            Action::Tags => self.edit_tags(),
-            Action::Batch => self.batch_dialog(),
             Action::Grid => self.toggle_grid(),
             Action::Info => self.toggle_info(),
+            Action::EditMenu | Action::More => self.toggle_menu(a),
             Action::Histogram => self.toggle_histogram(),
             Action::Slideshow => self.toggle_slideshow(),
             Action::Compare => self.toggle_compare(),
@@ -363,7 +368,7 @@ impl App {
         } else if self.slideshow {
             self.stop_slideshow();
             self.render()
-        } else if self.menu_open {
+        } else if self.menu.is_some() {
             self.close_menu()
         } else if self.info_state.open {
             self.toggle_info()
@@ -435,8 +440,6 @@ impl App {
             Command::Rate4 => self.rate(4),
             Command::Rate5 => self.rate(5),
             Command::RatingFilter => self.cycle_rating_filter(),
-            Command::Tags => self.edit_tags(),
-            Command::Batch => self.batch_dialog(),
             Command::Crop => self.toggle_crop(),
             Command::Wireframe => self.toggle_wire(),
             Command::Section => self.toggle_section(),

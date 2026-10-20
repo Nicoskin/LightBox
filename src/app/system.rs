@@ -188,7 +188,7 @@ impl App {
         self.detail = None;
         self.textures.clear();
         self.cache.clear();
-        self.menu_open = false;
+        self.menu = None;
         self.card_open = false;
         true
     }

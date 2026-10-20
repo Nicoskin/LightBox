@@ -146,26 +146,6 @@ impl Overlay {
                     self.ctx.SetTransform(&Matrix3x2::identity());
                 }
                 Icon::Text(t) => self.glyph_str(t, r, &self.formats.value),
-                Icon::Checker => {
-                    let cell = 4.0 * s;
-                    for i in 0..4 {
-                        for j in 0..4 {
-                            let a = if (i + j) % 2 == 0 { 0.95 } else { 0.35 };
-                            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, a * o));
-                            let x = cx - 2.0 * cell + i as f32 * cell;
-                            let y = cy - 2.0 * cell + j as f32 * cell;
-                            self.ctx.FillRectangle(
-                                &D2D_RECT_F {
-                                    left: x,
-                                    top: y,
-                                    right: x + cell,
-                                    bottom: y + cell,
-                                },
-                                &self.brush,
-                            );
-                        }
-                    }
-                }
                 Icon::Smoothing => {
                     // A pixel staircase with a smooth curve over it.
                     let px = 3.0 * s;
@@ -198,43 +178,6 @@ impl Overlay {
                         None::<&ID2D1StrokeStyle>,
                     );
                 }
-                Icon::Angle => {
-                    // "∠": a base line and a slanted arm with a small arc.
-                    let (x0, y0) = (cx - 8.0 * s, cy + 6.0 * s);
-                    let w = 1.6 * s;
-                    let none = None::<&ID2D1StrokeStyle>;
-                    let p = |x: f32, y: f32| Vector2 { X: x, Y: y };
-                    self.ctx
-                        .DrawLine(p(x0, y0), p(cx + 8.0 * s, y0), &self.brush, w, none);
-                    self.ctx.DrawLine(
-                        p(x0, y0),
-                        p(cx + 6.0 * s, cy - 7.0 * s),
-                        &self.brush,
-                        w,
-                        none,
-                    );
-                    self.ctx.DrawLine(
-                        p(cx + 1.0 * s, y0),
-                        p(cx - 0.5 * s, cy + 0.8 * s),
-                        &self.brush,
-                        w * 0.8,
-                        none,
-                    );
-                }
-                Icon::Swatch(g) => {
-                    let h = 7.0 * s;
-                    let r = D2D_RECT_F {
-                        left: cx - h,
-                        top: cy - h,
-                        right: cx + h,
-                        bottom: cy + h,
-                    };
-                    self.brush.SetColor(&rgba(g, g, g, o));
-                    self.ctx.FillRectangle(&r, &self.brush);
-                    self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.6 * o));
-                    self.ctx
-                        .DrawRectangle(&r, &self.brush, s, None::<&ID2D1StrokeStyle>);
-                }
                 Icon::Grid => {
                     let (h, w) = (7.5 * s, 1.3 * s);
                     let none = None::<&ID2D1StrokeStyle>;
@@ -265,21 +208,6 @@ impl Overlay {
                             &self.brush,
                             w,
                             none,
-                        );
-                    }
-                }
-                Icon::Histogram => {
-                    let base = cy + 7.0 * s;
-                    for (k, height) in [5.0f32, 11.0, 8.0, 14.0, 6.0].iter().enumerate() {
-                        let x = cx - 8.0 * s + k as f32 * 3.4 * s;
-                        self.ctx.FillRectangle(
-                            &D2D_RECT_F {
-                                left: x,
-                                top: base - height * s,
-                                right: x + 2.4 * s,
-                                bottom: base,
-                            },
-                            &self.brush,
                         );
                     }
                 }
@@ -696,6 +624,36 @@ impl Overlay {
                     .FillRoundedRectangle(&rounded(inner, 6.0 * s), &self.brush);
                 self.brush.SetColor(&rgba(1.0, 1.0, 1.0, text_a));
                 self.glyph_str(&seg.text, inner, &self.formats.option);
+            }
+            // Sliders: a track filled up to the value, and the knob.
+            for (rect, value, hot) in &c.sliders {
+                let t = rf(*rect);
+                let inset = (t.bottom - t.top) * 0.45;
+                let (x0, x1) = (t.left + inset, t.right - inset);
+                let cy = (t.top + t.bottom) / 2.0;
+                let k = x0 + (x1 - x0) * value.clamp(0.0, 1.0);
+                let bar = |a: f32, b: f32| D2D_RECT_F {
+                    left: a,
+                    top: cy - 2.0 * s,
+                    right: b,
+                    bottom: cy + 2.0 * s,
+                };
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.18));
+                self.ctx
+                    .FillRoundedRectangle(&rounded(bar(x0, x1), 2.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(0.30, 0.56, 1.0, 0.95));
+                self.ctx
+                    .FillRoundedRectangle(&rounded(bar(x0, k), 2.0 * s), &self.brush);
+                let r = if *hot { 9.0 } else { 8.0 } * s;
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 1.0));
+                self.ctx.FillEllipse(
+                    &D2D1_ELLIPSE {
+                        point: Vector2 { X: k, Y: cy },
+                        radiusX: r,
+                        radiusY: r,
+                    },
+                    &self.brush,
+                );
             }
             if c.clip.is_some() {
                 self.ctx.PopAxisAlignedClip();

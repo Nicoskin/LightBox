@@ -8,7 +8,8 @@ use windows::Win32::Graphics::Direct2D::{
 use windows_numerics::Vector2;
 
 use super::overlay::{
-    AdjustView, CaptionView, CropView, DialView, MenuView, ObjectsView, Overlay, SegmentView, rgba,
+    AdjustView, BarView, CaptionView, CropView, DialView, MenuView, ObjectsView, Overlay,
+    SegmentView, rgba,
 };
 use super::panel::rf;
 use crate::view::Rect;
@@ -162,45 +163,77 @@ impl Overlay {
             );
             for item in &m.items {
                 let ir = rf(item.rect);
+                let cy = (ir.top + ir.bottom) / 2.0;
+                if item.separator {
+                    self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.10));
+                    self.ctx.FillRectangle(
+                        &D2D_RECT_F {
+                            left: ir.left + 8.0 * s,
+                            top: cy - 0.5 * s,
+                            right: ir.right - 8.0 * s,
+                            bottom: cy + 0.5 * s,
+                        },
+                        &self.brush,
+                    );
+                    continue;
+                }
                 if item.hot {
                     self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.10));
                     self.ctx
                         .FillRoundedRectangle(&rounded(ir, 5.0 * s), &self.brush);
                 }
-                let cy = (ir.top + ir.bottom) / 2.0;
-                let sw = 16.0 * s;
-                let sx = ir.left + 10.0 * s;
-                self.swatch(
-                    D2D_RECT_F {
-                        left: sx,
-                        top: cy - sw / 2.0,
-                        right: sx + sw,
-                        bottom: cy + sw / 2.0,
-                    },
-                    item.swatch,
-                    s,
-                );
-                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.92));
-                self.glyph_str(
-                    &item.label,
-                    D2D_RECT_F {
-                        left: sx + sw + 10.0 * s,
-                        right: ir.right - 28.0 * s,
-                        ..ir
-                    },
-                    &self.formats.label,
-                );
+                // A tick (options that are on) or a colour swatch on the
+                // left, the name, the key on the right.
+                let lead = ir.left + 10.0 * s;
+                let mark = 16.0 * s;
+                let mark_rect = D2D_RECT_F {
+                    left: lead,
+                    top: cy - mark / 2.0,
+                    right: lead + mark,
+                    bottom: cy + mark / 2.0,
+                };
+                if let Some(gray) = item.swatch {
+                    self.swatch(mark_rect, gray, s);
+                }
                 if item.selected {
                     self.brush
                         .SetColor(&rgba(ACCENT.0, ACCENT.1, ACCENT.2, 1.0));
-                    self.glyph(
-                        '\u{E73E}',
+                    let at = if item.swatch.is_some() {
                         D2D_RECT_F {
                             left: ir.right - 30.0 * s,
                             right: ir.right - 4.0 * s,
                             ..ir
+                        }
+                    } else {
+                        D2D_RECT_F {
+                            top: ir.top,
+                            bottom: ir.bottom,
+                            ..mark_rect
+                        }
+                    };
+                    self.glyph('\u{E73E}', at, &self.formats.small_icon);
+                }
+                let hint_w = if item.hint.is_empty() { 0.0 } else { 84.0 * s };
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.92));
+                self.glyph_str(
+                    &item.label,
+                    D2D_RECT_F {
+                        left: lead + mark + 10.0 * s,
+                        right: ir.right - hint_w - 12.0 * s,
+                        ..ir
+                    },
+                    &self.formats.label,
+                );
+                if hint_w > 0.0 {
+                    self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.45));
+                    self.glyph_str(
+                        &item.hint,
+                        D2D_RECT_F {
+                            left: ir.right - hint_w - 8.0 * s,
+                            right: ir.right - 8.0 * s,
+                            ..ir
                         },
-                        &self.formats.small_icon,
+                        &self.formats.option,
                     );
                 }
             }
@@ -443,6 +476,36 @@ impl Overlay {
 }
 
 impl Overlay {
+    /// A row of buttons on a dark rounded card.
+    pub(super) unsafe fn button_bar(&self, b: &BarView, s: f32) {
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            self.brush.SetColor(&rgba(0.11, 0.11, 0.12, 0.92));
+            self.ctx
+                .FillRoundedRectangle(&rounded(rf(b.card), 10.0 * s), &self.brush);
+            for btn in &b.buttons {
+                let r = rf(btn.rect);
+                let fill = if btn.selected {
+                    rgba(
+                        ACCENT.0,
+                        ACCENT.1,
+                        ACCENT.2,
+                        if btn.hot { 1.0 } else { 0.9 },
+                    )
+                } else if btn.hot {
+                    rgba(1.0, 1.0, 1.0, 0.16)
+                } else {
+                    rgba(1.0, 1.0, 1.0, 0.06)
+                };
+                self.brush.SetColor(&fill);
+                self.ctx
+                    .FillRoundedRectangle(&rounded(r, 6.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+                self.glyph_str(&btn.text, r, &self.formats.option);
+            }
+        }
+    }
+
     /// The objects card: a swatch and the name per row; hidden objects get
     /// a hollow swatch and dim text.
     pub(super) unsafe fn objects_card(&self, o: &ObjectsView, s: f32) {

@@ -7,10 +7,13 @@ use std::rc::Rc;
 use anyhow::Result;
 
 use super::{App, Mode};
-use crate::gfx::{GpuImage, Layer};
+use crate::gfx::{BarView, GpuImage, Layer, SegmentView};
 use crate::i18n::tr;
 use crate::t;
 use crate::view::{Rect, View};
+use windows::Win32::UI::WindowsAndMessaging::{
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+};
 
 /// Gap between the halves, 96-DPI pixels.
 const GAP_DIP: f64 = 4.0;
@@ -36,6 +39,10 @@ pub(super) struct Compare {
     pub held: bool,
     /// Difference layout: index into `GAINS`.
     pub gain: usize,
+    /// The bar button under the pointer.
+    pub hot: Option<BarHit>,
+    /// The bar button pressed (`Some(None)`: the bar itself).
+    pub pressed: Option<Option<BarHit>>,
 }
 
 /// Moves a layer by `dx` screen pixels (the right half).
@@ -223,6 +230,8 @@ impl App {
             layout: CompareLayout::SideBySide,
             held: false,
             gain: 2,
+            hot: None,
+            pressed: None,
         });
         let next = if self.index + 1 < self.files.len() {
             self.index + 1
@@ -302,6 +311,202 @@ impl App {
     pub(super) fn compare_key_removed(&mut self, key: &str) {
         if self.compare.as_ref().is_some_and(|c| c.key == key) {
             self.compare = None;
+        }
+    }
+}
+
+/// What a button of the compare bar does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum BarHit {
+    PrevB,
+    NextB,
+    Layout(CompareLayout),
+    /// Held down: A instead of B (one-place layout).
+    HoldA,
+    /// The difference gain, round the steps.
+    Gain,
+    Close,
+}
+
+/// The bar's buttons laid out: what each does, its text, where.
+type BarButtons = Vec<(BarHit, String, Rect)>;
+
+/// Bar sizes, 96-DPI pixels.
+const BAR_H: f64 = 40.0;
+const BAR_PAD: f64 = 5.0;
+const BAR_GAP: f64 = 6.0;
+
+// The compare bar: the same controls as the keys, for the mouse.
+impl App {
+    /// The bar's buttons with their labels and widths (96-DPI pixels).
+    fn bar_buttons(&self) -> Vec<(BarHit, String, f64)> {
+        let Some(c) = &self.compare else {
+            return Vec::new();
+        };
+        let mut v = vec![
+            (BarHit::PrevB, "◀ B".to_string(), 64.0),
+            (BarHit::NextB, "B ▶".to_string(), 64.0),
+            (
+                BarHit::Layout(CompareLayout::SideBySide),
+                tr("Рядом").into(),
+                110.0,
+            ),
+            (
+                BarHit::Layout(CompareLayout::Overlay),
+                tr("В одном месте").into(),
+                140.0,
+            ),
+            (
+                BarHit::Layout(CompareLayout::Difference),
+                tr("Разность").into(),
+                110.0,
+            ),
+        ];
+        match c.layout {
+            CompareLayout::Overlay => v.push((BarHit::HoldA, tr("Держите: A").into(), 120.0)),
+            CompareLayout::Difference => {
+                v.push((BarHit::Gain, t!("Усиление ×{}", GAINS[c.gain]), 140.0));
+            }
+            CompareLayout::SideBySide => {}
+        }
+        v.push((BarHit::Close, tr("Закрыть").into(), 100.0));
+        v
+    }
+
+    /// The bar above the panel and its buttons.
+    fn bar_layout(&self) -> Option<(Rect, BarButtons)> {
+        let buttons = self.bar_buttons();
+        if buttons.is_empty() {
+            return None;
+        }
+        let s = self.ui_scale();
+        let (vw, vh) = self.viewport();
+        let total: f64 = buttons.iter().map(|(_, _, w)| w * s).sum::<f64>()
+            + BAR_GAP * s * (buttons.len() - 1) as f64
+            + 2.0 * BAR_PAD * s;
+        let y1 = vh - self.panel_height() - 12.0 * s;
+        let x0 = ((vw - total) / 2.0).round();
+        let card = Rect {
+            x0,
+            y0: y1 - BAR_H * s,
+            x1: x0 + total,
+            y1,
+        };
+        let mut x = x0 + BAR_PAD * s;
+        let rects = buttons
+            .into_iter()
+            .map(|(hit, text, w)| {
+                let r = Rect {
+                    x0: x,
+                    y0: card.y0 + BAR_PAD * s,
+                    x1: x + w * s,
+                    y1: card.y1 - BAR_PAD * s,
+                };
+                x = r.x1 + BAR_GAP * s;
+                (hit, text, r)
+            })
+            .collect();
+        Some((card, rects))
+    }
+
+    fn compare_bar_hit(&self, p: (f64, f64)) -> Option<Option<BarHit>> {
+        let (card, rects) = self.bar_layout()?;
+        card.contains(p).then(|| {
+            rects
+                .iter()
+                .find(|(_, _, r)| r.contains(p))
+                .map(|(h, ..)| *h)
+        })
+    }
+
+    /// Top of the compare bar (notices go above it).
+    pub(super) fn compare_bar_top(&self) -> Option<f64> {
+        self.bar_layout().map(|(card, _)| card.y0)
+    }
+
+    pub(super) fn compare_bar_view(&self) -> Option<BarView> {
+        let (card, rects) = self.bar_layout()?;
+        let c = self.compare.as_ref()?;
+        let n = rects.len();
+        Some(BarView {
+            card,
+            buttons: rects
+                .into_iter()
+                .enumerate()
+                .map(|(i, (hit, text, rect))| SegmentView {
+                    rect,
+                    text,
+                    selected: match hit {
+                        BarHit::Layout(l) => l == c.layout,
+                        BarHit::HoldA => c.held,
+                        _ => false,
+                    },
+                    hot: c.hot == Some(hit),
+                    first: i == 0,
+                    last: i + 1 == n,
+                })
+                .collect(),
+        })
+    }
+
+    /// Mouse over the bar; `true` when consumed.
+    pub(super) fn compare_input(&mut self, msg: u32, p: (f64, f64)) -> Result<bool> {
+        let hit = self.compare_bar_hit(p);
+        let Some(c) = self.compare.as_mut() else {
+            return Ok(false);
+        };
+        match msg {
+            WM_MOUSEMOVE => {
+                let hot = hit.flatten();
+                if c.hot != hot {
+                    c.hot = hot;
+                    self.render()?;
+                }
+                Ok(false)
+            }
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK => {
+                let Some(h) = hit else {
+                    return Ok(false);
+                };
+                c.pressed = Some(h);
+                if h == Some(BarHit::HoldA) {
+                    self.hold_a(true)?;
+                }
+                Ok(true)
+            }
+            WM_LBUTTONUP => {
+                let Some(pressed) = c.pressed.take() else {
+                    return Ok(hit.is_some());
+                };
+                // Pressed on the bar between the buttons.
+                let Some(pressed) = pressed else {
+                    return Ok(true);
+                };
+                if pressed == BarHit::HoldA {
+                    self.hold_a(false)?;
+                    return Ok(true);
+                }
+                if hit.flatten() != Some(pressed) {
+                    return Ok(true);
+                }
+                match pressed {
+                    BarHit::PrevB => self.step(-1)?,
+                    BarHit::NextB => self.step(1)?,
+                    BarHit::Layout(l) => {
+                        c.layout = l;
+                        c.held = false;
+                        self.refit_and_render()?;
+                    }
+                    BarHit::Gain => {
+                        c.gain = (c.gain + 1) % GAINS.len();
+                        self.render()?;
+                    }
+                    BarHit::Close => self.toggle_compare()?,
+                    BarHit::HoldA => {}
+                }
+                Ok(true)
+            }
+            _ => Ok(false),
         }
     }
 }

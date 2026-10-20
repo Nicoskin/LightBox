@@ -244,8 +244,6 @@ pub enum Command {
     Rate4,
     Rate5,
     RatingFilter,
-    Tags,
-    Batch,
     Crop,
     Adjust,
     Wireframe,
@@ -256,7 +254,7 @@ pub enum Command {
 }
 
 impl Command {
-    pub const ALL: [Command; 54] = {
+    pub const ALL: [Command; 52] = {
         use Command::*;
         [
             Prev,
@@ -304,8 +302,6 @@ impl Command {
             Rate5,
             Rate0,
             RatingFilter,
-            Tags,
-            Batch,
             Crop,
             Adjust,
             Wireframe,
@@ -365,8 +361,6 @@ impl Command {
             Rate4 => "rate_4",
             Rate5 => "rate_5",
             RatingFilter => "rating_filter",
-            Tags => "tags",
-            Batch => "batch",
             Crop => "crop",
             Adjust => "adjust",
             Wireframe => "wireframe",
@@ -426,8 +420,6 @@ impl Command {
             Rate4 => tr("Рейтинг ★★★★"),
             Rate5 => tr("Рейтинг ★★★★★"),
             RatingFilter => tr("Фильтр по рейтингу"),
-            Tags => tr("Метки"),
-            Batch => tr("Пакетная обработка"),
             Crop => tr("Обрезать"),
             Adjust => tr("Коррекция"),
             Wireframe => tr("Каркас модели"),
@@ -488,8 +480,6 @@ impl Command {
             Rate4 => vec![Key::ctrl(c(b'4'))],
             Rate5 => vec![Key::ctrl(c(b'5'))],
             RatingFilter => vec![Key::ctrl(c(b'F'))],
-            Tags => vec![Key::ctrl(c(b'K'))],
-            Batch => vec![Key::ctrl(c(b'B'))],
             Crop => vec![Key::plain(c(b'X'))],
             Adjust => vec![Key::plain(c(b'A'))],
             Wireframe => vec![Key::plain(c(b'W'))],

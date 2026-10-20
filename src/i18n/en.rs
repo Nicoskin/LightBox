@@ -198,55 +198,6 @@ pub(super) const EN: &[(&str, &str)] = &[
     ),
     ("Стол {} · {}", "Plate {} · {}"),
     // Tags, ratings, batch.
-    ("Метки (через запятую)", "Tags (comma-separated)"),
-    (
-        "{} — метки видны в Проводнике и в Lightroom",
-        "{} — tags show in Explorer and Lightroom",
-    ),
-    ("Метки", "Tags"),
-    ("Метки сняты", "Tags removed"),
-    ("Метки: {}", "Tags: {}"),
-    ("Метки не записаны: {}", "Tags not saved: {}"),
-    (
-        "Пакетная обработка уже идёт",
-        "Batch processing is already running",
-    ),
-    ("Пакетная обработка", "Batch processing"),
-    ("Действие", "Action"),
-    ("Переименовать", "Rename"),
-    ("Конвертировать в папку", "Convert into a folder"),
-    ("Имя файла", "File name"),
-    ("{имя}", "{name}"),
-    ("{дата}", "{date}"),
-    ("Как у исходного", "As the original"),
-    ("WebP (без потерь)", "WebP (lossless)"),
-    (
-        "Длинная сторона, px (0 — как есть)",
-        "Long side, px (0 — keep)",
-    ),
-    ("Папка для результата", "Output folder"),
-    ("Вся папка: {} фото", "Whole folder: {} photos"),
-    (
-        "Выбрано в ленте: {} фото",
-        "Selected in the filmstrip: {} photos",
-    ),
-    (
-        "{}. В имени: {{имя}} — прежнее имя, {{n}} — номер, {{дата}} — дата съёмки.",
-        "{}. In the name: {{name}} — the old name, {{n}} — number, {{date}} — date taken.",
-    ),
-    ("Начать", "Start"),
-    (
-        "Для нескольких файлов в имени нужен {{n}} или {{имя}}",
-        "Several files need {{n}} or {{name}} in the name",
-    ),
-    ("Обработка…", "Processing…"),
-    ("Обработано {} из {}", "Processed {} of {}"),
-    ("Готово: {} файлов", "Done: {} files"),
-    (
-        "Готово: {}, с ошибками: {} ({})",
-        "Done: {}, failed: {} ({})",
-    ),
-    ("пустое имя", "empty name"),
     ("Рейтинг снят", "Rating removed"),
     ("Рейтинг не записан: {}", "Rating not saved: {}"),
     ("Показаны все фото", "Showing all photos"),
@@ -255,10 +206,6 @@ pub(super) const EN: &[(&str, &str)] = &[
         "Rated {} and up only · {} photos",
     ),
     ("фильтр: от {}", "filter: {} and up"),
-    (
-        "этот формат не хранит рейтинг и метки",
-        "this format cannot store ratings and tags",
-    ),
     // Saving and editing.
     (
         "Сохранить поворот в файл?",
@@ -418,7 +365,6 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("сервер карт ответил {}", "the map server answered {}"),
     ("{} (копия)", "{} (copy)"),
     ("Качество JPEG:", "JPEG quality:"),
-    ("Папка", "Folder"),
     ("Изображение ({})", "Image ({})"),
     ("Быстрый просмотрщик изображений", "Fast image viewer"),
     // Uninstall and updates.
@@ -672,11 +618,6 @@ pub(super) const EN: &[(&str, &str)] = &[
         "Положить гранью на стол: щёлкните грань (B)",
         "Lay flat: click a face (B)",
     ),
-    ("Метки (Ctrl+K)", "Tags (Ctrl+K)"),
-    (
-        "Переименовать или конвертировать выбранные (Ctrl+B)",
-        "Rename or convert the selected (Ctrl+B)",
-    ),
     ("Информация о файле (I)", "File info (I)"),
     ("Гистограмма (H)", "Histogram (H)"),
     (
@@ -711,5 +652,29 @@ pub(super) const EN: &[(&str, &str)] = &[
     (
         "Место съёмки на OpenStreetMap",
         "Where it was taken, on OpenStreetMap",
+    ),
+    // Menus, the compare bar, dimming.
+    (
+        "этот формат не хранит рейтинг",
+        "this format cannot store a rating",
+    ),
+    ("Повернуть на любой угол", "Rotate by any angle"),
+    (
+        "Правка: обрезка, коррекция, отражение, поворот на любой угол",
+        "Edit: crop, adjust, flip, rotate by any angle",
+    ),
+    (
+        "Ещё: сетка, гистограмма, сравнение, слайд-шоу, фон прозрачности",
+        "More: grid, histogram, compare, slideshow, transparency background",
+    ),
+    ("Рядом", "Side by side"),
+    ("В одном месте", "In one place"),
+    ("Разность", "Difference"),
+    ("Держите: A", "Hold: A"),
+    ("Усиление ×{}", "Gain ×{}"),
+    ("Закрыть", "Close"),
+    (
+        "Затемнение фона, % (0–100)",
+        "Background dimming, % (0–100)",
     ),
 ];
