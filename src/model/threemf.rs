@@ -366,6 +366,7 @@ pub fn parse(data: &[u8]) -> Result<Mesh, String> {
                         .filter(|n| !n.is_empty())
                         .map(str::to_string)
                 })
+                .map(|n| strip_mesh_ext(&n).to_string())
                 .unwrap_or_else(|| crate::t!("Объект {}", objects.len() + 1));
             let n = named.entry(base.clone()).or_default();
             *n += 1;
@@ -400,6 +401,15 @@ pub fn parse(data: &[u8]) -> Result<Mesh, String> {
         b.set_plates(found);
     }
     b.finish()
+}
+
+/// Slicers name objects after the files they came from: "cube.stl" → "cube".
+fn strip_mesh_ext(name: &str) -> &str {
+    let lower = name.to_ascii_lowercase();
+    [".stl", ".obj", ".3mf", ".step", ".stp", ".amf"]
+        .iter()
+        .find(|e| lower.ends_with(*e))
+        .map_or(name, |e| &name[..name.len() - e.len()])
 }
 
 /// Adds object `id` of model part `part`. `top`: nesting depth and the
@@ -725,7 +735,7 @@ mod tests {
         let settings = br#"<?xml version="1.0"?>
 <config>
   <object id="2">
-    <metadata key="name" value="Stand"/>
+    <metadata key="name" value="Stand.STL"/>
     <metadata key="extruder" value="1"/>
     <part id="1" subtype="normal_part"><metadata key="extruder" value="0"/></part>
     <part id="3" subtype="normal_part"><metadata key="extruder" value="2"/></part>

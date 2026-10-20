@@ -5,7 +5,7 @@
 use crate::view::Rect;
 
 /// Sizes in 96-DPI pixels.
-const W: f64 = 300.0;
+const W: f64 = 340.0;
 const PAD: f64 = 12.0;
 const TITLE_H: f64 = 30.0;
 const BTN_H: f64 = 30.0;
