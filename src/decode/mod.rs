@@ -60,11 +60,7 @@ fn ext_of(path: &Path) -> String {
 
 /// Everything the viewer opens: image [`EXTENSIONS`] and 3D models.
 pub fn all_extensions() -> impl Iterator<Item = &'static str> {
-    EXTENSIONS
-        .iter()
-        .chain(crate::model::EXTENSIONS)
-        .chain(crate::video::EXTENSIONS)
-        .copied()
+    EXTENSIONS.iter().chain(crate::model::EXTENSIONS).copied()
 }
 
 /// Documents shown on Space (PDF, text): not part of folder browsing.
@@ -642,8 +638,7 @@ mod tests {
             let model = [".stl", ".obj", ".mtl", ".3mf"]
                 .iter()
                 .any(|e| name.ends_with(e));
-            let viewable =
-                (is_supported(&path) || is_document(&path)) && !crate::video::is_video(&path);
+            let viewable = is_supported(&path) || is_document(&path);
             if name.starts_with("broken_") || name.starts_with("huge") || model || !viewable {
                 continue;
             }

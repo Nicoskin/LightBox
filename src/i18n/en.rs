@@ -187,22 +187,6 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("3MF: не ZIP-архив", "3MF: not a ZIP archive"),
     ("Стол {}", "Plate {}"),
     ("Стол {} · {}", "Plate {} · {}"),
-    // Video.
-    (
-        "видео не воспроизводится: {}",
-        "the video does not play: {}",
-    ),
-    (
-        "видео не воспроизводится: нет кодека или файл повреждён",
-        "the video does not play: no codec, or the file is damaged",
-    ),
-    ("Звук выключен", "Sound off"),
-    ("Звук включён", "Sound on"),
-    ("{}  · без звука", "{}  · muted"),
-    (
-        "Media Foundation недоступен",
-        "Media Foundation is not available",
-    ),
     // Tags, ratings, batch.
     ("Метки (через запятую)", "Tags (comma-separated)"),
     (

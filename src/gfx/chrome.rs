@@ -8,7 +8,7 @@ use windows::Win32::Graphics::Direct2D::{
 use windows_numerics::Vector2;
 
 use super::overlay::{
-    AdjustView, CaptionView, CropView, DialView, MenuView, Overlay, SegmentView, VideoBarView, rgba,
+    AdjustView, CaptionView, CropView, DialView, MenuView, Overlay, SegmentView, rgba,
 };
 use super::panel::rf;
 use crate::view::Rect;
@@ -713,58 +713,6 @@ impl Overlay {
                 self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
                 self.glyph_str(&b.text, r, &self.formats.option);
             }
-        }
-    }
-}
-
-impl Overlay {
-    /// The video bar: a round play / pause button, the track and the time.
-    pub(super) unsafe fn video_bar(&self, v: &VideoBarView, s: f32) {
-        // SAFETY: inside BeginDraw/EndDraw.
-        unsafe {
-            let bar = rf(v.bar);
-            self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.55));
-            self.ctx
-                .FillRoundedRectangle(&rounded(bar, 8.0 * s), &self.brush);
-            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
-            let glyph = if v.playing { '\u{E769}' } else { '\u{E768}' };
-            self.glyph(glyph, rf(v.button), &self.formats.small_icon);
-            let t = rf(v.track);
-            let cy = (t.top + t.bottom) / 2.0;
-            let line = |x0: f32, x1: f32| D2D_RECT_F {
-                left: x0,
-                top: cy - 2.0 * s,
-                right: x1,
-                bottom: cy + 2.0 * s,
-            };
-            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.25));
-            self.ctx
-                .FillRoundedRectangle(&rounded(line(t.left, t.right), 2.0 * s), &self.brush);
-            let x = t.left + (t.right - t.left) * v.progress as f32;
-            self.brush
-                .SetColor(&rgba(ACCENT.0, ACCENT.1, ACCENT.2, 1.0));
-            self.ctx
-                .FillRoundedRectangle(&rounded(line(t.left, x), 2.0 * s), &self.brush);
-            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 1.0));
-            self.ctx.FillEllipse(
-                &D2D1_ELLIPSE {
-                    point: Vector2 { X: x, Y: cy },
-                    radiusX: 6.0 * s,
-                    radiusY: 6.0 * s,
-                },
-                &self.brush,
-            );
-            let text = D2D_RECT_F {
-                left: t.right + 8.0 * s,
-                ..bar
-            };
-            let label = if v.muted {
-                crate::t!("{}  · без звука", v.time)
-            } else {
-                v.time.clone()
-            };
-            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.9));
-            self.glyph_str(&label, text, &self.formats.option);
         }
     }
 }

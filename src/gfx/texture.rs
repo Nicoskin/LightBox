@@ -113,33 +113,6 @@ fn upload_region(
 }
 
 impl GpuImage {
-    /// A frame already on the GPU (video): one texture, upright, opaque.
-    pub fn from_texture(
-        texture: ID3D11Texture2D,
-        srv: ID3D11ShaderResourceView,
-        width: u32,
-        height: u32,
-    ) -> Self {
-        Self {
-            tiles: vec![Tile {
-                _texture: texture,
-                srv,
-                x0: 0,
-                y0: 0,
-                w: width,
-                h: height,
-                uv: [0.0, 0.0, 1.0, 1.0],
-            }],
-            overview: None,
-            width,
-            height,
-            display: (f64::from(width), f64::from(height)),
-            orientation: Orientation::IDENTITY,
-            has_alpha: false,
-            full: true,
-        }
-    }
-
     pub fn upload(gpu: &Gpu, img: &DecodedImage) -> Result<Self> {
         let (_, bpp, _) = format_of(&img.pixels);
         let pitch = img.width as usize * bpp;

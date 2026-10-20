@@ -248,16 +248,8 @@ impl App {
     /// decodes. Returns `true` if a redraw is needed.
     pub(super) fn show_current(&mut self) -> Result<bool> {
         if self.model_mode() {
-            self.stop_video();
             return self.show_model();
         }
-        if self.video_mode() {
-            self.model = None;
-            self.model_rx = None;
-            return self.show_video();
-        }
-        // Leaving a video: stop its sound.
-        self.stop_video();
         // Leaving a model: free its GPU mesh.
         self.model = None;
         self.model_rx = None;
@@ -429,7 +421,7 @@ impl App {
             }
         }
         // 3D models are loaded by their own path (see model3d).
-        wanted.retain(|r| !crate::model::is_model(&r.path) && !crate::video::is_video(&r.path));
+        wanted.retain(|r| !crate::model::is_model(&r.path));
         loader.request(wanted);
         self.update_detail();
     }

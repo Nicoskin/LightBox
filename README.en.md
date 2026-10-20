@@ -17,7 +17,6 @@ A fast image and 3D model viewer for Windows 10/11 in the spirit of Picasa Photo
 - **Huge images** (30 000 × 20 000 and more) are drawn in tiles.
 - **SVG stays vector at any zoom:** the visible part is redrawn at screen resolution.
 - **Animation** in GIF, WebP and APNG: Space pauses, `,` and `.` step frames.
-- **Video** (MP4, MOV, WMV, AVI, MKV/WebM with codecs): Space pauses, a seek bar, M mutes.
 - **Documents on Space:** PDF and text files in Lightbox itself; DOCX, XLSX and other types through the Windows preview handlers.
 - **3D models** STL, OBJ (+MTL) and 3MF with colours, including Bambu Studio, OrcaSlicer and PrusaSlicer projects: filament colours and build plates (↑/↓). Drag turns, the wheel zooms. Models are browsed together with photos and appear in the filmstrip.
 - **Model tools:** a ruler between two points (D), wireframe (W), a section by height (P, ↑/↓ move it), lay flat on a face (B).
@@ -44,7 +43,6 @@ A fast image and 3D model viewer for Windows 10/11 in the spirit of Picasa Photo
 | HDR | Radiance HDR, OpenEXR |
 | RAW | DNG, CR2, CR3, NEF, ARW, ORF, RW2, RAF, PEF, SRW and more (embedded preview) |
 | 3D | STL (ASCII and binary), OBJ + MTL, 3MF (and slicer projects), G-code |
-| Video | MP4, MOV, M4V, WMV, AVI, MKV, WebM (with the codecs installed in Windows) |
 | Documents | PDF, TXT and code; others through Windows preview handlers |
 
 ¹ HEIC opens with the Windows codec ("HEIF Image Extensions" from the Microsoft Store).

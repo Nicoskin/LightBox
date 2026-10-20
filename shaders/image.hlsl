@@ -26,7 +26,7 @@ cbuffer Params : register(b0)
     uint   edges;          // sides of this part that are image edges: 1 left, 2 top, 4 right, 8 bottom
     float  diff_gain;      // PSDiff: amplification of |B - A|
     float4 adjust;         // exposure (EV), contrast, saturation, warmth; 0 = none
-    uint   opaque;         // 1: ignore the texture's alpha (video frames)
+    uint   opaque;         // 1: ignore the texture's alpha (no transparency)
     uint3  pad2;
 };
 
