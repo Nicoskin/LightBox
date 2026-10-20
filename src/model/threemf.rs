@@ -8,7 +8,7 @@ use std::collections::HashMap;
 
 use roxmltree::{Document, Node};
 
-use super::{Builder, Mesh, Plate};
+use super::{Builder, Group, Mesh};
 use crate::i18n::tr;
 
 /// 3 × 4 affine transform, 3MF order: m00 m01 m02 m10 … m32 (row vectors).
@@ -69,6 +69,8 @@ struct Filaments {
     parts: HashMap<(String, String), usize>,
     /// PrusaSlicer: triangle runs of an object's mesh (first, last, extruder).
     volumes: HashMap<String, Vec<(usize, usize, usize)>>,
+    /// Object names the slicer shows.
+    names: HashMap<String, String>,
 }
 
 impl Filaments {
@@ -165,6 +167,9 @@ fn model_settings(files: &HashMap<String, Vec<u8>>, f: &mut Filaments) -> Vec<Pl
             };
             if let Some(e) = extruder(obj) {
                 f.objects.insert(id.to_string(), e);
+            }
+            if let Some(name) = meta(obj, "name").filter(|n| !n.trim().is_empty()) {
+                f.names.insert(id.to_string(), name.trim().to_string());
             }
             for c in obj.children().filter(Node::is_element) {
                 let attr = |k| c.attribute(k).and_then(|s| s.parse::<usize>().ok());
@@ -331,6 +336,8 @@ pub fn parse(data: &[u8]) -> Result<Mesh, String> {
     order.sort_by_key(|&i| plate_of[i]);
     let mut b = Builder::new(true);
     let mut runs: Vec<Option<std::ops::Range<usize>>> = vec![None; plates.len()];
+    let mut objects: Vec<Group> = Vec::new();
+    let mut named: HashMap<String, usize> = HashMap::new();
     for i in order {
         let (id, t) = &items[i];
         let start = b.count();
@@ -343,12 +350,44 @@ pub fn parse(data: &[u8]) -> Result<Mesh, String> {
             let from = r.as_ref().map_or(start, |r| r.start);
             *r = Some(from..b.count());
         }
+        if b.count() > start {
+            // The slicer's name, the file's, or a number; copies numbered.
+            let base = scene
+                .filaments
+                .names
+                .get(*id)
+                .cloned()
+                .or_else(|| {
+                    scene
+                        .objects
+                        .get(&(root_index, *id))
+                        .and_then(|o| o.attribute("name"))
+                        .map(str::trim)
+                        .filter(|n| !n.is_empty())
+                        .map(str::to_string)
+                })
+                .unwrap_or_else(|| crate::t!("Объект {}", objects.len() + 1));
+            let n = named.entry(base.clone()).or_default();
+            *n += 1;
+            let name = if *n > 1 {
+                format!("{base} ({n})")
+            } else {
+                base
+            };
+            objects.push(Group {
+                name,
+                tris: start..b.count(),
+            });
+        }
     }
-    let found: Vec<Plate> = plates
+    if objects.len() > 1 {
+        b.set_objects(objects);
+    }
+    let found: Vec<Group> = plates
         .iter()
         .zip(runs)
         .filter_map(|(p, r)| Some((p, r.filter(|r| r.start < r.end)?)))
-        .map(|(p, tris)| Plate {
+        .map(|(p, tris)| Group {
             name: if p.name.is_empty() {
                 crate::t!("Стол {}", p.id)
             } else {
@@ -686,6 +725,7 @@ mod tests {
         let settings = br#"<?xml version="1.0"?>
 <config>
   <object id="2">
+    <metadata key="name" value="Stand"/>
     <metadata key="extruder" value="1"/>
     <part id="1" subtype="normal_part"><metadata key="extruder" value="0"/></part>
     <part id="3" subtype="normal_part"><metadata key="extruder" value="2"/></part>
@@ -718,6 +758,20 @@ mod tests {
         // Plate 1: object 2 (two parts) and the second copy of object 4.
         assert_eq!(m.plates[0].tris, 0..3);
         assert_eq!(m.plates[1].tris, 3..4);
+        let objects: Vec<(&str, std::ops::Range<usize>)> = m
+            .objects
+            .iter()
+            .map(|o| (o.name.as_str(), o.tris.clone()))
+            .collect();
+        assert_eq!(
+            objects,
+            [("Stand", 0..2), ("Объект 2", 2..3), ("Объект 3", 3..4)]
+        );
+        // Only the second object, painted green.
+        let one = m.pick(&[(2..3, Some([0.0, 1.0, 0.0, 1.0]))]);
+        assert_eq!(one.triangles(), 1);
+        assert_eq!(one.colors.as_ref().unwrap()[0], [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(m.pick(&[]).triangles(), 0);
         let colors = m.colors.as_ref().unwrap();
         let red = [1.0, 0.0, 0.0, 1.0];
         let green = [0.0, 1.0, 0.0, 1.0];

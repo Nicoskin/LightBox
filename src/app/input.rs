@@ -71,6 +71,21 @@ impl App {
         {
             return Ok(Some(LRESULT(0)));
         }
+        if self.objects_open()
+            && matches!(
+                msg,
+                WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK | WM_MOUSEWHEEL
+            )
+        {
+            let p = if msg == WM_MOUSEWHEEL {
+                self.screen_to_client(lparam)
+            } else {
+                client_point(lparam)
+            };
+            if self.objects_input(msg, wparam.0, p)? {
+                return Ok(Some(LRESULT(0)));
+            }
+        }
         if self.crop.is_some()
             && msg != WM_MOUSEWHEEL
             && self.crop_input(msg, wparam.0, client_point(lparam))?
@@ -262,6 +277,7 @@ impl App {
             Action::Section => self.toggle_section(),
             Action::Measure => self.toggle_model_tool(Tool::Measure),
             Action::LayFlat => self.toggle_model_tool(Tool::LayFlat),
+            Action::Objects => self.toggle_objects(),
             Action::Tags => self.edit_tags(),
             Action::Batch => self.batch_dialog(),
             Action::Grid => self.toggle_grid(),
@@ -336,6 +352,9 @@ impl App {
     fn on_escape(&mut self) -> Result<()> {
         if self.end_model_tool()? {
             return Ok(());
+        }
+        if self.objects_open() {
+            return self.toggle_objects();
         }
         if !self.selected.is_empty() {
             self.clear_selection()
@@ -423,6 +442,7 @@ impl App {
             Command::Section => self.toggle_section(),
             Command::Measure => self.toggle_model_tool(Tool::Measure),
             Command::LayFlat => self.toggle_model_tool(Tool::LayFlat),
+            Command::Objects => self.toggle_objects(),
             Command::Adjust => self.toggle_tone(),
         }
     }

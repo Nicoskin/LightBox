@@ -97,6 +97,7 @@ impl App {
                 Action::Section => tr("Разрез по высоте (P) · ↑ и ↓ двигают"),
                 Action::Measure => tr("Линейка: две точки на модели (D)"),
                 Action::LayFlat => tr("Положить гранью на стол: щёлкните грань (B)"),
+                Action::Objects => tr("Объекты проекта: цвета, скрыть и показать (O)"),
                 Action::Tags => tr("Метки (Ctrl+K)"),
                 Action::Batch => tr("Переименовать или конвертировать выбранные (Ctrl+B)"),
                 Action::Info => tr("Информация о файле (I)"),

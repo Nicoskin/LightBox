@@ -36,12 +36,14 @@ pub struct Mesh {
     /// G-code: the toolpath (instead of triangles).
     pub path: Option<Box<gcode::Toolpath>>,
     /// Slicer projects with several build plates: their triangles.
-    pub plates: Vec<Plate>,
+    pub plates: Vec<Group>,
+    /// 3MF with several objects: each one's triangles, in order.
+    pub objects: Vec<Group>,
 }
 
-/// A build plate of a slicer project: a run of triangles.
+/// A named run of triangles: a build plate or an object of a project.
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Plate {
+pub struct Group {
     pub name: String,
     pub tris: std::ops::Range<usize>,
 }
@@ -75,25 +77,63 @@ impl Mesh {
     }
 
     /// The triangles `tris` as a mesh of their own (one plate).
+    #[cfg(test)]
     pub fn part(&self, tris: std::ops::Range<usize>) -> Mesh {
+        self.pick(&[(tris, None)])
+    }
+
+    /// Bounds of the triangles `tris`.
+    pub fn bounds(&self, tris: std::ops::Range<usize>) -> ([f32; 3], [f32; 3]) {
         let end = (tris.end * 3).min(self.positions.len());
-        let r = (tris.start * 3).min(end)..end;
-        let positions = self.positions[r.clone()].to_vec();
         let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
-        for p in &positions {
+        for p in &self.positions[(tris.start * 3).min(end)..end] {
             for i in 0..3 {
                 min[i] = min[i].min(p[i]);
                 max[i] = max[i].max(p[i]);
             }
         }
-        Mesh {
-            normals: self.normals[r.clone()].to_vec(),
-            colors: self.colors.as_ref().map(|c| c[r].to_vec()),
-            positions,
-            min,
-            max,
-            ..Default::default()
+        if min[0] > max[0] {
+            return (self.min, self.max);
         }
+        (min, max)
+    }
+
+    /// Runs of triangles joined into a mesh of their own, each optionally
+    /// painted one colour (the objects shown, in contrasting colours).
+    /// Nothing picked: an empty mesh with this mesh's bounds.
+    pub fn pick(&self, parts: &[(std::ops::Range<usize>, Option<[f32; 4]>)]) -> Mesh {
+        let painted = parts.iter().any(|(_, c)| c.is_some());
+        let mut m = Mesh::default();
+        let mut colors = Vec::new();
+        for (tris, paint) in parts {
+            let end = (tris.end * 3).min(self.positions.len());
+            let r = (tris.start * 3).min(end)..end;
+            m.positions.extend_from_slice(&self.positions[r.clone()]);
+            m.normals.extend_from_slice(&self.normals[r.clone()]);
+            if let Some(c) = paint {
+                colors.extend(std::iter::repeat_n(*c, r.len()));
+            } else if let Some(own) = &self.colors {
+                colors.extend_from_slice(&own[r]);
+            } else if painted {
+                colors.extend(std::iter::repeat_n(DEFAULT_COLOR, r.len()));
+            }
+        }
+        if painted || self.colors.is_some() {
+            m.colors = Some(colors);
+        }
+        let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for p in &m.positions {
+            for i in 0..3 {
+                min[i] = min[i].min(p[i]);
+                max[i] = max[i].max(p[i]);
+            }
+        }
+        (m.min, m.max) = if m.positions.is_empty() {
+            (self.min, self.max)
+        } else {
+            (min, max)
+        };
+        m
     }
 }
 
@@ -150,8 +190,12 @@ impl Builder {
         self.mesh.positions.len() / 3
     }
 
-    pub fn set_plates(&mut self, plates: Vec<Plate>) {
+    pub fn set_plates(&mut self, plates: Vec<Group>) {
         self.mesh.plates = plates;
+    }
+
+    pub fn set_objects(&mut self, objects: Vec<Group>) {
+        self.mesh.objects = objects;
     }
 
     pub fn finish(mut self) -> Result<Mesh, String> {

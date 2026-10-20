@@ -252,10 +252,11 @@ pub enum Command {
     Section,
     Measure,
     LayFlat,
+    Objects,
 }
 
 impl Command {
-    pub const ALL: [Command; 53] = {
+    pub const ALL: [Command; 54] = {
         use Command::*;
         [
             Prev,
@@ -311,6 +312,7 @@ impl Command {
             Section,
             Measure,
             LayFlat,
+            Objects,
         ]
     };
 
@@ -371,6 +373,7 @@ impl Command {
             Section => "section",
             Measure => "measure",
             LayFlat => "lay_flat",
+            Objects => "objects",
         }
     }
 
@@ -431,6 +434,7 @@ impl Command {
             Section => tr("Разрез модели"),
             Measure => tr("Линейка"),
             LayFlat => tr("Положить гранью на стол"),
+            Objects => tr("Объекты проекта"),
         }
     }
 
@@ -492,6 +496,7 @@ impl Command {
             Section => vec![Key::plain(c(b'P'))],
             Measure => vec![Key::plain(c(b'D'))],
             LayFlat => vec![Key::plain(c(b'B'))],
+            Objects => vec![Key::plain(c(b'O'))],
         }
     }
 

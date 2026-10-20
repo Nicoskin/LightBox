@@ -16,17 +16,20 @@ use crate::i18n::{dec, tr};
 use crate::model::raster::Orbit;
 use crate::model::{self, Mesh, pick};
 use crate::t;
+use crate::ui::objects;
 use crate::ui::toolbar::Action;
 use crate::view::Rect;
+use windows::Win32::Graphics::Direct3D11::ID3D11Device;
 
 /// "Display size" a model reports (for the window size in windowed mode).
 pub(super) const MODEL_DISPLAY: (f64, f64) = (1280.0, 960.0);
 
 pub(super) struct ModelState {
     pub key: String,
-    mesh: Arc<Mesh>,
-    /// What is shown: the whole mesh or one build plate.
-    view: Arc<Mesh>,
+    pub(super) mesh: Arc<Mesh>,
+    /// What is shown: the whole mesh, one build plate, the objects not
+    /// hidden.
+    pub(super) view: Arc<Mesh>,
     gpu: Rc<GpuMesh>,
     cam: Orbit,
     /// G-code: the top layer shown (0-based).
@@ -41,6 +44,53 @@ pub(super) struct ModelState {
     tool: Option<Tool>,
     /// Ruler points (at most two).
     marks: Vec<[f32; 3]>,
+    /// Projects: objects hidden in the objects card.
+    pub(super) hidden: Vec<bool>,
+    /// Projects: every object in its own contrasting colour.
+    pub(super) contrast: bool,
+    /// The objects card (O).
+    pub(super) card: Option<super::objects::CardState>,
+}
+
+impl ModelState {
+    /// Builds what is shown from the plate, the hidden objects and the
+    /// colours. `refit`: a new view (another plate): the camera starts over.
+    pub(super) fn rebuild(&mut self, device: &ID3D11Device, refit: bool) -> Result<()> {
+        let all = 0..self.mesh.triangles();
+        let base = self.plate.map_or(all, |i| self.mesh.plates[i].tris.clone());
+        let plain = !self.contrast && !self.hidden.contains(&true);
+        let mut view = if plain && self.plate.is_none() {
+            None
+        } else if plain || self.mesh.objects.is_empty() {
+            Some(self.mesh.pick(&[(base.clone(), None)]))
+        } else {
+            let parts: Vec<_> = self
+                .mesh
+                .objects
+                .iter()
+                .enumerate()
+                .filter(|(i, _)| !self.hidden.get(*i).copied().unwrap_or(false))
+                .filter_map(|(i, o)| {
+                    let r = o.tris.start.max(base.start)..o.tris.end.min(base.end);
+                    let paint = self.contrast.then(|| objects::contrast_color(i));
+                    (r.start < r.end).then_some((r, paint))
+                })
+                .collect();
+            Some(self.mesh.pick(&parts))
+        };
+        // Hiding objects keeps the bed and the zoom where they were.
+        if let Some(v) = &mut view {
+            (v.min, v.max) = self.mesh.bounds(base);
+        }
+        self.view = view.map_or_else(|| Arc::clone(&self.mesh), Arc::new);
+        self.gpu = Rc::new(GpuMesh::upload(device, &self.view)?);
+        if refit {
+            self.cam = Orbit::fit(&self.view);
+            self.section = None;
+            self.marks.clear();
+        }
+        Ok(())
+    }
 }
 
 /// What a click on the model does.
@@ -124,6 +174,7 @@ impl App {
                     .path
                     .as_ref()
                     .map_or(0, |p| p.layer_ends.len().saturating_sub(1));
+                let objects = mesh.objects.len();
                 let mesh = Arc::new(mesh);
                 self.model = Some(ModelState {
                     key,
@@ -137,6 +188,9 @@ impl App {
                     section: None,
                     tool: None,
                     marks: Vec::new(),
+                    hidden: vec![false; objects],
+                    contrast: false,
+                    card: None,
                 });
                 self.error = None;
                 self.notice = None;
@@ -315,14 +369,7 @@ impl App {
         let to = (at + delta).clamp(0, n as i64);
         if to != at {
             m.plate = (to > 0).then(|| to as usize - 1);
-            m.view = match m.plate {
-                Some(i) => Arc::new(m.mesh.part(m.mesh.plates[i].tris.clone())),
-                None => Arc::clone(&m.mesh),
-            };
-            m.gpu = Rc::new(GpuMesh::upload(&self.gpu.device, &m.view)?);
-            m.cam = Orbit::fit(&m.view);
-            m.section = None;
-            m.marks.clear();
+            m.rebuild(&self.gpu.device, true)?;
         }
         let text = match m.plate {
             Some(i) => t!("{} из {}", m.mesh.plates[i].name, n),

@@ -7,6 +7,7 @@ pub mod crop;
 pub mod dial;
 pub mod home;
 pub mod info;
+pub mod objects;
 pub mod popup;
 pub mod settings_card;
 pub mod thumbs;

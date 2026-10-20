@@ -186,6 +186,16 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("3MF: нет модели в пакете", "3MF: no model in the package"),
     ("3MF: не ZIP-архив", "3MF: not a ZIP archive"),
     ("Стол {}", "Plate {}"),
+    ("Объект {}", "Object {}"),
+    ("В модели один объект", "The model has one object"),
+    ("Объекты: {} из {}", "Objects: {} of {}"),
+    ("Контрастные цвета", "Contrast colours"),
+    ("Показать все", "Show all"),
+    ("Объекты проекта", "Project objects"),
+    (
+        "Объекты проекта: цвета, скрыть и показать (O)",
+        "Project objects: colours, hide and show (O)",
+    ),
     ("Стол {} · {}", "Plate {} · {}"),
     // Tags, ratings, batch.
     ("Метки (через запятую)", "Tags (comma-separated)"),

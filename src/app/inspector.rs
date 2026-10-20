@@ -138,7 +138,7 @@ impl App {
 
     /// Top of the inspector overlays: below the title bar or the corner
     /// close button.
-    fn overlay_top(&self, below_close: bool) -> f64 {
+    pub(super) fn overlay_top(&self, below_close: bool) -> f64 {
         let s = self.ui_scale();
         match self.mode {
             Mode::Windowed => (caption::TITLE_H + 8.0) * s,

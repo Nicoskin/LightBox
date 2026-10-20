@@ -32,6 +32,8 @@ pub enum Action {
     Section,
     Measure,
     LayFlat,
+    /// The objects of a project (O).
+    Objects,
     /// Tags (Ctrl+K).
     Tags,
     /// Batch rename / convert (Ctrl+B).
@@ -270,6 +272,7 @@ pub fn layout(
         Item::Button(Section, Icon::Glyph('\u{E8C6}'), false),
         Item::Button(Measure, Icon::Glyph('\u{ED5E}'), false),
         Item::Button(LayFlat, Icon::Glyph('\u{E74B}'), false),
+        Item::Button(Objects, Icon::Glyph('\u{E8FD}'), false),
     ];
     let tools: &[Item] = if model { &model_tools } else { &tools };
     let files = [

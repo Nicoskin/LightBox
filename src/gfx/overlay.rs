@@ -68,6 +68,8 @@ pub struct Ui {
     pub home: Vec<SegmentView>,
     /// The crop tool.
     pub crop: Option<CropView>,
+    /// The objects card of a 3D project (O).
+    pub objects: Option<ObjectsView>,
     /// The adjustments card.
     pub adjust: Option<AdjustView>,
     /// Points picked on a model (the ruler), joined by a line.
@@ -90,6 +92,7 @@ impl Ui {
             && self.labels.is_empty()
             && self.home.is_empty()
             && self.crop.is_none()
+            && self.objects.is_none()
             && self.adjust.is_none()
             && self.marks.is_empty()
     }
@@ -314,6 +317,9 @@ impl Overlay {
             }
             if let Some(c) = &ui.crop {
                 self.crop(c, ui.scale);
+            }
+            if let Some(o) = &ui.objects {
+                self.objects_card(o, ui.scale);
             }
             if let Some(a) = &ui.adjust {
                 self.adjust_card(a, ui.scale);
@@ -569,6 +575,25 @@ pub struct DialView {
     pub px_per_deg: f64,
     pub reset_hot: bool,
     pub opacity: f32,
+}
+
+/// The objects card of a 3D project: title, buttons and one row per
+/// object (clipped to `list`).
+pub struct ObjectsView {
+    pub card: Rect,
+    pub title: (Rect, String),
+    pub buttons: Vec<SegmentView>,
+    pub list: Rect,
+    pub rows: Vec<ObjectRowView>,
+}
+
+pub struct ObjectRowView {
+    pub rect: Rect,
+    pub name: String,
+    /// sRGB swatch.
+    pub color: [f32; 4],
+    pub visible: bool,
+    pub hot: bool,
 }
 
 /// Info panel: rows of label / value, headings, wrapped text blocks and

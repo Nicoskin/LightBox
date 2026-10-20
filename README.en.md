@@ -19,7 +19,7 @@ A fast image and 3D model viewer for Windows 10/11 in the spirit of Picasa Photo
 - **Animation** in GIF, WebP and APNG: Space pauses, `,` and `.` step frames.
 - **Documents on Space:** PDF and text files in Lightbox itself; DOCX, XLSX and other types through the Windows preview handlers.
 - **3D models** STL, OBJ (+MTL) and 3MF with colours, including Bambu Studio, OrcaSlicer and PrusaSlicer projects: filament colours and build plates (↑/↓). Drag turns, the wheel zooms. Models are browsed together with photos and appear in the filmstrip.
-- **Model tools:** a ruler between two points (D), wireframe (W), a section by height (P, ↑/↓ move it), lay flat on a face (B).
+- **Model tools:** a ruler between two points (D), wireframe (W), a section by height (P, ↑/↓ move it), lay flat on a face (B), project objects (O): contrast colours, hide and show any object.
 - **G-code** (.gcode, .gcode.3mf): the toolpath coloured by line type, layers with ↑/↓, print time and filament use.
 - **Inspector:** histogram, single R/G/B/A channels, an info panel (EXIF, camera, GPS with a map, ICC). For PNGs from ComfyUI and A1111 it shows the prompt and generation parameters with copy buttons.
 - **Ratings and tags** (Ctrl+1…5, Ctrl+K) written the Windows way, so Explorer and Lightroom see them; a filter by rating.

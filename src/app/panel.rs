@@ -180,6 +180,7 @@ impl App {
                     Action::Wireframe | Action::Section | Action::Measure | Action::LayFlat => {
                         self.model_tool_on(b.action)
                     }
+                    Action::Objects => self.objects_open(),
                     Action::Grid => self.settings.pixel_grid,
                     Action::Info => self.info_state.open,
                     Action::Histogram => self.hist_state.open,
@@ -192,6 +193,7 @@ impl App {
                     Action::Wireframe | Action::Section | Action::Measure | Action::LayFlat => {
                         self.model_tools()
                     }
+                    Action::Objects => self.has_objects(),
                     Action::Reset => self.edits.contains_key(&cache::key(&self.current)),
                     _ => true,
                 },

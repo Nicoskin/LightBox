@@ -8,7 +8,7 @@ use windows::Win32::Graphics::Direct2D::{
 use windows_numerics::Vector2;
 
 use super::overlay::{
-    AdjustView, CaptionView, CropView, DialView, MenuView, Overlay, SegmentView, rgba,
+    AdjustView, CaptionView, CropView, DialView, MenuView, ObjectsView, Overlay, SegmentView, rgba,
 };
 use super::panel::rf;
 use crate::view::Rect;
@@ -443,6 +443,76 @@ impl Overlay {
 }
 
 impl Overlay {
+    /// The objects card: a swatch and the name per row; hidden objects get
+    /// a hollow swatch and dim text.
+    pub(super) unsafe fn objects_card(&self, o: &ObjectsView, s: f32) {
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            self.brush.SetColor(&rgba(0.11, 0.11, 0.12, 0.94));
+            self.ctx
+                .FillRoundedRectangle(&rounded(rf(o.card), 10.0 * s), &self.brush);
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+            self.glyph_str(&o.title.1, rf(o.title.0), &self.formats.caption);
+            for b in &o.buttons {
+                let r = rf(b.rect);
+                let fill = if b.selected {
+                    rgba(ACCENT.0, ACCENT.1, ACCENT.2, if b.hot { 1.0 } else { 0.9 })
+                } else if b.hot {
+                    rgba(1.0, 1.0, 1.0, 0.16)
+                } else {
+                    rgba(1.0, 1.0, 1.0, 0.08)
+                };
+                self.brush.SetColor(&fill);
+                self.ctx
+                    .FillRoundedRectangle(&rounded(r, 6.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+                self.glyph_str(&b.text, r, &self.formats.option);
+            }
+            self.ctx
+                .PushAxisAlignedClip(&rf(o.list), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
+            for row in &o.rows {
+                let r = rf(row.rect);
+                if row.hot {
+                    self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.08));
+                    self.ctx
+                        .FillRoundedRectangle(&rounded(r, 6.0 * s), &self.brush);
+                }
+                let cy = (r.top + r.bottom) / 2.0;
+                let sw = D2D_RECT_F {
+                    left: r.left + 10.0 * s,
+                    top: cy - 7.0 * s,
+                    right: r.left + 24.0 * s,
+                    bottom: cy + 7.0 * s,
+                };
+                let [cr, cg, cb, _] = row.color;
+                self.brush.SetColor(&rgba(cr, cg, cb, 1.0));
+                if row.visible {
+                    self.ctx
+                        .FillRoundedRectangle(&rounded(sw, 3.0 * s), &self.brush);
+                } else {
+                    self.ctx.DrawRoundedRectangle(
+                        &rounded(sw, 3.0 * s),
+                        &self.brush,
+                        1.5 * s,
+                        None::<&ID2D1StrokeStyle>,
+                    );
+                }
+                self.brush
+                    .SetColor(&rgba(1.0, 1.0, 1.0, if row.visible { 0.92 } else { 0.4 }));
+                self.glyph_str(
+                    &row.name,
+                    D2D_RECT_F {
+                        left: sw.right + 10.0 * s,
+                        right: r.right - 8.0 * s,
+                        ..r
+                    },
+                    &self.formats.label,
+                );
+            }
+            self.ctx.PopAxisAlignedClip();
+        }
+    }
+
     /// Ruler points on a model: accent dots joined by a line, both with a
     /// dark outline to stand out on any surface.
     pub(super) unsafe fn marks(&self, points: &[(f64, f64)], s: f32) {

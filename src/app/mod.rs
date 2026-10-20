@@ -18,6 +18,7 @@ mod inspector;
 mod mode;
 mod model3d;
 mod nav;
+mod objects;
 mod organize;
 mod panel;
 mod save;
@@ -937,6 +938,7 @@ impl App {
                 .collect(),
             home: self.home_view(),
             crop: self.crop_view(),
+            objects: self.objects_view(),
             adjust: self.tone_view(),
             marks: self.model_marks(),
         };
