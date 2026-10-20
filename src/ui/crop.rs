@@ -211,7 +211,7 @@ pub fn bar(vp: (f64, f64), s: f64, bottom: f64) -> BarLayout {
     let aspects = Aspect::ALL
         .iter()
         .enumerate()
-        .map(|(i, (a, label))| (*a, *label, rect(x0 + seg * i as f64, seg)))
+        .map(|(i, (a, label))| (*a, crate::i18n::tr(label), rect(x0 + seg * i as f64, seg)))
         .collect();
     let bx = x0 + seg * Aspect::ALL.len() as f64 + gap * 2.0;
     BarLayout {

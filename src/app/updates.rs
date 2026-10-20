@@ -10,6 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use anyhow::Result;
 
 use super::{App, WM_APP_UPDATE, post};
+use crate::i18n::tr;
+use crate::t;
 use crate::update::{self, Release};
 use crate::win::dialogs;
 
@@ -52,14 +54,14 @@ impl App {
     pub(super) fn check_updates(&mut self, manual: bool) {
         let Some(repo) = update::REPO else {
             if manual {
-                self.notice("Проверка обновлений не настроена в этой сборке");
+                self.notice(tr("Проверка обновлений не настроена в этой сборке"));
             }
             return;
         };
         self.settings.last_update_check = now();
         self.settings.save();
         if manual {
-            self.notice("Проверка обновлений…");
+            self.notice(tr("Проверка обновлений…"));
         }
         let (tx, rx) = channel();
         let hwnd = self.hwnd.0 as isize;
@@ -83,14 +85,11 @@ impl App {
             UpdateEvent::Checked { result, manual } => match result {
                 Ok(Some(release)) => self.offer_update(release),
                 Ok(None) if manual => {
-                    self.notice(&format!(
-                        "Установлена последняя версия ({})",
-                        update::VERSION
-                    ));
+                    self.notice(&t!("Установлена последняя версия ({})", update::VERSION));
                     self.render()
                 }
                 Err(e) if manual => {
-                    self.notice(&format!("Не удалось проверить обновления: {e}"));
+                    self.notice(&t!("Не удалось проверить обновления: {}", e));
                     self.render()
                 }
                 _ => Ok(()),
@@ -99,7 +98,7 @@ impl App {
                 let reopen = (!self.hidden && !self.current.as_os_str().is_empty())
                     .then(|| self.current.clone());
                 if let Err(e) = update::run_installer(&setup, reopen.as_deref()) {
-                    self.notice(&format!("Не удалось запустить установщик: {e:#}"));
+                    self.notice(&t!("Не удалось запустить установщик: {}", format!("{e:#}")));
                     return self.render();
                 }
                 // The installer closes this window itself; leave now.
@@ -107,7 +106,7 @@ impl App {
                 Ok(())
             }
             UpdateEvent::Downloaded(Err(e)) => {
-                self.notice(&format!("Обновление не загружено: {e}"));
+                self.notice(&t!("Обновление не загружено: {}", e));
                 self.render()
             }
         }
@@ -119,11 +118,13 @@ impl App {
         if crate::paths::portable() {
             let (choice, _) = dialogs::ask(
                 self.hwnd,
-                &format!("Доступна версия {}", release.version),
-                &format!("Сейчас у вас {}.\n\n{notes}", update::VERSION),
+                &t!("Доступна версия {}", release.version),
+                &t!("Сейчас у вас {}.\n\n{}", update::VERSION, notes),
                 &[(
                     ID_UPDATE,
-                    "Открыть страницу загрузки\nПортативная версия обновляется вручную: замените файлы в папке",
+                    tr(
+                        "Открыть страницу загрузки\nПортативная версия обновляется вручную: замените файлы в папке",
+                    ),
                 )],
                 None,
             );
@@ -136,11 +137,11 @@ impl App {
         }
         let (choice, _) = dialogs::ask(
             self.hwnd,
-            &format!("Доступна версия {}", release.version),
-            &format!("Сейчас установлена {}.\n\n{notes}", update::VERSION),
+            &t!("Доступна версия {}", release.version),
+            &t!("Сейчас установлена {}.\n\n{}", update::VERSION, notes),
             &[(
                 ID_UPDATE,
-                "Обновить сейчас\nНастройки и ассоциации файлов сохранятся",
+                tr("Обновить сейчас\nНастройки и ассоциации файлов сохранятся"),
             )],
             None,
         );
@@ -148,7 +149,7 @@ impl App {
             return Ok(());
         }
         self.leave_current();
-        self.notice("Загрузка обновления…");
+        self.notice(tr("Загрузка обновления…"));
         let (tx, rx) = channel();
         let hwnd = self.hwnd.0 as isize;
         let spawned = thread::Builder::new().name("update".into()).spawn(move || {

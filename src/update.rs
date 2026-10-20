@@ -8,6 +8,7 @@
 
 use std::path::{Path, PathBuf};
 
+use crate::i18n::tr;
 use anyhow::{Context as _, Result, bail};
 use windows::Win32::Networking::WinHttp::{
     URL_COMPONENTS, WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_FLAG_SECURE,
@@ -197,7 +198,7 @@ fn parse_release(json: &serde_json::Value) -> Result<Option<Release>> {
         .iter()
         .find(|a| name(a).ends_with(".exe") && name(a).contains("setup"))
     else {
-        bail!("в выпуске {tag} нет установщика");
+        bail!(crate::t!("в выпуске {} нет установщика", tag));
     };
     // GitHub publishes "digest": "sha256:…" per asset; else a .sha256 file.
     let mut sha = setup["digest"]
@@ -231,14 +232,16 @@ fn parse_release(json: &serde_json::Value) -> Result<Option<Release>> {
 pub fn download(release: &Release) -> Result<PathBuf> {
     let (status, data) = http_get(&release.setup_url)?;
     if status != 200 {
-        bail!("загрузка: HTTP {status}");
+        bail!(crate::t!("загрузка: HTTP {}", status));
     }
     let Some(expected) = &release.sha256 else {
-        bail!("у выпуска нет контрольной суммы — обновление небезопасно");
+        bail!(tr(
+            "у выпуска нет контрольной суммы — обновление небезопасно"
+        ));
     };
     let got = sha256(&data);
     if &got != expected {
-        bail!("контрольная сумма не совпала");
+        bail!(tr("контрольная сумма не совпала"));
     }
     let path = std::env::temp_dir().join(format!("lightbox-setup-{}.exe", release.version));
     std::fs::write(&path, data)?;

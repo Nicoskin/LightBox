@@ -759,7 +759,7 @@ impl Overlay {
                 ..bar
             };
             let label = if v.muted {
-                format!("{}  · без звука", v.time)
+                crate::t!("{}  · без звука", v.time)
             } else {
                 v.time.clone()
             };

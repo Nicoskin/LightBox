@@ -9,6 +9,8 @@ use std::thread;
 use anyhow::Result;
 
 use super::{App, WM_APP_RATING, post};
+use crate::i18n::tr;
+use crate::t;
 use crate::{cache, rating};
 
 /// Ratings read or written: file key, stars or an error, written by us.
@@ -80,14 +82,14 @@ impl App {
                     self.ratings.insert(key.clone(), s);
                     if ours {
                         let text = if s == 0 {
-                            "Рейтинг снят".to_string()
+                            tr("Рейтинг снят").to_string()
                         } else {
                             stars_text(s)
                         };
                         self.notice(&text);
                     }
                 }
-                Err(e) if ours => self.notice(&format!("Рейтинг не записан: {e}")),
+                Err(e) if ours => self.notice(&t!("Рейтинг не записан: {}", e)),
                 Err(_) => {}
             }
             redraw = true;
@@ -127,8 +129,8 @@ impl App {
         self.rating_filter = FILTERS[(i + 1) % FILTERS.len()];
         self.apply_filter();
         let text = match self.rating_filter {
-            0 => "Показаны все фото".to_string(),
-            n => format!(
+            0 => tr("Показаны все фото").to_string(),
+            n => t!(
                 "Только с рейтингом от {} · {} фото",
                 stars_text(n),
                 self.files.len()
@@ -167,7 +169,7 @@ impl App {
 
     /// "фильтр: от ★★★" while filtering.
     pub(super) fn filter_label(&self) -> Option<String> {
-        (self.rating_filter > 0).then(|| format!("фильтр: от {}", stars_text(self.rating_filter)))
+        (self.rating_filter > 0).then(|| t!("фильтр: от {}", stars_text(self.rating_filter)))
     }
 }
 

@@ -9,8 +9,10 @@ use anyhow::Result;
 use super::{App, WM_APP_SAVED, post};
 use crate::cache;
 use crate::edit::{Job, Outcome, Writer};
+use crate::i18n::tr;
 use crate::orientation::Orientation;
 use crate::settings::{ImperfectJpeg, SaveMode};
+use crate::t;
 use crate::win::dialogs;
 
 const ASK_SAVE: i32 = 100;
@@ -90,14 +92,14 @@ impl App {
             SaveMode::Ask => {
                 let (choice, _) = dialogs::ask(
                     self.hwnd,
-                    "Сохранить поворот в файл?",
+                    tr("Сохранить поворот в файл?"),
                     &Self::file_name(&path),
                     &[
                         (
                             ASK_SAVE,
-                            "Сохранить\nФайл будет перезаписан без потери качества",
+                            tr("Сохранить\nФайл будет перезаписан без потери качества"),
                         ),
-                        (ASK_DISCARD, "Не сохранять\nВернуть исходную ориентацию"),
+                        (ASK_DISCARD, tr("Не сохранять\nВернуть исходную ориентацию")),
                     ],
                     None,
                 );
@@ -117,9 +119,9 @@ impl App {
         if self.edits.contains_key(&cache::key(&self.current)) {
             let path = self.current.clone();
             self.save_rotation(&path);
-            self.notice("Сохранение…");
+            self.notice(tr("Сохранение…"));
         } else {
-            self.notice("Нет изменений для сохранения");
+            self.notice(tr("Нет изменений для сохранения"));
         }
         self.render()
     }
@@ -167,7 +169,7 @@ impl App {
                 format,
                 quality,
             });
-            self.notice("Сохранение…");
+            self.notice(tr("Сохранение…"));
         }
         self.render()
     }
@@ -180,7 +182,7 @@ impl App {
                     w.submit(Job::Restore { undo });
                 }
             }
-            None => self.notice("Нечего отменять"),
+            None => self.notice(tr("Нечего отменять")),
         }
         self.render()
     }
@@ -226,22 +228,26 @@ impl App {
                     self.saving.remove(&key);
                     let (choice, remember) = dialogs::ask(
                         self.hwnd,
-                        "Поворот без потерь невозможен точно",
-                        &format!(
+                        tr("Поворот без потерь невозможен точно"),
+                        &t!(
                             "{}: ширина или высота не кратна размеру блока JPEG (16 px).",
                             Self::file_name(&path)
                         ),
                         &[
                             (
                                 CHOICE_TRIM,
-                                "Обрезать край\nТеряется не больше 15 пикселей, качество не меняется",
+                                tr(
+                                    "Обрезать край\nТеряется не больше 15 пикселей, качество не меняется",
+                                ),
                             ),
                             (
                                 CHOICE_EXIF,
-                                "Записать только тег ориентации\nПиксели не меняются; некоторые программы игнорируют тег",
+                                tr(
+                                    "Записать только тег ориентации\nПиксели не меняются; некоторые программы игнорируют тег",
+                                ),
                             ),
                         ],
-                        Some("Запомнить выбор"),
+                        Some(tr("Запомнить выбор")),
                     );
                     let imperfect = match choice {
                         Some(CHOICE_TRIM) => ImperfectJpeg::Trim,
@@ -265,7 +271,7 @@ impl App {
                     }
                 }
                 Outcome::Exported { dst } => {
-                    self.notice(&format!("Сохранено: {}", Self::file_name(&dst)));
+                    self.notice(&t!("Сохранено: {}", Self::file_name(&dst)));
                     if dst.parent() == self.current.parent() {
                         self.rescan_folder();
                     }
@@ -275,13 +281,14 @@ impl App {
                     self.edits.remove(&key);
                     self.reloading.remove(&key);
                     self.invalidate(&path);
-                    self.notice("Сохранение отменено");
+                    self.notice(tr("Сохранение отменено"));
                 }
                 Outcome::Failed { path, error } => {
                     self.saving.remove(&cache::key(&path));
-                    self.notice(&format!(
-                        "Не удалось сохранить {}: {error}",
-                        Self::file_name(&path)
+                    self.notice(&t!(
+                        "Не удалось сохранить {}: {}",
+                        Self::file_name(&path),
+                        error
                     ));
                 }
             }

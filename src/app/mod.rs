@@ -906,7 +906,7 @@ impl App {
         let ui = Ui {
             scale: self.ui_scale() as f32,
             message: if self.home() {
-                Some(crate::ui::home::MESSAGE.to_string())
+                Some(crate::i18n::tr(crate::ui::home::MESSAGE).to_string())
             } else {
                 self.error.as_ref().map(|e| {
                     let name = self
@@ -914,7 +914,7 @@ impl App {
                         .file_name()
                         .map(|n| n.to_string_lossy().into_owned())
                         .unwrap_or_default();
-                    format!("Не удалось открыть файл\n{name}: {e}")
+                    crate::t!("Не удалось открыть файл\n{}: {}", name, e)
                 })
             },
             // The panel shows the zoom level itself; notices always show.

@@ -7,16 +7,41 @@ pub mod tiff;
 
 use crate::orientation::Orientation;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum EncodeError {
-    #[error("{0}")]
     Format(String),
-    #[error("JPEG: {0}")]
-    Jpeg(#[from] turbojpeg::Error),
-    #[error("изображение слишком большое")]
+    Jpeg(turbojpeg::Error),
     TooLarge,
-    #[error("формат не поддерживает запись: {0}")]
     Unsupported(&'static str),
+}
+
+// The messages are shown to the user, in the interface language.
+impl std::fmt::Display for EncodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Format(e) => f.write_str(e),
+            Self::Jpeg(e) => write!(f, "JPEG: {e}"),
+            Self::TooLarge => f.write_str(crate::i18n::tr("изображение слишком большое")),
+            Self::Unsupported(what) => {
+                f.write_str(&crate::t!("формат не поддерживает запись: {}", what))
+            }
+        }
+    }
+}
+
+impl std::error::Error for EncodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Jpeg(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<turbojpeg::Error> for EncodeError {
+    fn from(e: turbojpeg::Error) -> Self {
+        Self::Jpeg(e)
+    }
 }
 
 /// Reorders pixels (`bpp` bytes each) so that the result shows what

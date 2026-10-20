@@ -18,6 +18,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{HSTRING, PWSTR, w};
 
 use crate::APP_NAME;
+use crate::i18n::tr;
 use crate::win::{dialogs, registry};
 
 /// `%LOCALAPPDATA%\Programs\Lightbox`.
@@ -99,10 +100,10 @@ pub fn uninstall() -> Result<()> {
     let exe = std::env::current_exe()?;
     let (choice, remove_settings) = dialogs::ask(
         HWND::default(),
-        &format!("Удалить {APP_NAME}?"),
-        "Программа, её ярлык и ассоциации файлов будут удалены.",
-        &[(1, "Удалить")],
-        Some("Удалить и настройки"),
+        &crate::t!("Удалить {}?", APP_NAME),
+        tr("Программа, её ярлык и ассоциации файлов будут удалены."),
+        &[(1, tr("Удалить"))],
+        Some(tr("Удалить и настройки")),
     );
     if choice != Some(1) {
         return Ok(());
@@ -138,7 +139,7 @@ pub fn uninstall() -> Result<()> {
     unsafe {
         MessageBoxW(
             None,
-            &HSTRING::from(format!("{APP_NAME} удалён.")),
+            &HSTRING::from(crate::t!("{} удалён.", APP_NAME)),
             &HSTRING::from(APP_NAME),
             MB_OK | MB_ICONINFORMATION,
         );

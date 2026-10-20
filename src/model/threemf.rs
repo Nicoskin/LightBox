@@ -9,6 +9,7 @@ use std::collections::HashMap;
 use roxmltree::{Document, Node};
 
 use super::{Builder, Mesh, Plate};
+use crate::i18n::tr;
 
 /// 3 × 4 affine transform, 3MF order: m00 m01 m02 m10 … m32 (row vectors).
 type Transform = [f32; 12];
@@ -244,7 +245,7 @@ pub fn parse(data: &[u8]) -> Result<Mesh, String> {
     let root_index = texts
         .iter()
         .position(|(k, _)| *k == model_name)
-        .ok_or("3MF: нет модели в пакете")?;
+        .ok_or(tr("3MF: нет модели в пакете"))?;
     let mut docs = Vec::with_capacity(texts.len());
     for (i, (_, text)) in texts.iter().enumerate() {
         match Document::parse(text) {
@@ -349,9 +350,9 @@ pub fn parse(data: &[u8]) -> Result<Mesh, String> {
         .filter_map(|(p, r)| Some((p, r.filter(|r| r.start < r.end)?)))
         .map(|(p, tris)| Plate {
             name: if p.name.is_empty() {
-                format!("Стол {}", p.id)
+                crate::t!("Стол {}", p.id)
             } else {
-                format!("Стол {} · {}", p.id, p.name)
+                crate::t!("Стол {} · {}", p.id, p.name)
             },
             tris,
         })
@@ -479,7 +480,7 @@ pub(crate) fn unzip(data: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
         .rev()
         .take(70_000)
         .find(|&i| data[i..].starts_with(b"PK\x05\x06"))
-        .ok_or("3MF: не ZIP-архив")?;
+        .ok_or(tr("3MF: не ZIP-архив"))?;
     let mut count = u16le(eocd + 10).ok_or("ZIP")? as usize;
     let mut p = u32le(eocd + 16).ok_or("ZIP")? as usize;
     // ZIP64 (written by .NET packaging, e.g. 3D Builder): the real count

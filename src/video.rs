@@ -6,6 +6,7 @@
 use std::path::Path;
 use std::sync::OnceLock;
 
+use crate::i18n::tr;
 use anyhow::{Context as _, Result};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::Graphics::Direct3D10::ID3D10Multithread;
@@ -109,7 +110,7 @@ impl Player {
         path: &Path,
         post: impl Fn(Event) + Send + Sync + 'static,
     ) -> Result<Self> {
-        anyhow::ensure!(startup(), "Media Foundation недоступен");
+        anyhow::ensure!(startup(), tr("Media Foundation недоступен"));
         // SAFETY: plain Media Foundation / COM calls with valid arguments;
         // the device is shared with the engine's threads (made safe below).
         unsafe {

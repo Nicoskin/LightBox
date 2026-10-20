@@ -10,6 +10,8 @@ use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer, WM_LBUTTONDOW
 use super::{App, VIDEO_TIMER, WM_APP_VIDEO, post_with};
 use crate::cache;
 use crate::gfx::{GpuImage, VideoBarView};
+use crate::i18n::tr;
+use crate::t;
 use crate::video::{self, Event, Player};
 use crate::view::Rect;
 
@@ -50,7 +52,7 @@ impl App {
                 self.movie = Some(Movie { key, player });
                 self.start_frames();
             }
-            Err(e) => self.error = Some(format!("видео не воспроизводится: {e:#}")),
+            Err(e) => self.error = Some(t!("видео не воспроизводится: {}", format!("{e:#}"))),
         }
         Ok(true)
     }
@@ -107,7 +109,8 @@ impl App {
     pub(super) fn on_video(&mut self, code: usize) -> Result<()> {
         match Event::from_code(code) {
             Some(Event::Error) => {
-                self.error = Some("видео не воспроизводится: нет кодека или файл повреждён".into());
+                self.error =
+                    Some(tr("видео не воспроизводится: нет кодека или файл повреждён").into());
                 self.stop_video();
                 self.render()
             }
@@ -149,9 +152,9 @@ impl App {
         let muted = !m.player.muted();
         m.player.set_muted(muted);
         self.notice(if muted {
-            "Звук выключен"
+            tr("Звук выключен")
         } else {
-            "Звук включён"
+            tr("Звук включён")
         });
         self.render()?;
         Ok(true)

@@ -16,7 +16,9 @@ use crate::adjust::Adjust;
 use crate::cache;
 use crate::edit::Job;
 use crate::gfx::{AdjustView, SegmentView, SliderView};
+use crate::i18n::tr;
 use crate::orientation::Orientation;
+use crate::t;
 use crate::ui::adjust::{self, Hit};
 
 pub(super) struct ToneState {
@@ -179,7 +181,7 @@ impl App {
         // The tilt is now in the pixels.
         self.angle = 0.0;
         self.dial_open = false;
-        self.notice("Коррекция сохраняется…");
+        self.notice(tr("Коррекция сохраняется…"));
         self.render()
     }
 
@@ -194,7 +196,7 @@ impl App {
                 let v = adjust::get(&t.values, i);
                 let (label, track, value) = l.sliders[i];
                 SliderView {
-                    label: (label, adjust::SLIDERS[i].0.to_string()),
+                    label: (label, tr(adjust::SLIDERS[i].0).to_string()),
                     track,
                     knob: l.knob_x(i, v),
                     zero: l.knob_x(i, 0.0),
@@ -204,9 +206,11 @@ impl App {
             })
             .collect();
         let note = if self.angle != 0.0 {
-            format!("Наклон {:+.1}° будет выпрямлен, края обрезаны", self.angle).replace('.', ",")
+            let sign = if self.angle > 0.0 { "+" } else { "−" };
+            let angle = format!("{sign}{}", crate::i18n::dec(self.angle.abs(), 1));
+            t!("Наклон {}° будет выпрямлен, края обрезаны", angle)
         } else {
-            "Сохраняется с качеством JPEG из настроек".to_string()
+            tr("Сохраняется с качеством JPEG из настроек").to_string()
         };
         let button = |r, text: &str, hit: Hit, main: bool| SegmentView {
             rect: r,
@@ -221,9 +225,9 @@ impl App {
             sliders,
             note: (l.note, note),
             buttons: vec![
-                button(l.reset, "Сбросить", Hit::Reset, false),
-                button(l.apply, "Применить", Hit::Apply, true),
-                button(l.cancel, "Отмена", Hit::Cancel, false),
+                button(l.reset, tr("Сбросить"), Hit::Reset, false),
+                button(l.apply, tr("Применить"), Hit::Apply, true),
+                button(l.cancel, tr("Отмена"), Hit::Cancel, false),
             ],
         })
     }

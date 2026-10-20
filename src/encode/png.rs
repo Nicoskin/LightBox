@@ -7,6 +7,7 @@ use std::io::Cursor;
 use png::{ColorType, Decoder, Limits, Transformations};
 
 use super::{EncodeError, orient_pixels, tiff};
+use crate::i18n::tr;
 use crate::orientation::Orientation;
 
 const SIGNATURE: &[u8; 8] = b"\x89PNG\r\n\x1a\n";
@@ -17,7 +18,7 @@ struct Chunk<'a> {
 }
 
 fn chunks(data: &[u8]) -> Result<Vec<Chunk<'_>>, EncodeError> {
-    let bad = || EncodeError::Format("повреждённый PNG".into());
+    let bad = || EncodeError::Format(tr("повреждённый PNG").into());
     if !data.starts_with(SIGNATURE) {
         return Err(bad());
     }
@@ -72,9 +73,9 @@ pub fn transform(
     let list = chunks(data)?;
     if list.iter().any(|c| &c.kind == b"acTL") {
         if crop.is_some() {
-            return Err(EncodeError::Unsupported(
+            return Err(EncodeError::Unsupported(tr(
                 "обрезка анимированных PNG не поддерживается",
-            ));
+            )));
         }
         return rotate_apng(&list, display);
     }
@@ -217,7 +218,7 @@ pub(super) fn crop_units(
     let cw = (c[2] as usize).min(w - x0);
     let ch = (c[3] as usize).min(h - y0);
     if cw == 0 || ch == 0 {
-        return Err(EncodeError::Format("пустая область обрезки".into()));
+        return Err(EncodeError::Format(tr("пустая область обрезки").into()));
     }
     let mut out = Vec::with_capacity(cw * ch * bpp);
     for y in y0..y0 + ch {
@@ -327,7 +328,7 @@ pub(super) fn display_of(
 /// Animated PNG: every frame is turned at its original bit depth and its
 /// position on the canvas moved with it; timing, disposal and blending stay.
 fn rotate_apng(list: &[Chunk], display: Orientation) -> Result<Vec<u8>, EncodeError> {
-    let bad = || EncodeError::Format("повреждённый APNG".into());
+    let bad = || EncodeError::Format(tr("повреждённый APNG").into());
     let ihdr = list
         .first()
         .filter(|c| &c.kind == b"IHDR")
@@ -342,7 +343,7 @@ fn rotate_apng(list: &[Chunk], display: Orientation) -> Result<Vec<u8>, EncodeEr
     let color = ColorType::from_u8(d[9]).ok_or_else(bad)?;
     if d[12] != 0 {
         return Err(EncodeError::Format(
-            "чересстрочные анимированные PNG не поддерживаются".into(),
+            tr("чересстрочные анимированные PNG не поддерживаются").into(),
         ));
     }
     let spp = samples_per_pixel(color);

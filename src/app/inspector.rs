@@ -12,7 +12,9 @@ use super::{App, Mode, WM_APP_INFO, post};
 use crate::cache;
 use crate::decode::DecodedImage;
 use crate::gfx::{HistogramView, InfoView};
+use crate::i18n::tr;
 use crate::inspect::{self, FileInfo, Histogram};
+use crate::t;
 use crate::ui::caption;
 use crate::ui::info::{self, AiShape, InfoButton, InfoLayout};
 use crate::win::clipboard;
@@ -75,11 +77,11 @@ impl App {
     pub(super) fn set_channel(&mut self, c: u32) -> Result<()> {
         self.channel = if self.channel == c { 0 } else { c.min(4) };
         self.notice(match self.channel {
-            1 => "Канал: красный",
-            2 => "Канал: зелёный",
-            3 => "Канал: синий",
-            4 => "Канал: альфа",
-            _ => "Все каналы",
+            1 => tr("Канал: красный"),
+            2 => tr("Канал: зелёный"),
+            3 => tr("Канал: синий"),
+            4 => tr("Канал: альфа"),
+            _ => tr("Все каналы"),
         });
         self.render()
     }
@@ -88,9 +90,9 @@ impl App {
         self.settings.pixel_grid = !self.settings.pixel_grid;
         self.settings.save();
         self.notice(if self.settings.pixel_grid {
-            "Сетка пикселей: вкл (от 800 %)"
+            tr("Сетка пикселей: вкл (от 800 %)")
         } else {
-            "Сетка пикселей: выкл"
+            tr("Сетка пикселей: выкл")
         });
         self.render()
     }
@@ -247,24 +249,34 @@ impl App {
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
-        rows.push(("Имя".to_string(), name));
+        rows.push((tr("Имя").to_string(), name));
         if let Some(img) = self.cache.image(&self.current) {
             let (w, h) = img.display_size();
             let mp = f64::from(w) * f64::from(h) / 1e6;
-            rows.push(("Размер".into(), format!("{w} × {h}   ({mp:.1} Мп)")));
+            rows.push((
+                tr("Размер").into(),
+                t!("{} × {}   ({} Мп)", w, h, crate::i18n::dec(mp, 1)),
+            ));
             let i = &img.info;
             let depth = match (i.bits, i.float) {
-                (_, true) => "32 бит float".to_string(),
-                (b, false) => format!("{b} бит на канал"),
+                (_, true) => tr("32 бит float").to_string(),
+                (b, false) => t!("{} бит на канал", b),
             };
-            rows.push(("Формат".into(), format!("{}   ·   {depth}", i.format)));
+            rows.push((tr("Формат").into(), format!("{}   ·   {depth}", i.format)));
             rows.push((
-                "Прозрачность".into(),
-                if img.has_alpha { "есть" } else { "нет" }.into(),
+                tr("Прозрачность").into(),
+                if img.has_alpha {
+                    tr("есть")
+                } else {
+                    tr("нет")
+                }
+                .into(),
             ));
             rows.push((
-                "Профиль".into(),
-                i.icc.clone().unwrap_or_else(|| "sRGB (нет профиля)".into()),
+                tr("Профиль").into(),
+                i.icc
+                    .clone()
+                    .unwrap_or_else(|| tr("sRGB (нет профиля)").into()),
             ));
         }
         match self.file_info() {
@@ -273,10 +285,10 @@ impl App {
                 if let Some(m) = &f.modified {
                     file = format!("{file}   ·   {m}");
                 }
-                rows.insert(2, ("Файл".into(), file));
+                rows.insert(2, (tr("Файл").into(), file));
                 rows.extend(f.exif.iter().map(|(l, v)| ((*l).to_string(), v.clone())));
             }
-            None => rows.insert(2, ("Файл".into(), "…".into())),
+            None => rows.insert(2, (tr("Файл").into(), "…".into())),
         }
         rows
     }
@@ -318,7 +330,7 @@ impl App {
         };
         let mut v = InfoView {
             card: l.card,
-            title: (l.title, "Информация".into()),
+            title: (l.title, tr("Информация").into()),
             rows: l
                 .rows
                 .iter()
@@ -332,15 +344,16 @@ impl App {
         };
         if let Some(ai) = self.file_info().and_then(|f| f.ai.as_ref()) {
             if let Some(h) = l.ai_heading {
-                v.headings.push((h, format!("Генерация · {}", ai.tool)));
+                v.headings.push((h, t!("Генерация · {}", ai.tool)));
             }
             if let Some((label, text)) = l.prompt {
-                v.rows.push((label, "Промпт".into(), label, String::new()));
+                v.rows
+                    .push((label, tr("Промпт").into(), label, String::new()));
                 v.blocks.push((text, clip(&ai.prompt)));
             }
             if let Some((label, text)) = l.negative {
                 v.rows
-                    .push((label, "Негативный промпт".into(), label, String::new()));
+                    .push((label, tr("Негативный промпт").into(), label, String::new()));
                 v.blocks.push((text, clip(&ai.negative)));
             }
             for ((lr, vr), (k, val)) in l.params.iter().zip(&ai.params) {
@@ -392,16 +405,16 @@ impl App {
             return Ok(());
         };
         let (text, what) = match b {
-            InfoButton::Prompt => (ai.prompt, "Промпт скопирован"),
-            InfoButton::Workflow => (ai.workflow.unwrap_or_default(), "Workflow скопирован"),
-            InfoButton::All => (ai.raw, "Параметры скопированы"),
+            InfoButton::Prompt => (ai.prompt, tr("Промпт скопирован")),
+            InfoButton::Workflow => (ai.workflow.unwrap_or_default(), tr("Workflow скопирован")),
+            InfoButton::All => (ai.raw, tr("Параметры скопированы")),
             InfoButton::Map => return Ok(()),
         };
         match clipboard::set_text(self.hwnd, &text) {
             Ok(()) => self.notice(what),
             Err(e) => {
                 tracing::warn!("clipboard: {e:#}");
-                self.notice("Не удалось скопировать");
+                self.notice(tr("Не удалось скопировать"));
             }
         }
         self.render()

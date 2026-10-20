@@ -9,6 +9,7 @@ use std::io::Cursor;
 use image::{DynamicImage, ImageEncoder, ImageFormat};
 
 use super::{EncodeError, orient_pixels, tiff};
+use crate::i18n::tr;
 use crate::orientation::Orientation;
 
 /// Writes new pixels (straight RGBA8, upright) in the original's format,
@@ -26,9 +27,9 @@ pub fn encode_like(
         ImageFormat::Tiff
     } else if original.len() > 16 && &original[0..4] == b"RIFF" && &original[8..12] == b"WEBP" {
         if !webp_is_lossless(original) {
-            return Err(EncodeError::Unsupported(
+            return Err(EncodeError::Unsupported(tr(
                 "WebP со сжатием с потерями не пересохраняется. Сохраните копию через «Сохранить как»",
-            ));
+            )));
         }
         ImageFormat::WebP
     } else {
@@ -38,14 +39,14 @@ pub fn encode_like(
             "tga" => ImageFormat::Tga,
             "pbm" | "pgm" | "ppm" | "pnm" | "pam" => ImageFormat::Pnm,
             _ => {
-                return Err(EncodeError::Unsupported(
+                return Err(EncodeError::Unsupported(tr(
                     "этот формат не пересохраняется. Сохраните копию через «Сохранить как»",
-                ));
+                )));
             }
         }
     };
     let img = image::RgbaImage::from_raw(w as u32, h as u32, rgba.to_vec())
-        .ok_or_else(|| EncodeError::Format("размер".into()))?;
+        .ok_or_else(|| EncodeError::Format(tr("размер").into()))?;
     let img = if img.pixels().all(|p| p[3] == 255) && format != ImageFormat::WebP {
         DynamicImage::ImageRgb8(DynamicImage::ImageRgba8(img).into_rgb8())
     } else {
@@ -98,13 +99,15 @@ pub fn transform(
     if is_tiff && crop.is_none() {
         let mut out = data.to_vec();
         if !tiff::set_orientation(&mut out, u16::from(display.exif())) {
-            return Err(EncodeError::Format("повреждённый TIFF".into()));
+            return Err(EncodeError::Format(tr("повреждённый TIFF").into()));
         }
         return Ok(out);
     }
     if data.starts_with(b"GIF8") {
         if crop.is_some() {
-            return Err(EncodeError::Unsupported("обрезка GIF не поддерживается"));
+            return Err(EncodeError::Unsupported(tr(
+                "обрезка GIF не поддерживается",
+            )));
         }
         return gif(data, display);
     }
@@ -118,10 +121,9 @@ pub fn transform(
         "tga" => ImageFormat::Tga,
         "pbm" | "pgm" | "ppm" | "pnm" | "pam" => ImageFormat::Pnm,
         "avif" | "heic" | "heif" | "hif" => {
-            return Err(EncodeError::Unsupported(
-                "поворот AVIF и HEIC сохраняется только при просмотре: \
-                 в программе нет их кодировщика. Сохраните копию через «Сохранить как»",
-            ));
+            return Err(EncodeError::Unsupported(tr(
+                "поворот AVIF и HEIC сохраняется только при просмотре: в программе нет их кодировщика. Сохраните копию через «Сохранить как»",
+            )));
         }
         _ => return Err(only_view()),
     };
@@ -152,9 +154,9 @@ fn cut(img: DynamicImage, crop: Option<[u32; 4]>) -> DynamicImage {
 }
 
 fn only_view() -> EncodeError {
-    EncodeError::Unsupported(
+    EncodeError::Unsupported(tr(
         "этот формат поворачивается только при просмотре. Сохраните копию через «Сохранить как»",
-    )
+    ))
 }
 
 /// `img` as `display` shows it.
@@ -182,15 +184,14 @@ fn webp(data: &[u8], display: Orientation, crop: Option<[u32; 4]>) -> Result<Vec
             as usize;
         match kind {
             b"ANIM" => {
-                return Err(EncodeError::Unsupported(
+                return Err(EncodeError::Unsupported(tr(
                     "поворот анимированного WebP сохраняется только при просмотре",
-                ));
+                )));
             }
             b"VP8 " => {
-                return Err(EncodeError::Unsupported(
-                    "поворот WebP со сжатием с потерями сохраняется только при просмотре: \
-                     пересохранение ухудшило бы качество. Сохраните копию через «Сохранить как»",
-                ));
+                return Err(EncodeError::Unsupported(tr(
+                    "поворот WebP со сжатием с потерями сохраняется только при просмотре: пересохранение ухудшило бы качество. Сохраните копию через «Сохранить как»",
+                )));
             }
             b"VP8L" => lossless = true,
             _ => {}
@@ -198,7 +199,7 @@ fn webp(data: &[u8], display: Orientation, crop: Option<[u32; 4]>) -> Result<Vec
         pos += 8 + len + (len & 1);
     }
     if !lossless {
-        return Err(EncodeError::Format("повреждённый WebP".into()));
+        return Err(EncodeError::Format(tr("повреждённый WebP").into()));
     }
     let mut reader = image::ImageReader::with_format(Cursor::new(data), ImageFormat::WebP);
     reader.no_limits();

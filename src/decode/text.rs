@@ -31,6 +31,7 @@ use windows::core::w;
 use windows_numerics::Matrix3x2;
 
 use super::{DecodeError, Raw, RawImage, SizeHint};
+use crate::i18n::tr;
 
 /// Extensions shown as text documents (lower case).
 pub const EXTENSIONS: &[&str] = &[
@@ -109,7 +110,7 @@ const MAX_SIDE: f64 = 8192.0;
 const MIN_SIDE: f64 = 1600.0;
 
 fn err(e: windows::core::Error) -> DecodeError {
-    DecodeError::Other(format!("текст: {}", e.message()))
+    DecodeError::Other(crate::t!("текст: {}", e.message()))
 }
 
 /// Bytes → UTF-16: BOMs (UTF-8, UTF-16 LE/BE), valid UTF-8, otherwise the
@@ -248,7 +249,7 @@ impl TextDoc {
         // Windows line ends count as one.
         text.retain(|&c| c != u16::from(b'\r'));
         if truncated {
-            text.extend("\n\n… файл длиннее: показано его начало".encode_utf16());
+            text.extend(tr("\n\n… файл длиннее: показано его начало").encode_utf16());
         }
         let mono = !PROSE.contains(&ext.as_str());
         let mut doc = Self {

@@ -6,6 +6,7 @@
 
 use std::path::Path;
 
+use crate::i18n::tr;
 use windows::Win32::Foundation::PROPERTYKEY;
 use windows::Win32::Storage::EnhancedStorage::{PKEY_Keywords, PKEY_Rating};
 use windows::Win32::System::Com::StructuredStorage::{
@@ -113,7 +114,7 @@ fn write(
 }
 
 fn unsupported() -> String {
-    "этот формат не хранит рейтинг и метки".into()
+    tr("этот формат не хранит рейтинг и метки").into()
 }
 
 /// Sets the rating (0 clears it).

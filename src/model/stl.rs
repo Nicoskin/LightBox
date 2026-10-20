@@ -1,6 +1,7 @@
 //! STL, binary and ASCII (Z-up, usually millimetres).
 
 use super::{Builder, Mesh};
+use crate::i18n::tr;
 
 pub fn parse(data: &[u8]) -> Result<Mesh, String> {
     let binary_len = data
@@ -18,7 +19,7 @@ fn binary(data: &[u8]) -> Result<Mesh, String> {
     let count = data
         .get(80..84)
         .map(|c| u32::from_le_bytes([c[0], c[1], c[2], c[3]]) as usize)
-        .ok_or("STL: файл слишком короткий")?;
+        .ok_or(tr("STL: файл слишком короткий"))?;
     let mut b = Builder::new(true);
     let f = |o: usize| f32::from_le_bytes([data[o], data[o + 1], data[o + 2], data[o + 3]]);
     for i in 0..count {

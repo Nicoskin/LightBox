@@ -1,6 +1,7 @@
 //! Start screen (launched without a file): "Open file…" and "Settings"
 //! under a centred hint. Pure layout and hit-testing.
 
+use crate::i18n::tr;
 use crate::view::Rect;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -12,8 +13,8 @@ pub enum HomeButton {
 impl HomeButton {
     pub fn label(self) -> &'static str {
         match self {
-            HomeButton::Open => "Открыть файл…",
-            HomeButton::Settings => "Настройки",
+            HomeButton::Open => tr("Открыть файл…"),
+            HomeButton::Settings => tr("Настройки"),
         }
     }
 }

@@ -15,6 +15,7 @@ use super::App;
 use crate::cache;
 use crate::edit::Job;
 use crate::gfx::{CropView, SegmentView};
+use crate::i18n::tr;
 use crate::orientation::Orientation;
 use crate::ui::crop::{self, Aspect, Grip};
 use crate::view::Rect;
@@ -72,7 +73,9 @@ impl App {
             drag: None,
             hot: None,
         });
-        self.notice("Обрезка: тяните за углы и края · Enter — применить · Esc — отмена");
+        self.notice(tr(
+            "Обрезка: тяните за углы и края · Enter — применить · Esc — отмена",
+        ));
         self.render()
     }
 
@@ -226,7 +229,7 @@ impl App {
             crop: Some(rect),
         });
         self.saving.insert(key);
-        self.notice("Обрезка сохраняется…");
+        self.notice(tr("Обрезка сохраняется…"));
         self.render()
     }
 
@@ -250,8 +253,8 @@ impl App {
             })
             .collect();
         for (r, text, hit) in [
-            (bar.apply, "Применить", BarHit::Apply),
-            (bar.cancel, "Отмена", BarHit::Cancel),
+            (bar.apply, tr("Применить"), BarHit::Apply),
+            (bar.cancel, tr("Отмена"), BarHit::Cancel),
         ] {
             segments.push(SegmentView {
                 rect: r,

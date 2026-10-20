@@ -12,6 +12,7 @@ use super::App;
 use crate::cache;
 use crate::decode::{self, DecodedImage};
 use crate::gfx::GpuImage;
+use crate::t;
 
 /// Pages kept on the GPU besides the one shown.
 const KEEP: usize = 6;
@@ -81,7 +82,7 @@ impl App {
         d.page = page;
         let (pages, cached) = (d.pages, d.textures.get(&page).cloned());
         self.detail = None;
-        self.notice(&format!("Страница {} из {pages}", page + 1));
+        self.notice(&t!("Страница {} из {}", page + 1, pages));
         match cached {
             Some(t) => self.show_page(t)?,
             None => self.request_page(page),
@@ -138,6 +139,6 @@ impl App {
     pub(super) fn page_label(&self) -> Option<String> {
         self.doc()
             .filter(|d| d.pages > 1)
-            .map(|d| format!("стр. {} из {}", d.page + 1, d.pages))
+            .map(|d| t!("стр. {} из {}", d.page + 1, d.pages))
     }
 }

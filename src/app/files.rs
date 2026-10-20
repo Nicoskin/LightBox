@@ -9,9 +9,11 @@ use anyhow::Result;
 use super::{App, WM_APP_FILEOP, post};
 use crate::cache;
 use crate::fileops::{FileOps, Job, Outcome};
+use crate::i18n::tr;
 use crate::library;
 use crate::orientation::Orientation;
 use crate::settings::{FolderAction, QuickFolder};
+use crate::t;
 use crate::win::{clipboard, dialogs};
 
 /// Dialog button ids.
@@ -51,7 +53,7 @@ impl App {
     /// written: the file must not be moved or deleted under the writer.
     fn busy_saving(&mut self) -> bool {
         if self.saving.contains(&cache::key(&self.current)) {
-            self.notice("Подождите: фото сохраняется");
+            self.notice(tr("Подождите: фото сохраняется"));
             return true;
         }
         false
@@ -66,10 +68,10 @@ impl App {
         if self.settings.confirm_delete {
             let (choice, never) = dialogs::ask(
                 self.hwnd,
-                "Удалить в корзину?",
+                tr("Удалить в корзину?"),
                 &Self::file_name(&self.current),
-                &[(ID_DELETE, "Удалить")],
-                Some("Больше не спрашивать"),
+                &[(ID_DELETE, tr("Удалить"))],
+                Some(tr("Больше не спрашивать")),
             );
             if choice != Some(ID_DELETE) {
                 return Ok(());
@@ -132,7 +134,7 @@ impl App {
             .or_else(|| self.current.parent().map(Path::to_path_buf));
         let Some(path) = dialogs::open(
             Some(self.hwnd),
-            &format!("Папка для F{n}"),
+            &t!("Папка для F{}", n),
             true,
             None,
             start.as_deref(),
@@ -142,8 +144,8 @@ impl App {
         let (choice, _) = dialogs::ask(
             self.hwnd,
             &format!("F{n} → {}", folder_name(&path)),
-            "Что делать с фото по этой клавише? С Ctrl — наоборот.",
-            &[(ID_COPY, "Копировать"), (ID_MOVE, "Перемещать")],
+            tr("Что делать с фото по этой клавише? С Ctrl — наоборот."),
+            &[(ID_COPY, tr("Копировать")), (ID_MOVE, tr("Перемещать"))],
             None,
         );
         let Some(id) = choice else {
@@ -175,7 +177,7 @@ impl App {
             path: self.current.clone(),
             edit: self.current_edit(),
         });
-        self.notice("Копирование…");
+        self.notice(tr("Копирование…"));
         self.render()
     }
 
@@ -183,10 +185,10 @@ impl App {
     pub(super) fn copy_path(&mut self) -> Result<()> {
         let text = self.current.display().to_string();
         match clipboard::set_text(self.hwnd, &text) {
-            Ok(()) => self.notice("Путь скопирован"),
+            Ok(()) => self.notice(tr("Путь скопирован")),
             Err(e) => {
                 tracing::warn!("clipboard: {e:#}");
-                self.notice("Не удалось скопировать");
+                self.notice(tr("Не удалось скопировать"));
             }
         }
         self.render()
@@ -210,7 +212,7 @@ impl App {
             path: self.current.clone(),
             edit: self.current_edit(),
         });
-        self.notice("Установка обоев…");
+        self.notice(tr("Установка обоев…"));
         self.render()
     }
 
@@ -227,18 +229,18 @@ impl App {
         while let Some(out) = self.fileops.as_ref().and_then(FileOps::try_recv) {
             match out {
                 Outcome::Deleted { path } => {
-                    self.notice("Удалено в корзину");
+                    self.notice(tr("Удалено в корзину"));
                     self.remove_file(&path)?;
                 }
                 Outcome::Moved { path, to } => {
-                    self.notice(&format!("Перемещено в «{}»", folder_name(&to)));
+                    self.notice(&t!("Перемещено в «{}»", folder_name(&to)));
                     self.remove_file(&path)?;
                 }
                 Outcome::Copied { to } => {
-                    self.notice(&format!("Скопировано в «{}»", folder_name(&to)));
+                    self.notice(&t!("Скопировано в «{}»", folder_name(&to)));
                 }
-                Outcome::ImageCopied => self.notice("Изображение скопировано"),
-                Outcome::WallpaperSet => self.notice("Обои установлены"),
+                Outcome::ImageCopied => self.notice(tr("Изображение скопировано")),
+                Outcome::WallpaperSet => self.notice(tr("Обои установлены")),
                 Outcome::Cancelled | Outcome::Done => {}
                 Outcome::Failed { what, error } => {
                     tracing::warn!("{what}: {error}");
@@ -333,25 +335,25 @@ impl App {
             }
             v.push(Item::Command(
                 CMD_ASSIGN,
-                "Назначить папку…\tShift+F1..F9".into(),
+                tr("Назначить папку…\tShift+F1..F9").into(),
                 true,
             ));
             v
         };
         let items = vec![
-            cmd(CMD_COPY_IMAGE, "Копировать изображение\tCtrl+C"),
-            cmd(CMD_COPY_PATH, "Копировать путь\tCtrl+Shift+C"),
+            cmd(CMD_COPY_IMAGE, tr("Копировать изображение\tCtrl+C")),
+            cmd(CMD_COPY_PATH, tr("Копировать путь\tCtrl+Shift+C")),
             Item::Separator,
-            Item::Submenu("Копировать в папку".into(), folders(CMD_COPY_TO)),
-            Item::Submenu("Переместить в папку".into(), folders(CMD_MOVE_TO)),
+            Item::Submenu(tr("Копировать в папку").into(), folders(CMD_COPY_TO)),
+            Item::Submenu(tr("Переместить в папку").into(), folders(CMD_MOVE_TO)),
             Item::Separator,
-            cmd(CMD_EXPLORER, "Показать в проводнике"),
-            cmd(CMD_EDITOR, "Открыть в редакторе\tE"),
-            cmd(CMD_WALLPAPER, "Сделать обоями рабочего стола"),
+            cmd(CMD_EXPLORER, tr("Показать в проводнике")),
+            cmd(CMD_EDITOR, tr("Открыть в редакторе\tE")),
+            cmd(CMD_WALLPAPER, tr("Сделать обоями рабочего стола")),
             Item::Separator,
-            cmd(CMD_INFO, "Информация\tI"),
+            cmd(CMD_INFO, tr("Информация\tI")),
             Item::Separator,
-            cmd(CMD_DELETE, "Удалить в корзину\tDel"),
+            cmd(CMD_DELETE, tr("Удалить в корзину\tDel")),
         ];
         let at = crate::win::window::cursor_pos();
         let Some(id) = menu::popup(self.hwnd, &items, at) else {

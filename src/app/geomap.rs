@@ -8,6 +8,8 @@ use std::thread;
 use super::{App, WM_APP_MAP, post};
 use crate::cache;
 use crate::gfx::Thumb;
+use crate::i18n::tr;
+use crate::t;
 
 /// A map being rendered: file key and the result channel.
 pub(super) type MapRx = (String, Receiver<Result<Thumb, String>>);
@@ -74,11 +76,11 @@ impl App {
             return (Some(Rc::clone(t)), String::new());
         }
         let status = if !self.settings.map_tiles {
-            "Загрузка карт выключена в настройках".to_string()
+            tr("Загрузка карт выключена в настройках").to_string()
         } else if let Some((_, e)) = self.map_error.as_ref().filter(|(k, _)| *k == key) {
-            format!("Карта не загрузилась: {e}")
+            t!("Карта не загрузилась: {}", e)
         } else {
-            "Загрузка карты…".to_string()
+            tr("Загрузка карты…").to_string()
         };
         (None, status)
     }

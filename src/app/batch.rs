@@ -7,8 +7,10 @@ use anyhow::Result;
 
 use super::App;
 use crate::cache;
+use crate::i18n::tr;
 use crate::orientation::Orientation;
 use crate::settings::SaveMode;
+use crate::t;
 
 impl App {
     /// Filmstrip click with Ctrl (toggle) or Shift (range from the current
@@ -35,8 +37,9 @@ impl App {
         }
         let n = self.selected.len();
         if n > 0 {
-            self.notice(&format!(
-                "Выбрано фото: {n} · R / L — повернуть все · Esc — снять выбор"
+            self.notice(&t!(
+                "Выбрано фото: {} · R / L — повернуть все · Esc — снять выбор",
+                n
             ));
         }
         self.render()?;
@@ -87,7 +90,7 @@ impl App {
                 self.save_rotation(p);
             }
         }
-        self.notice(&format!("Повёрнуто фото: {}", paths.len()));
+        self.notice(&t!("Повёрнуто фото: {}", paths.len()));
         self.render()
     }
 
@@ -102,9 +105,9 @@ impl App {
             }
         }
         self.notice(&if n == 0 {
-            "Нет изменений для сохранения".to_string()
+            tr("Нет изменений для сохранения").to_string()
         } else {
-            format!("Сохранение фото: {n}…")
+            t!("Сохранение фото: {}…", n)
         });
         self.render()
     }

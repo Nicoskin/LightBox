@@ -13,6 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 use windows::core::HSTRING;
 
 use super::{App, WATCH_TIMER, WM_APP_WATCH, post};
+use crate::i18n::tr;
 use crate::win::watch::Watcher;
 use crate::{cache, decode, library};
 
@@ -91,7 +92,7 @@ impl App {
             {
                 Some(p) => p,
                 None => {
-                    self.notice("В папке нет изображений");
+                    self.notice(tr("В папке нет изображений"));
                     return self.render();
                 }
             }
@@ -99,7 +100,7 @@ impl App {
             path
         };
         if !decode::is_supported(&target) {
-            self.notice("Этот файл не изображение и не 3D-модель");
+            self.notice(tr("Этот файл не изображение и не 3D-модель"));
             return self.render();
         }
         self.quicklook = false;

@@ -14,6 +14,7 @@ use windows::core::HSTRING;
 
 use crate::APP_NAME;
 use crate::decode::all_extensions;
+use crate::i18n::tr;
 
 const CLASSES: &str = r"Software\Classes";
 const RUN: &str = r"Software\Microsoft\Windows\CurrentVersion\Run";
@@ -119,7 +120,7 @@ pub fn register(exe: &Path) -> Result<()> {
     let icon = format!("\"{exe_s}\",0");
     let pid = prog_id();
     let pk = format!(r"{CLASSES}\{pid}");
-    set(&pk, "", &format!("Изображение ({APP_NAME})"))?;
+    set(&pk, "", &crate::t!("Изображение ({})", APP_NAME))?;
     set(&format!(r"{pk}\DefaultIcon"), "", &icon)?;
     set(&format!(r"{pk}\shell\open\command"), "", &open)?;
 
@@ -132,7 +133,7 @@ pub fn register(exe: &Path) -> Result<()> {
     set(
         &caps,
         "ApplicationDescription",
-        "Быстрый просмотрщик изображений",
+        tr("Быстрый просмотрщик изображений"),
     )?;
     set(&caps, "ApplicationIcon", &icon)?;
     for ext in all_extensions() {

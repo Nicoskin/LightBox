@@ -8,6 +8,8 @@ use anyhow::Result;
 
 use super::{App, Mode};
 use crate::gfx::{GpuImage, Layer};
+use crate::i18n::tr;
+use crate::t;
 use crate::view::{Rect, View};
 
 /// Gap between the halves, 96-DPI pixels.
@@ -181,7 +183,7 @@ impl App {
             CompareLayout::Difference => vec![label(
                 0.0,
                 self.viewport().0,
-                format!(
+                t!(
                     "Разность A − B · усиление ×{} (Shift + колесо)",
                     GAINS[c.gain]
                 ),
@@ -191,7 +193,7 @@ impl App {
                     (format!("A · {}", c.name), self.viewport().0)
                 } else {
                     (
-                        format!("B · {b_name}   (держите пробел — A)"),
+                        t!("B · {}   (держите пробел — A)", b_name),
                         self.viewport().0,
                     )
                 };
@@ -207,7 +209,7 @@ impl App {
             return self.refit_and_render();
         }
         if self.files.len() < 2 || self.preview() {
-            self.notice("Для сравнения нужна папка с несколькими фото");
+            self.notice(tr("Для сравнения нужна папка с несколькими фото"));
             return self.render();
         }
         let Some((key, tex)) = self.shown.clone() else {
@@ -229,7 +231,7 @@ impl App {
         };
         self.go_to(next)?;
         self.anim = None;
-        self.notice("Сравнение: ← → меняют B · V — вид · C — выход");
+        self.notice(tr("Сравнение: ← → меняют B · V — вид · C — выход"));
         self.refit_and_render()
     }
 

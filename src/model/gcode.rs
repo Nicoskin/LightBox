@@ -4,6 +4,7 @@
 //! image. Travel moves are left out.
 
 use super::Mesh;
+use crate::i18n::tr;
 
 /// Line types, as the shader colours them.
 pub mod kind {
@@ -90,9 +91,9 @@ fn human_time(secs: u64) -> String {
         (secs / 60 % 60).max(u64::from(secs < 60)),
     );
     match (d, h) {
-        (0, 0) => format!("{m} мин"),
-        (0, _) => format!("{h} ч {m} мин"),
-        _ => format!("{d} д {h} ч {m} мин"),
+        (0, 0) => crate::t!("{} мин", m),
+        (0, _) => crate::t!("{} ч {} мин", h, m),
+        _ => crate::t!("{} д {} ч {} мин", d, h, m),
     }
 }
 
@@ -240,14 +241,14 @@ pub fn parse_text(text: &[u8]) -> Result<Toolpath, String> {
                     .and_then(|v| v.trim().parse::<f32>().ok())
                 && g > 0.0
             {
-                tp.filament = Some(format!("{g:.1} г").replace('.', ","));
+                tp.filament = Some(crate::t!("{} г", crate::i18n::dec(g, 1)));
             }
             if tp.filament.is_none()
                 && let Some(m) = lower
                     .strip_prefix(";filament used:")
                     .and_then(|v| v.trim().trim_end_matches('m').parse::<f32>().ok())
             {
-                tp.filament = Some(format!("{m:.2} м").replace('.', ","));
+                tp.filament = Some(crate::t!("{} м", crate::i18n::dec(m, 2)));
             }
             continue;
         }
@@ -328,7 +329,7 @@ pub fn parse_text(text: &[u8]) -> Result<Toolpath, String> {
         }
     }
     if tp.segs.is_empty() {
-        return Err("в G-code нет движений с подачей пластика".into());
+        return Err(tr("в G-code нет движений с подачей пластика").into());
     }
     tp.layer_ends.push(tp.segs.len() as u32);
     if let Some((_, _, data)) = thumb
@@ -347,7 +348,7 @@ pub fn parse(data: &[u8]) -> Result<Mesh, String> {
         let files = super::threemf::unzip(data)?;
         let mut names: Vec<&String> = files.keys().filter(|n| n.ends_with(".gcode")).collect();
         names.sort();
-        let name = names.first().ok_or("в архиве нет G-code")?;
+        let name = names.first().ok_or(tr("в архиве нет G-code"))?;
         parse_text(&files[*name])?
     } else {
         parse_text(data)?

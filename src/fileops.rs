@@ -25,6 +25,7 @@ use windows::core::{HSTRING, PCWSTR};
 
 use crate::decode;
 use crate::encode;
+use crate::i18n::tr;
 use crate::orientation::Orientation;
 use crate::win::clipboard;
 
@@ -142,7 +143,7 @@ fn run(job: Job, owner: HWND) -> Outcome {
             }) {
                 Ok(true) => Outcome::Deleted { path },
                 Ok(false) => Outcome::Cancelled,
-                Err(e) => fail("Не удалось удалить")(e),
+                Err(e) => fail(tr("Не удалось удалить"))(e),
             }
         }
         Job::Copy { path, to } => {
@@ -158,7 +159,7 @@ fn run(job: Job, owner: HWND) -> Outcome {
             }) {
                 Ok(true) => Outcome::Copied { to },
                 Ok(false) => Outcome::Cancelled,
-                Err(e) => fail("Не удалось скопировать")(e),
+                Err(e) => fail(tr("Не удалось скопировать"))(e),
             }
         }
         Job::Move { path, to } => {
@@ -174,21 +175,21 @@ fn run(job: Job, owner: HWND) -> Outcome {
             }) {
                 Ok(true) => Outcome::Moved { path, to },
                 Ok(false) => Outcome::Cancelled,
-                Err(e) => fail("Не удалось переместить")(e),
+                Err(e) => fail(tr("Не удалось переместить"))(e),
             }
         }
         Job::CopyImage { path, edit } => copy_image(owner, &path, edit)
             .map(|()| Outcome::ImageCopied)
-            .unwrap_or_else(fail("Не удалось скопировать изображение")),
+            .unwrap_or_else(fail(tr("Не удалось скопировать изображение"))),
         Job::ShowInExplorer { path } => show_in_explorer(&path)
             .map(|()| Outcome::Done)
-            .unwrap_or_else(fail("Не удалось открыть проводник")),
+            .unwrap_or_else(fail(tr("Не удалось открыть проводник"))),
         Job::OpenInEditor { path, editor } => open_in_editor(owner, &path, editor.as_deref())
             .map(|()| Outcome::Done)
-            .unwrap_or_else(fail("Не удалось открыть редактор")),
+            .unwrap_or_else(fail(tr("Не удалось открыть редактор"))),
         Job::Wallpaper { path, edit } => set_wallpaper(&path, edit)
             .map(|()| Outcome::WallpaperSet)
-            .unwrap_or_else(fail("Не удалось установить обои")),
+            .unwrap_or_else(fail(tr("Не удалось установить обои"))),
     }
 }
 
@@ -296,7 +297,7 @@ fn open_in_editor(owner: HWND, path: &Path, editor: Option<&Path>) -> Result<()>
             }
         }
     }
-    bail!("нет программы для редактирования этого формата")
+    bail!(tr("нет программы для редактирования этого формата"))
 }
 
 /// Formats the desktop shows directly; others (and turned photos) are

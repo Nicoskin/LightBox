@@ -13,6 +13,8 @@ use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 use super::{ANIM_TIMER, App, WM_APP_FRAMES, post};
 use crate::cache;
 use crate::decode::anim::{self, Animation};
+use crate::i18n::tr;
+use crate::t;
 
 pub(super) struct Playback {
     key: String,
@@ -171,9 +173,9 @@ impl App {
             }
         }
         self.notice(if playing {
-            "Воспроизведение"
+            tr("Воспроизведение")
         } else {
-            "Пауза"
+            tr("Пауза")
         });
         self.render()?;
         Ok(true)
@@ -197,11 +199,12 @@ impl App {
     /// "кадр 3 / 24" for the caption, while an animation is loaded.
     pub(super) fn frame_label(&self) -> Option<String> {
         let p = self.playback.as_ref()?;
-        let pause = if p.playing { "" } else { " · пауза" };
-        Some(format!(
-            "кадр {} / {}{pause}",
+        let pause = if p.playing { "" } else { tr(" · пауза") };
+        Some(t!(
+            "кадр {} / {}{}",
             p.index + 1,
-            p.anim.frames.len()
+            p.anim.frames.len(),
+            pause
         ))
     }
 }

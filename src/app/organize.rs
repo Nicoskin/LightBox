@@ -10,6 +10,8 @@ use std::thread;
 use anyhow::Result;
 
 use super::{App, WM_APP_BATCH, post};
+use crate::i18n::tr;
+use crate::t;
 use crate::win::form::{self, Field};
 use crate::{cache, decode, encode, rating};
 
@@ -48,14 +50,14 @@ impl App {
         }
         let path = self.current.clone();
         let mut fields = [Field::Text {
-            label: "Метки (через запятую)".into(),
+            label: tr("Метки (через запятую)").into(),
             value: rating::keywords(&path).join(", "),
         }];
-        let note = format!(
+        let note = t!(
             "{} — метки видны в Проводнике и в Lightroom",
             Self::file_name(&path)
         );
-        if !form::show(self.hwnd, "Метки", &note, &mut fields, "Сохранить") {
+        if !form::show(self.hwnd, tr("Метки"), &note, &mut fields, tr("Сохранить")) {
             return Ok(());
         }
         let Field::Text { value, .. } = &fields[0] else {
@@ -68,9 +70,9 @@ impl App {
             .map(str::to_string)
             .collect();
         match rating::set_keywords(&path, &words, self.settings.keep_file_dates) {
-            Ok(()) if words.is_empty() => self.notice("Метки сняты"),
-            Ok(()) => self.notice(&format!("Метки: {}", words.join(", "))),
-            Err(e) => self.notice(&format!("Метки не записаны: {e}")),
+            Ok(()) if words.is_empty() => self.notice(tr("Метки сняты")),
+            Ok(()) => self.notice(&t!("Метки: {}", words.join(", "))),
+            Err(e) => self.notice(&t!("Метки не записаны: {}", e)),
         }
         self.render()
     }
@@ -78,7 +80,7 @@ impl App {
     /// Ctrl+B: rename / convert the picked photos (or the whole folder).
     pub(super) fn batch_dialog(&mut self) -> Result<()> {
         if self.batch_rx.is_some() {
-            self.notice("Пакетная обработка уже идёт");
+            self.notice(tr("Пакетная обработка уже идёт"));
             return self.render();
         }
         let files: Vec<PathBuf> = if self.selected.is_empty() {
@@ -103,51 +105,55 @@ impl App {
             .map_or_else(PathBuf::new, |d| d.join("Lightbox"));
         let mut fields = [
             Field::Choice {
-                label: "Действие".into(),
-                options: vec!["Переименовать".into(), "Конвертировать в папку".into()],
+                label: tr("Действие").into(),
+                options: vec![
+                    tr("Переименовать").into(),
+                    tr("Конвертировать в папку").into(),
+                ],
                 selected: 0,
             },
             Field::Text {
-                label: "Имя файла".into(),
-                value: "{имя}".into(),
+                label: tr("Имя файла").into(),
+                value: tr("{имя}").into(),
             },
             Field::Choice {
-                label: "Формат".into(),
+                label: tr("Формат").into(),
                 options: vec![
-                    "Как у исходного".into(),
+                    tr("Как у исходного").into(),
                     "JPEG".into(),
                     "PNG".into(),
-                    "WebP (без потерь)".into(),
+                    tr("WebP (без потерь)").into(),
                 ],
                 selected: 1,
             },
             Field::Number {
-                label: "Длинная сторона, px (0 — как есть)".into(),
+                label: tr("Длинная сторона, px (0 — как есть)").into(),
                 value: 0,
             },
             Field::Number {
-                label: "Качество JPEG".into(),
+                label: tr("Качество JPEG").into(),
                 value: u32::from(self.settings.jpeg_quality),
             },
             Field::Folder {
-                label: "Папка для результата".into(),
+                label: tr("Папка для результата").into(),
                 value: folder,
             },
         ];
         let which = if self.selected.is_empty() {
-            format!("Вся папка: {} фото", files.len())
+            t!("Вся папка: {} фото", files.len())
         } else {
-            format!("Выбрано в ленте: {} фото", files.len())
+            t!("Выбрано в ленте: {} фото", files.len())
         };
-        let note = format!(
-            "{which}. В имени: {{имя}} — прежнее имя, {{n}} — номер, {{дата}} — дата съёмки."
+        let note = t!(
+            "{}. В имени: {{имя}} — прежнее имя, {{n}} — номер, {{дата}} — дата съёмки.",
+            which
         );
         if !form::show(
             self.hwnd,
-            "Пакетная обработка",
+            tr("Пакетная обработка"),
             &note,
             &mut fields,
-            "Начать",
+            tr("Начать"),
         ) {
             return Ok(());
         }
@@ -185,8 +191,9 @@ impl App {
             && !job.template.contains("{n}")
             && job.files.len() > 1
             && !job.template.contains("{имя}")
+            && !job.template.contains("{name}")
         {
-            self.notice("Для нескольких файлов в имени нужен {n} или {имя}");
+            self.notice(&t!("Для нескольких файлов в имени нужен {{n}} или {{имя}}"));
             return self.render();
         }
         let (tx, rx) = channel();
@@ -211,7 +218,7 @@ impl App {
         });
         if spawned.is_ok() {
             self.batch_rx = Some(rx);
-            self.notice("Обработка…");
+            self.notice(tr("Обработка…"));
         }
         self.render()
     }
@@ -220,7 +227,7 @@ impl App {
         let mut done = None;
         while let Some(m) = self.batch_rx.as_ref().and_then(|rx| rx.try_recv().ok()) {
             match m {
-                BatchMsg::Progress(i, n) => self.notice(&format!("Обработано {i} из {n}")),
+                BatchMsg::Progress(i, n) => self.notice(&t!("Обработано {} из {}", i, n)),
                 BatchMsg::Done { ok, failed } => done = Some((ok, failed)),
             }
         }
@@ -228,11 +235,12 @@ impl App {
             self.batch_rx = None;
             self.clear_selection()?;
             if failed.is_empty() {
-                self.notice(&format!("Готово: {ok} файлов"));
+                self.notice(&t!("Готово: {} файлов", ok));
             } else {
                 tracing::warn!("batch failures: {failed:?}");
-                self.notice(&format!(
-                    "Готово: {ok}, с ошибками: {} ({})",
+                self.notice(&t!(
+                    "Готово: {}, с ошибками: {} ({})",
+                    ok,
                     failed.len(),
                     failed[0]
                 ));
@@ -314,7 +322,7 @@ fn run_one(job: &Job, path: &Path, n: usize) -> Result<(), String> {
     let width = job.files.len().to_string().len().max(2);
     let stem = file_stem(&job.template, path, n, width);
     if stem.is_empty() {
-        return Err("пустое имя".into());
+        return Err(tr("пустое имя").into());
     }
     let ext = path
         .extension()
@@ -345,7 +353,7 @@ fn run_one(job: &Job, path: &Path, n: usize) -> Result<(), String> {
             ((w as f64 * k).round() as u32).max(1),
             ((h as f64 * k).round() as u32).max(1),
         );
-        let buf = image::RgbaImage::from_raw(w as u32, h as u32, px).ok_or("размер")?;
+        let buf = image::RgbaImage::from_raw(w as u32, h as u32, px).ok_or(tr("размер"))?;
         px =
             image::imageops::resize(&buf, nw, nh, image::imageops::FilterType::Lanczos3).into_raw();
         (w, h) = (nw as usize, nh as usize);
@@ -366,7 +374,7 @@ fn run_one(job: &Job, path: &Path, n: usize) -> Result<(), String> {
         Format::WebP => {
             let mut out = Vec::new();
             image::DynamicImage::ImageRgba8(
-                image::RgbaImage::from_raw(w as u32, h as u32, px).ok_or("размер")?,
+                image::RgbaImage::from_raw(w as u32, h as u32, px).ok_or(tr("размер"))?,
             )
             .write_to(
                 &mut std::io::Cursor::new(&mut out),

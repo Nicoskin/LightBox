@@ -9,9 +9,11 @@ use super::{App, Mode, PANEL_HOLD_MS, PANEL_TIMER, WM_APP_THUMB, post, stars};
 use crate::cache;
 use crate::gfx::Icon;
 use crate::gfx::{ButtonView, CardView, CellView, PanelView, SegmentView, TextStyle, TextView};
+use crate::i18n::tr;
 use crate::keymap::{self, Command, Key, Keymap};
 use crate::orientation::Orientation;
 use crate::settings::AlphaBg;
+use crate::t;
 use crate::ui::caption::CaptionButton;
 use crate::ui::info::InfoButton;
 use crate::ui::settings_card;
@@ -280,7 +282,7 @@ impl App {
     fn details(&self) -> String {
         let mut parts = Vec::new();
         if self.files.len() > 1 {
-            parts.push(format!("{} из {}", self.index + 1, self.files.len()));
+            parts.push(t!("{} из {}", self.index + 1, self.files.len()));
         }
         if let Some(p) = self.page_label() {
             parts.push(p);
@@ -288,7 +290,7 @@ impl App {
             parts.push(format!("{w:.0} × {h:.0}"));
         }
         if self.edits.contains_key(&cache::key(&self.current)) {
-            parts.push("повёрнуто, не сохранено".into());
+            parts.push(tr("повёрнуто, не сохранено").into());
         }
         if let Some(s) = self.stars().filter(|s| *s > 0) {
             parts.push(stars::stars_text(s));
@@ -449,7 +451,7 @@ impl App {
             for (k, rect) in r.chips.iter().enumerate() {
                 let capturing = self.card_capture == Some((r.cmd, k));
                 let text = if capturing {
-                    "Нажмите…".to_string()
+                    tr("Нажмите…").to_string()
                 } else {
                     keys.get(k).map_or_else(String::new, |key| key.label())
                 };
@@ -465,13 +467,13 @@ impl App {
         }
         let keys_page = self.card_tab == settings_card::Tab::Keys;
         let footer = if keys_page {
-            "Щелчок — назначить клавишу, правый щелчок — убрать".to_string()
+            tr("Щелчок — назначить клавишу, правый щелчок — убрать").to_string()
         } else {
             settings_card::version_text()
         };
         Some(CardView {
             rect: l.card,
-            title: (l.title, "Настройки".to_string()),
+            title: (l.title, tr("Настройки").to_string()),
             close: (l.close, self.card_hot == Some(settings_card::Hit::Close)),
             tabs: l
                 .tabs
@@ -492,7 +494,7 @@ impl App {
             button: l.reset.map(|r| {
                 (
                     r,
-                    "Сбросить все".to_string(),
+                    tr("Сбросить все").to_string(),
                     self.card_hot == Some(settings_card::Hit::ResetKeys),
                 )
             }),
@@ -591,7 +593,7 @@ impl App {
                     self.settings.save();
                     self.keymap = Keymap::new(&self.settings.keys);
                     self.card_capture = None;
-                    self.notice("Клавиши — как по умолчанию");
+                    self.notice(tr("Клавиши — как по умолчанию"));
                     self.render()?;
                 }
                 Some(Hit::Card) => {}
@@ -615,7 +617,7 @@ impl App {
         self.settings.save();
         self.keymap = Keymap::new(&self.settings.keys);
         if let (Some(k), Some(other)) = (key, taken) {
-            self.notice(&format!("{} снята с «{}»", k.label(), other.label()));
+            self.notice(&t!("{} снята с «{}»", k.label(), other.label()));
         }
     }
 
@@ -649,6 +651,7 @@ impl App {
             Choice::CheckUpdates => self.check_updates(true),
             Choice::Cache(mb) => self.cache.set_budget(mb as usize * (1 << 20)),
             Choice::Preload(_) => self.schedule(),
+            Choice::Language(l) => crate::i18n::init(l),
             Choice::Autostart(on) => {
                 self.set_autostart(on);
                 if on && !self.settings.resident {
@@ -668,7 +671,7 @@ impl App {
                     }
                     self.settings.save();
                     self.apply_resident();
-                    self.notice("Пробел в проводнике работает, пока Lightbox в трее");
+                    self.notice(tr("Пробел в проводнике работает, пока Lightbox в трее"));
                 } else {
                     self.apply_quick_look();
                 }
@@ -681,9 +684,9 @@ impl App {
                     .and_then(std::path::Path::parent);
                 if let Some(exe) = crate::win::dialogs::open(
                     Some(self.hwnd),
-                    "Программа для редактирования",
+                    tr("Программа для редактирования"),
                     false,
-                    Some(("Программы", "*.exe")),
+                    Some((tr("Программы"), "*.exe")),
                     start,
                 ) {
                     self.settings.editor = Some(exe);

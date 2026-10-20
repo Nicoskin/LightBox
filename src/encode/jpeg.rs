@@ -4,6 +4,7 @@
 use turbojpeg::{Transform, TransformOp, Transformer};
 
 use super::{EncodeError, tiff};
+use crate::i18n::tr;
 use crate::orientation::Orientation;
 use crate::settings::ImperfectJpeg;
 
@@ -91,7 +92,7 @@ pub fn crop(data: &[u8], c: [u32; 4]) -> Result<(Vec<u8>, [u32; 4]), EncodeError
     let w = (c[0] as usize + c[2] as usize).min(header.width) - x;
     let h = (c[1] as usize + c[3] as usize).min(header.height) - y;
     if w == 0 || h == 0 {
-        return Err(EncodeError::Format("пустая область обрезки".into()));
+        return Err(EncodeError::Format(tr("пустая область обрезки").into()));
     }
     let mut t = Transform::op(TransformOp::None);
     t.crop = Some(turbojpeg::TransformCrop {

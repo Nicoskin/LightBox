@@ -29,6 +29,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 use windows::core::{GUID, HSTRING, Interface as _, PWSTR, w};
 
+use crate::i18n::tr;
 use crate::win::monitor::Monitor;
 
 /// The interface id of preview handlers, as registered under ShellEx.
@@ -66,7 +67,7 @@ pub fn run(path: &Path) -> Result<()> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
     }
-    let clsid = handler_for(path).context("нет программы для предпросмотра этого типа")?;
+    let clsid = handler_for(path).context(tr("нет программы для предпросмотра этого типа"))?;
     let path = std::path::absolute(path)?;
     let wide = HSTRING::from(path.as_os_str());
 
@@ -76,7 +77,7 @@ pub fn run(path: &Path) -> Result<()> {
     let handler: IPreviewHandler = unsafe {
         CoCreateInstance(&clsid, None, CLSCTX_LOCAL_SERVER)
             .or_else(|_| CoCreateInstance(&clsid, None, CLSCTX_INPROC_SERVER))
-            .context("обработчик предпросмотра не запустился")?
+            .context(tr("обработчик предпросмотра не запустился"))?
     };
     // SAFETY: the handler reads the file through one of these.
     unsafe {
@@ -89,7 +90,7 @@ pub fn run(path: &Path) -> Result<()> {
             let item: IShellItem = SHCreateItemFromParsingName(&wide, None)?;
             i.Initialize(&item, STGM_READ.0)?;
         } else {
-            bail!("обработчик предпросмотра не принимает файлы");
+            bail!(tr("обработчик предпросмотра не принимает файлы"));
         }
     }
 

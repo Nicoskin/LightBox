@@ -8,6 +8,7 @@ pub mod raster;
 mod stl;
 mod threemf;
 
+use crate::i18n::tr;
 use std::path::Path;
 
 /// Model file extensions (lower case).
@@ -155,7 +156,7 @@ impl Builder {
 
     pub fn finish(mut self) -> Result<Mesh, String> {
         if self.mesh.positions.is_empty() {
-            return Err("в модели нет треугольников".into());
+            return Err(tr("в модели нет треугольников").into());
         }
         if self.colored {
             self.mesh.colors = Some(self.colors);
@@ -198,7 +199,7 @@ pub fn load(path: &Path) -> Result<Mesh, String> {
         "3mf" if is_gcode_3mf(path) => gcode::parse(&data),
         "3mf" => threemf::parse(&data),
         "gcode" | "gco" => gcode::parse(&data),
-        _ => Err("неизвестный формат модели".into()),
+        _ => Err(tr("неизвестный формат модели").into()),
     }
 }
 

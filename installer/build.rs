@@ -56,7 +56,7 @@ BEGIN
   BEGIN
     BLOCK "041904B0"
     BEGIN
-      VALUE "FileDescription", "Установка Lightbox"
+      VALUE "FileDescription", "Lightbox Setup"
       VALUE "ProductName", "Lightbox"
       VALUE "FileVersion", "{version}"
       VALUE "ProductVersion", "{version}"

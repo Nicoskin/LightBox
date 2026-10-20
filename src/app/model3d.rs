@@ -12,8 +12,10 @@ use anyhow::Result;
 use super::{App, WM_APP_MODEL, post};
 use crate::cache;
 use crate::gfx::{GpuMesh, ModelDraw};
+use crate::i18n::{dec, tr};
 use crate::model::raster::Orbit;
 use crate::model::{self, Mesh, pick};
+use crate::t;
 use crate::ui::toolbar::Action;
 use crate::view::Rect;
 
@@ -97,7 +99,7 @@ impl App {
         });
         if spawned.is_ok() {
             self.model_rx = Some((key, rx));
-            self.notice("Загрузка модели…");
+            self.notice(tr("Загрузка модели…"));
         }
         Ok(true)
     }
@@ -239,25 +241,25 @@ impl App {
     pub(super) fn model_details(&self) -> Option<String> {
         let m = self.current_model()?;
         if let Some(p) = &m.mesh.path {
-            let mut parts = vec![format!("слой {} из {}", m.layer + 1, p.layer_ends.len())];
+            let mut parts = vec![t!("слой {} из {}", m.layer + 1, p.layer_ends.len())];
             parts.extend(p.time.clone());
             parts.extend(p.filament.clone());
             return Some(parts.join("  ·  "));
         }
         let s = m.view.size();
         // Back to the file's Z-up axes for the dimensions: X, Y (depth), Z.
-        let text = format!(
-            "{} треугольников  ·  {:.1} × {:.1} × {:.1}",
+        let text = t!(
+            "{} треугольников  ·  {} × {} × {}",
             m.view.triangles(),
-            s[0],
-            s[2],
-            s[1]
+            dec(s[0], 1),
+            dec(s[2], 1),
+            dec(s[1], 1)
         );
         if m.mesh.plates.is_empty() {
             return Some(text);
         }
         let plate = m.plate.map_or_else(
-            || "все столы".to_string(),
+            || tr("все столы").to_string(),
             |i| m.mesh.plates[i].name.clone(),
         );
         Some(format!("{plate}  ·  {text}"))
@@ -292,7 +294,7 @@ impl App {
         let last = p.layer_ends.len().saturating_sub(1) as i64;
         m.layer = (m.layer as i64 + delta).clamp(0, last) as usize;
         let z = p.layer_z.get(m.layer).copied().unwrap_or(0.0);
-        let text = format!("Слой {} из {} · {z:.2} мм", m.layer + 1, last + 1).replace('.', ",");
+        let text = t!("Слой {} из {} · {} мм", m.layer + 1, last + 1, dec(z, 2));
         self.notice(&text);
         self.render()?;
         Ok(true)
@@ -323,8 +325,8 @@ impl App {
             m.marks.clear();
         }
         let text = match m.plate {
-            Some(i) => format!("{} из {n}", m.mesh.plates[i].name),
-            None => format!("Все столы ({n})"),
+            Some(i) => t!("{} из {}", m.mesh.plates[i].name, n),
+            None => t!("Все столы ({})", n),
         };
         self.notice(&text);
         self.render()?;
@@ -368,9 +370,9 @@ impl App {
         m.wire = !m.wire;
         let on = m.wire;
         self.notice(if on {
-            "Каркас"
+            tr("Каркас")
         } else {
-            "Каркас скрыт"
+            tr("Каркас скрыт")
         });
         self.render()
     }
@@ -426,8 +428,8 @@ impl App {
         m.tool = (m.tool != Some(tool)).then_some(tool);
         m.marks.clear();
         match m.tool {
-            Some(Tool::Measure) => self.notice("Линейка: щёлкните две точки на модели"),
-            Some(Tool::LayFlat) => self.notice("Щёлкните грань, которая ляжет на стол"),
+            Some(Tool::Measure) => self.notice(tr("Линейка: щёлкните две точки на модели")),
+            Some(Tool::LayFlat) => self.notice(tr("Щёлкните грань, которая ляжет на стол")),
             None => self.notice = None,
         }
         self.render()
@@ -475,7 +477,7 @@ impl App {
                     .push([o[0] + d[0] * t, o[1] + d[1] * t, o[2] + d[2] * t]);
                 match m.marks[..] {
                     [a, b] => ruler_text(a, b),
-                    _ => "Щёлкните вторую точку".to_string(),
+                    _ => tr("Щёлкните вторую точку").to_string(),
                 }
             }
             _ => {
@@ -492,7 +494,7 @@ impl App {
                 m.cam = Orbit::fit(&m.view);
                 m.tool = None;
                 m.section = None;
-                "Модель лежит выбранной гранью на столе".to_string()
+                tr("Модель лежит выбранной гранью на столе").to_string()
             }
         };
         self.notice(&text);
@@ -551,8 +553,8 @@ impl App {
 fn section_text(m: &ModelState) -> String {
     let (lo, hi) = (m.view.min[1], m.view.max[1]);
     match m.section {
-        Some(h) => format!("Разрез: {:.1} из {:.1} мм", h - lo, hi - lo).replace('.', ","),
-        None => "Разрез выключен".to_string(),
+        Some(h) => t!("Разрез: {} из {} мм", dec(h - lo, 1), dec(hi - lo, 1)),
+        None => tr("Разрез выключен").to_string(),
     }
 }
 
@@ -561,11 +563,11 @@ fn section_text(m: &ModelState) -> String {
 fn ruler_text(a: [f32; 3], b: [f32; 3]) -> String {
     let d = model::sub(b, a);
     let len = (d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).sqrt();
-    format!(
-        "{len:.2} мм  ·  X {:.2}  Y {:.2}  Z {:.2}",
-        d[0].abs(),
-        d[2].abs(),
-        d[1].abs()
+    t!(
+        "{} мм  ·  X {}  Y {}  Z {}",
+        dec(len, 2),
+        dec(d[0].abs(), 2),
+        dec(d[2].abs(), 2),
+        dec(d[1].abs(), 2)
     )
-    .replace('.', ",")
 }

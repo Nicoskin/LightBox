@@ -5,6 +5,8 @@ use anyhow::Result;
 use windows::Win32::UI::WindowsAndMessaging::{KillTimer, SetTimer};
 
 use super::{App, Mode, SLIDE_TIMER};
+use crate::i18n::tr;
+use crate::t;
 
 impl App {
     pub(super) fn toggle_slideshow(&mut self) -> Result<()> {
@@ -13,7 +15,7 @@ impl App {
             return self.render();
         }
         if self.files.len() < 2 || self.preview() {
-            self.notice("Для слайд-шоу нужна папка с несколькими фото");
+            self.notice(tr("Для слайд-шоу нужна папка с несколькими фото"));
             return self.render();
         }
         self.slideshow = true;
@@ -23,7 +25,7 @@ impl App {
         let secs = u32::from(self.settings.slideshow_secs.max(1));
         // SAFETY: own window; a periodic timer until killed.
         unsafe { SetTimer(Some(self.hwnd), SLIDE_TIMER, secs * 1000, None) };
-        self.notice(&format!("Слайд-шоу · {secs} с · Esc — стоп"));
+        self.notice(&t!("Слайд-шоу · {} с · Esc — стоп", secs));
         self.render()
     }
 
@@ -34,7 +36,7 @@ impl App {
             unsafe {
                 let _ = KillTimer(Some(self.hwnd), SLIDE_TIMER);
             }
-            self.notice("Слайд-шоу остановлено");
+            self.notice(tr("Слайд-шоу остановлено"));
         }
     }
 

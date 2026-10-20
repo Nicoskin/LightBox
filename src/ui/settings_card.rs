@@ -2,6 +2,7 @@
 //! the viewer, with the version in the footer. Pure layout / hit-testing /
 //! applying; drawing is in the overlay.
 
+use crate::i18n::tr;
 use crate::keymap::{Command, SLOTS};
 use crate::settings::{ImperfectJpeg, OpenMode, SaveMode, Settings, ThumbSize, Wheel};
 use crate::view::Rect;
@@ -35,6 +36,7 @@ pub enum Choice {
     /// Photos decoded ahead.
     Preload(u8),
     MapTiles(bool),
+    Language(crate::i18n::Language),
 }
 
 /// Settings pages.
@@ -60,11 +62,11 @@ impl Tab {
 
     pub fn label(self) -> &'static str {
         match self {
-            Tab::View => "Просмотр",
-            Tab::Interface => "Интерфейс",
-            Tab::Files => "Файлы",
-            Tab::System => "Система",
-            Tab::Keys => "Клавиши",
+            Tab::View => tr("Просмотр"),
+            Tab::Interface => tr("Интерфейс"),
+            Tab::Files => tr("Файлы"),
+            Tab::System => tr("Система"),
+            Tab::Keys => tr("Клавиши"),
         }
     }
 }
@@ -100,99 +102,119 @@ fn all_rows(tab: Tab) -> Vec<Row> {
     match tab {
         Tab::View => vec![
             row(
-                "Открывать фото",
+                tr("Открывать фото"),
                 vec![
-                    (Open(OpenMode::Fullscreen), "Во весь экран"),
-                    (Open(OpenMode::Windowed), "В окне"),
+                    (Open(OpenMode::Fullscreen), tr("Во весь экран")),
+                    (Open(OpenMode::Windowed), tr("В окне")),
                 ],
             ),
             row(
-                "Колесо мыши",
+                tr("Колесо мыши"),
                 vec![
-                    (Wheel(crate::settings::Wheel::Zoom), "Масштаб"),
-                    (Wheel(crate::settings::Wheel::Browse), "Листание"),
+                    (Wheel(crate::settings::Wheel::Zoom), tr("Масштаб")),
+                    (Wheel(crate::settings::Wheel::Browse), tr("Листание")),
                 ],
             ),
             row(
-                "Затемнение фона",
+                tr("Затемнение фона"),
                 vec![(Dim(60), "60 %"), (Dim(80), "80 %"), (Dim(92), "92 %")],
             ),
             row(
-                "Карты по GPS",
-                vec![(MapTiles(true), "Загружать"), (MapTiles(false), "Нет")],
+                tr("Карты по GPS"),
+                vec![
+                    (MapTiles(true), tr("Загружать")),
+                    (MapTiles(false), tr("Нет")),
+                ],
             ),
             row(
-                "Слайд-шоу (S, F5)",
+                tr("Слайд-шоу (S, F5)"),
                 vec![
-                    (Slideshow(2), "2 с"),
-                    (Slideshow(4), "4 с"),
-                    (Slideshow(8), "8 с"),
+                    (Slideshow(2), tr("2 с")),
+                    (Slideshow(4), tr("4 с")),
+                    (Slideshow(8), tr("8 с")),
                 ],
             ),
         ],
         Tab::Interface => vec![
             row(
-                "Лента миниатюр",
+                tr("Язык"),
                 vec![
-                    (Filmstrip(true), "Показывать"),
-                    (Filmstrip(false), "Скрыть"),
+                    (Language(crate::i18n::Language::Auto), tr("Как в Windows")),
+                    (Language(crate::i18n::Language::Ru), "Русский"),
+                    (Language(crate::i18n::Language::En), "English"),
                 ],
             ),
             row(
-                "Размер миниатюр",
+                tr("Лента миниатюр"),
                 vec![
-                    (Thumbs(ThumbSize::Tiny), "Крошечные"),
-                    (Thumbs(ThumbSize::Small), "Мелкие"),
-                    (Thumbs(ThumbSize::Medium), "Средние"),
-                    (Thumbs(ThumbSize::Large), "Крупные"),
+                    (Filmstrip(true), tr("Показывать")),
+                    (Filmstrip(false), tr("Скрыть")),
                 ],
             ),
             row(
-                "Анимации интерфейса",
-                vec![(Animations(true), "Вкл"), (Animations(false), "Выкл")],
+                tr("Размер миниатюр"),
+                vec![
+                    (Thumbs(ThumbSize::Tiny), tr("Крошечные")),
+                    (Thumbs(ThumbSize::Small), tr("Мелкие")),
+                    (Thumbs(ThumbSize::Medium), tr("Средние")),
+                    (Thumbs(ThumbSize::Large), tr("Крупные")),
+                ],
             ),
             row(
-                "Смена фото",
+                tr("Анимации интерфейса"),
                 vec![
-                    (TurnAnimation(true), "Плавно"),
-                    (TurnAnimation(false), "Сразу"),
+                    (Animations(true), tr("Вкл")),
+                    (Animations(false), tr("Выкл")),
+                ],
+            ),
+            row(
+                tr("Смена фото"),
+                vec![
+                    (TurnAnimation(true), tr("Плавно")),
+                    (TurnAnimation(false), tr("Сразу")),
                 ],
             ),
         ],
         Tab::Files => vec![
             row(
-                "Сохранять поворот",
+                tr("Сохранять поворот"),
                 vec![
-                    (Save(SaveMode::Auto), "Сразу"),
-                    (Save(SaveMode::Ask), "Спрашивать"),
-                    (Save(SaveMode::Manual), "Вручную"),
+                    (Save(SaveMode::Auto), tr("Сразу")),
+                    (Save(SaveMode::Ask), tr("Спрашивать")),
+                    (Save(SaveMode::Manual), tr("Вручную")),
                 ],
             ),
             row(
-                "Дата изменения файла",
+                tr("Дата изменения файла"),
                 vec![
-                    (KeepDates(true), "Сохранять"),
-                    (KeepDates(false), "Обновлять"),
+                    (KeepDates(true), tr("Сохранять")),
+                    (KeepDates(false), tr("Обновлять")),
                 ],
             ),
             row(
-                "JPEG не кратный 16 px",
+                tr("JPEG не кратный 16 px"),
                 vec![
-                    (Imperfect(None), "Спрашивать"),
-                    (Imperfect(Some(ImperfectJpeg::Trim)), "Обрезать"),
-                    (Imperfect(Some(ImperfectJpeg::ExifOnly)), "Только тег"),
+                    (Imperfect(None), tr("Спрашивать")),
+                    (Imperfect(Some(ImperfectJpeg::Trim)), tr("Обрезать")),
+                    (Imperfect(Some(ImperfectJpeg::ExifOnly)), tr("Только тег")),
                 ],
             ),
             row(
-                "Подтверждать удаление",
-                vec![(ConfirmDelete(true), "Да"), (ConfirmDelete(false), "Нет")],
+                tr("Подтверждать удаление"),
+                vec![
+                    (ConfirmDelete(true), tr("Да")),
+                    (ConfirmDelete(false), tr("Нет")),
+                ],
             ),
             row(
-                "Редактор (E)",
-                vec![(Editor(false), "Системный"), (Editor(true), "Выбрать…")],
+                tr("Редактор (E)"),
+                vec![
+                    (Editor(false), tr("Системный")),
+                    (Editor(true), tr("Выбрать…")),
+                ],
             ),
             row(
-                "Качество JPEG",
+                tr("Качество JPEG"),
                 vec![
                     (JpegQuality(85), "85"),
                     (JpegQuality(92), "92"),
@@ -202,42 +224,48 @@ fn all_rows(tab: Tab) -> Vec<Row> {
         ],
         Tab::System => vec![
             row(
-                "После закрытия",
+                tr("После закрытия"),
                 vec![
-                    (Resident(false), "Выходить"),
-                    (Resident(true), "Остаться в трее"),
+                    (Resident(false), tr("Выходить")),
+                    (Resident(true), tr("Остаться в трее")),
                 ],
             ),
             row(
-                "Пробел в проводнике",
-                vec![(QuickLook(true), "Просмотр"), (QuickLook(false), "Выкл")],
-            ),
-            row(
-                "Запуск с Windows",
-                vec![(Autostart(true), "В трее"), (Autostart(false), "Нет")],
-            ),
-            row(
-                "Обновления",
+                tr("Пробел в проводнике"),
                 vec![
-                    (AutoUpdate(true), "Раз в день"),
-                    (AutoUpdate(false), "Вручную"),
-                    (CheckUpdates, "Проверить"),
+                    (QuickLook(true), tr("Просмотр")),
+                    (QuickLook(false), tr("Выкл")),
                 ],
             ),
             row(
-                "Кэш изображений",
+                tr("Запуск с Windows"),
                 vec![
-                    (Cache(512), "0,5 ГБ"),
-                    (Cache(1536), "1,5 ГБ"),
-                    (Cache(4096), "4 ГБ"),
+                    (Autostart(true), tr("В трее")),
+                    (Autostart(false), tr("Нет")),
                 ],
             ),
             row(
-                "Предзагрузка",
+                tr("Обновления"),
                 vec![
-                    (Preload(1), "1 фото"),
-                    (Preload(3), "3 фото"),
-                    (Preload(6), "6 фото"),
+                    (AutoUpdate(true), tr("Раз в день")),
+                    (AutoUpdate(false), tr("Вручную")),
+                    (CheckUpdates, tr("Проверить")),
+                ],
+            ),
+            row(
+                tr("Кэш изображений"),
+                vec![
+                    (Cache(512), tr("0,5 ГБ")),
+                    (Cache(1536), tr("1,5 ГБ")),
+                    (Cache(4096), tr("4 ГБ")),
+                ],
+            ),
+            row(
+                tr("Предзагрузка"),
+                vec![
+                    (Preload(1), tr("1 фото")),
+                    (Preload(3), tr("3 фото")),
+                    (Preload(6), tr("6 фото")),
                 ],
             ),
         ],
@@ -250,7 +278,7 @@ pub fn version_text() -> String {
     let build = env!("LIGHTBOX_BUILD");
     let mut s = format!("{} {}", crate::APP_NAME, crate::update::VERSION);
     if !build.is_empty() {
-        s.push_str(" · сборка ");
+        s.push_str(tr(" · сборка "));
         s.push_str(build);
     }
     s
@@ -281,6 +309,7 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         Choice::Cache(v) => s.cache_mb == v,
         Choice::Preload(v) => s.preload == v,
         Choice::MapTiles(v) => s.map_tiles == v,
+        Choice::Language(v) => s.language == v,
     }
 }
 
@@ -313,6 +342,7 @@ pub fn apply(s: &mut Settings, c: Choice) {
         Choice::Cache(v) => s.cache_mb = v,
         Choice::Preload(v) => s.preload = v,
         Choice::MapTiles(v) => s.map_tiles = v,
+        Choice::Language(v) => s.language = v,
     }
 }
 

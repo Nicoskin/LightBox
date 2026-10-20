@@ -1,5 +1,6 @@
 //! Info panel (I) and histogram (H) layouts: pure geometry and hit-testing.
 
+use crate::i18n::tr;
 use crate::view::Rect;
 
 /// Sizes in 96-DPI pixels.
@@ -31,10 +32,10 @@ pub enum InfoButton {
 impl InfoButton {
     pub fn label(self) -> &'static str {
         match self {
-            InfoButton::Prompt => "Копировать промпт",
+            InfoButton::Prompt => tr("Копировать промпт"),
             InfoButton::Workflow => "Workflow",
-            InfoButton::All => "Всё",
-            InfoButton::Map => "Открыть на карте",
+            InfoButton::All => tr("Всё"),
+            InfoButton::Map => tr("Открыть на карте"),
         }
     }
 }

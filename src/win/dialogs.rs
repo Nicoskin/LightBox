@@ -102,7 +102,7 @@ pub fn save_as(
             .ok()?;
         let stem = Path::new(name)
             .file_stem()
-            .map(|s| format!("{} (копия)", s.to_string_lossy()))
+            .map(|s| crate::t!("{} (копия)", s.to_string_lossy()))
             .unwrap_or_default();
         let _ = dlg.SetFileName(&HSTRING::from(stem));
         if let Ok(item) = SHCreateItemFromParsingName::<_, _, IShellItem>(
@@ -112,7 +112,7 @@ pub fn save_as(
             let _ = dlg.SetFolder(&item);
         }
         if let Ok(c) = dlg.cast::<IFileDialogCustomize>() {
-            let _ = c.StartVisualGroup(100, w!("Качество JPEG:"));
+            let _ = c.StartVisualGroup(100, &HSTRING::from(crate::i18n::tr("Качество JPEG:")));
             let _ = c.AddComboBox(QUALITY_COMBO);
             for (i, q) in QUALITIES.iter().enumerate() {
                 let _ = c.AddControlItem(QUALITY_COMBO, i as u32, &HSTRING::from(q.to_string()));

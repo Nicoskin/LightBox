@@ -5,6 +5,7 @@
 
 use std::path::PathBuf;
 
+use crate::i18n::tr;
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, RECT, WPARAM};
 use windows::Win32::Graphics::Dwm::{DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
 use windows::Win32::Graphics::Gdi::{
@@ -255,7 +256,7 @@ pub fn show(owner: HWND, title: &str, note: &str, fields: &mut [Field], ok: &str
         );
         child(
             w!("BUTTON"),
-            "Отмена",
+            tr("Отмена"),
             WS_TABSTOP.0 | BS_PUSHBUTTON as u32,
             (client_w - pad - bw, by, bw, px(30)),
             ID_CANCEL,
@@ -335,7 +336,7 @@ extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM)
                             .and_then(|_| st.controls.get(i).copied());
                         if let Some(ctl) = target
                             && let Some(p) =
-                                super::dialogs::open(Some(hwnd), "Папка", true, None, None)
+                                super::dialogs::open(Some(hwnd), tr("Папка"), true, None, None)
                         {
                             let _ = SetWindowTextW(ctl, &HSTRING::from(p.as_os_str()));
                         }

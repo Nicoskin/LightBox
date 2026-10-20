@@ -6,6 +6,7 @@
 
 use std::path::PathBuf;
 
+use crate::i18n::tr;
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -72,10 +73,10 @@ impl AlphaBg {
 
     pub fn label(self) -> &'static str {
         match self {
-            AlphaBg::Checker => "Шахматка",
-            AlphaBg::White => "Белый",
-            AlphaBg::Gray => "Серый",
-            AlphaBg::Black => "Чёрный",
+            AlphaBg::Checker => tr("Шахматка"),
+            AlphaBg::White => tr("Белый"),
+            AlphaBg::Gray => tr("Серый"),
+            AlphaBg::Black => tr("Чёрный"),
         }
     }
 
@@ -179,6 +180,8 @@ pub struct Settings {
     pub preload: u8,
     /// Download OpenStreetMap tiles for the map of GPS positions.
     pub map_tiles: bool,
+    /// Interface language.
+    pub language: crate::i18n::Language,
     /// F1..F9 folders (tables follow the plain keys).
     pub quick_folders: Vec<QuickFolder>,
     /// Reassigned shortcuts (see `keymap`): action → keys.
@@ -214,6 +217,7 @@ impl Default for Settings {
             cache_mb: 1536,
             preload: 3,
             map_tiles: true,
+            language: crate::i18n::Language::Auto,
             quick_folders: Vec::new(),
             keys: Default::default(),
         }

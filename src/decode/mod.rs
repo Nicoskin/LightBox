@@ -26,6 +26,7 @@ mod wic;
 use std::path::Path;
 
 use crate::color;
+use crate::i18n::tr;
 use crate::orientation::Orientation;
 
 /// Largest texture side supported by D3D11 feature level 11.
@@ -78,20 +79,52 @@ pub fn is_supported(path: &Path) -> bool {
     all_extensions().any(|e| e == ext)
 }
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug)]
 pub enum DecodeError {
-    #[error("не удалось прочитать файл: {0}")]
-    Io(#[from] std::io::Error),
-    #[error("формат не поддерживается или файл повреждён")]
+    Io(std::io::Error),
     Unsupported,
-    #[error("JPEG: {0}")]
-    Jpeg(#[from] turbojpeg::Error),
-    #[error("PNG: {0}")]
+    Jpeg(turbojpeg::Error),
     Png(String),
-    #[error("{0}")]
     Other(String),
-    #[error("изображение слишком большое ({0}×{1})")]
     TooLarge(u32, u32),
+}
+
+// The messages are shown to the user, in the interface language.
+impl std::fmt::Display for DecodeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Io(e) => f.write_str(&crate::t!("не удалось прочитать файл: {}", e)),
+            Self::Unsupported => f.write_str(tr("формат не поддерживается или файл повреждён")),
+            Self::Jpeg(e) => write!(f, "JPEG: {e}"),
+            Self::Png(e) => write!(f, "PNG: {e}"),
+            Self::Other(e) => f.write_str(e),
+            Self::TooLarge(w, h) => {
+                f.write_str(&crate::t!("изображение слишком большое ({}×{})", w, h))
+            }
+        }
+    }
+}
+
+impl std::error::Error for DecodeError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Io(e) => Some(e),
+            Self::Jpeg(e) => Some(e),
+            _ => None,
+        }
+    }
+}
+
+impl From<std::io::Error> for DecodeError {
+    fn from(e: std::io::Error) -> Self {
+        Self::Io(e)
+    }
+}
+
+impl From<turbojpeg::Error> for DecodeError {
+    fn from(e: turbojpeg::Error) -> Self {
+        Self::Jpeg(e)
+    }
 }
 
 impl DecodeError {
@@ -332,7 +365,7 @@ pub fn decode_data(
         img.info.format = "PDF".into();
     } else if text::is_text(path) {
         let head = &data[..data.len().min(64 << 10)];
-        img.info.format = format!("Текст ({})", text::decode_bytes(head).1);
+        img.info.format = crate::t!("Текст ({})", text::decode_bytes(head).1);
     }
     Ok(img)
 }
@@ -426,7 +459,7 @@ fn format_name(f: Format) -> String {
         Format::Heic => "HEIC".into(),
         Format::Svg => "SVG".into(),
         Format::Psd => "PSD".into(),
-        Format::Raw => "RAW (встроенное превью)".into(),
+        Format::Raw => tr("RAW (встроенное превью)").into(),
         Format::Image(i) => i
             .extensions_str()
             .first()

@@ -55,15 +55,30 @@ fn main() {
         }
     }
     if let Err(e) = run(update, open) {
-        let text = HSTRING::from(format!("Не удалось установить {APP}:\n{e}"));
+        let text = HSTRING::from(format!(
+            "{} {APP}:\n{e}",
+            l("Не удалось установить", "Could not install")
+        ));
         // SAFETY: plain message box.
         unsafe { MessageBoxW(None, &text, &HSTRING::from(APP), MB_OK | MB_ICONERROR) };
         std::process::exit(1);
     }
 }
 
+/// Russian for a Russian Windows, English otherwise (as in the viewer).
+fn ru() -> bool {
+    // SAFETY: no preconditions.
+    let lang = unsafe { windows::Win32::Globalization::GetUserDefaultUILanguage() };
+    lang & 0x3ff == 0x19 // LANG_RUSSIAN
+}
+
+/// The text in the installer's language.
+fn l(ru_text: &'static str, en: &'static str) -> &'static str {
+    if ru() { ru_text } else { en }
+}
+
 fn run(update: bool, open: Option<PathBuf>) -> Result<(), String> {
-    let dir = install_dir().ok_or("нет папки LOCALAPPDATA")?;
+    let dir = install_dir().ok_or(l("нет папки LOCALAPPDATA", "no LOCALAPPDATA folder"))?;
     let exe = dir.join("lightbox.exe");
     let installed = reg_get(&uninstall_key(), "DisplayVersion");
 
@@ -89,7 +104,7 @@ fn run(update: bool, open: Option<PathBuf>) -> Result<(), String> {
     }
     std::fs::write(&exe, PAYLOAD).map_err(|e| format!("{}: {e}", exe.display()))?;
 
-    shortcut(&exe).map_err(|e| format!("ярлык: {e}"))?;
+    shortcut(&exe).map_err(|e| format!("{}: {e}", l("ярлык", "shortcut")))?;
     uninstall_entry(&dir, &exe)?;
     // File types for "Open with" and Default Apps (also refreshes the path).
     let _ = Command::new(&exe).arg("--register").status();
@@ -144,25 +159,41 @@ fn tray_enabled() -> bool {
 fn ask(installed: Option<&str>) -> Option<(bool, bool)> {
     let (instruction, content, buttons): (String, String, Vec<(i32, &str)>) = match installed {
         Some(old) => (
-            format!("Обновить {APP} {old} → {VERSION}"),
-            "Настройки, ассоциации файлов и режим в трее сохранятся.".into(),
-            vec![(ID_UPDATE, "Обновить")],
+            format!("{} {APP} {old} → {VERSION}", l("Обновить", "Update")),
+            l(
+                "Настройки, ассоциации файлов и режим в трее сохранятся.",
+                "Settings, file associations and the tray mode are kept.",
+            )
+            .into(),
+            vec![(ID_UPDATE, l("Обновить", "Update"))],
         ),
         None => (
-            format!("Установить {APP} {VERSION}"),
-            "Быстрый просмотрщик изображений. Устанавливается только для вас, \
-             права администратора не нужны."
-                .into(),
+            format!("{} {APP} {VERSION}", l("Установить", "Install")),
+            l(
+                "Быстрый просмотрщик изображений. Устанавливается только для вас, \
+                 права администратора не нужны.",
+                "A fast image viewer. Installed for you only; no administrator \
+                 rights needed.",
+            )
+            .into(),
             vec![
                 (
                     ID_ALL,
-                    "Установить и открывать им все изображения\n\
-                     Windows покажет страницу «Приложения по умолчанию» — \
-                     подтвердите выбор одним нажатием",
+                    l(
+                        "Установить и открывать им все изображения\n\
+                         Windows покажет страницу «Приложения по умолчанию» — \
+                         подтвердите выбор одним нажатием",
+                        "Install and open all images with it\n\
+                         Windows shows the Default apps page — confirm the \
+                         choice with one click",
+                    ),
                 ),
                 (
                     ID_ONLY,
-                    "Только установить\nПрограмма появится в «Открыть с помощью»",
+                    l(
+                        "Только установить\nПрограмма появится в «Открыть с помощью»",
+                        "Install only\nIt appears in “Open with”",
+                    ),
                 ),
             ],
         ),
@@ -178,14 +209,16 @@ fn ask(installed: Option<&str>) -> Option<(bool, bool)> {
             pszButtonText: PCWSTR(l.as_ptr()),
         })
         .collect();
-    let verify = HSTRING::from(
+    let verify = HSTRING::from(l(
         "Запускать при входе в Windows (в трее: мгновенное открытие и просмотр по пробелу в проводнике)",
-    );
+        "Start when Windows starts (in the tray: instant opening and Space preview in Explorer)",
+    ));
+    let title = HSTRING::from(l("Установка Lightbox", "Lightbox Setup"));
     let config = TASKDIALOGCONFIG {
         cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
         dwFlags: TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION,
         dwCommonButtons: TDCBF_CANCEL_BUTTON,
-        pszWindowTitle: w!("Установка Lightbox"),
+        pszWindowTitle: PCWSTR(title.as_ptr()),
         pszMainInstruction: PCWSTR(instruction.as_ptr()),
         pszContent: PCWSTR(content.as_ptr()),
         cButtons: items.len() as u32,
@@ -211,13 +244,17 @@ fn ask(installed: Option<&str>) -> Option<(bool, bool)> {
 }
 
 fn done(updated: bool) {
-    let text = HSTRING::from(if updated {
-        format!("{APP} обновлён до версии {VERSION}.")
-    } else {
-        format!(
+    let text = HSTRING::from(match (updated, ru()) {
+        (true, true) => format!("{APP} обновлён до версии {VERSION}."),
+        (true, false) => format!("{APP} has been updated to {VERSION}."),
+        (false, true) => format!(
             "{APP} {VERSION} установлен.\n\nОн есть в меню «Пуск» и в «Открыть с помощью». \
              Удалить его можно в «Установленных приложениях»."
-        )
+        ),
+        (false, false) => format!(
+            "{APP} {VERSION} is installed.\n\nIt is in the Start menu and in “Open with”. \
+             You can remove it in Installed apps."
+        ),
     });
     // SAFETY: plain message box.
     unsafe { MessageBoxW(None, &text, &HSTRING::from(APP), MB_OK) };
@@ -305,7 +342,10 @@ fn shortcut(exe: &Path) -> windows::core::Result<()> {
         let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         let sl: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_INPROC_SERVER)?;
         sl.SetPath(&HSTRING::from(exe.as_os_str()))?;
-        sl.SetDescription(w!("Быстрый просмотрщик изображений"))?;
+        sl.SetDescription(&HSTRING::from(l(
+            "Быстрый просмотрщик изображений",
+            "Fast image viewer",
+        )))?;
         sl.SetIconLocation(&HSTRING::from(exe.as_os_str()), 0)?;
         let pf: IPersistFile = sl.cast()?;
         pf.Save(&HSTRING::from(link.as_os_str()), true)?;

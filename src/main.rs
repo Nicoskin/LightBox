@@ -19,6 +19,7 @@ mod edit;
 mod encode;
 mod fileops;
 mod gfx;
+mod i18n;
 mod inspect;
 mod install;
 mod ipc;
@@ -143,6 +144,7 @@ fn main() {
     let args = Args::parse();
     bench::init(args.bench);
     init_logging();
+    i18n::init(settings::Settings::load().language);
 
     let exe = std::env::current_exe().unwrap_or_default();
     let result = match args.command {

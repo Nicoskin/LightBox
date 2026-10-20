@@ -396,7 +396,7 @@ impl App {
                 Ok(_) => {}
                 Err(e) => {
                     tracing::warn!("page render: {e}");
-                    self.notice(&format!("Страница {} не отрисовалась", done.page + 1));
+                    self.notice(&crate::t!("Страница {} не отрисовалась", done.page + 1));
                     self.render()?;
                 }
             }

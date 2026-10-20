@@ -33,6 +33,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use windows::core::{Interface as _, w};
 
 use super::{App, Mode, WM_APP_OPEN, WM_APP_QUICKLOOK, WM_APP_TRAY, post};
+use crate::i18n::tr;
 use crate::settings::OpenMode;
 use crate::win::monitor::Monitor;
 use crate::win::{dialogs, menu, window};
@@ -265,9 +266,9 @@ impl App {
             }
             WM_RBUTTONUP => {
                 let items = [
-                    menu::Item::Command(TRAY_OPEN, "Открыть файл…".into(), true),
+                    menu::Item::Command(TRAY_OPEN, tr("Открыть файл…").into(), true),
                     menu::Item::Separator,
-                    menu::Item::Command(TRAY_EXIT, "Выход".into(), true),
+                    menu::Item::Command(TRAY_EXIT, tr("Выход").into(), true),
                 ];
                 match menu::popup(self.hwnd, &items, window::cursor_pos()) {
                     Some(TRAY_OPEN) => self.open_dialog(),
@@ -290,9 +291,9 @@ impl App {
         let start = self.current.parent().map(Path::to_path_buf);
         match dialogs::open(
             None,
-            "Открыть файл",
+            tr("Открыть файл"),
             false,
-            Some(("Изображения и 3D-модели", &spec)),
+            Some((tr("Изображения и 3D-модели"), &spec)),
             start.as_deref(),
         ) {
             Some(p) => self.open_external(&p),

@@ -32,7 +32,7 @@ fn tile(x: u32, y: u32) -> Result<Vec<u8>> {
             let url = format!("https://tile.openstreetmap.org/{ZOOM}/{x}/{y}.png");
             let (status, data) = crate::update::http_get(&url)?;
             if status != 200 {
-                bail!("сервер карт ответил {status}");
+                bail!(crate::t!("сервер карт ответил {}", status));
             }
             if let Some(f) = &file {
                 if let Some(d) = f.parent() {

@@ -7,6 +7,7 @@ use std::path::Path;
 use serde_json::Value;
 
 use crate::decode::{DecodedImage, Pixels};
+use crate::i18n::tr;
 
 /// Pixels sampled at most (larger images are subsampled evenly).
 const HISTOGRAM_SAMPLES: usize = 500_000;
@@ -165,15 +166,15 @@ fn exif_rows(e: &exif::Exif) -> Vec<(&'static str, String)> {
         (make, model) => make.or(model),
     };
     if let Some(c) = camera.filter(|c| !c.is_empty()) {
-        rows.push(("Камера", c));
+        rows.push((tr("Камера"), c));
     }
     for (label, tag) in [
-        ("Объектив", Tag::LensModel),
-        ("Выдержка", Tag::ExposureTime),
-        ("Диафрагма", Tag::FNumber),
+        (tr("Объектив"), Tag::LensModel),
+        (tr("Выдержка"), Tag::ExposureTime),
+        (tr("Диафрагма"), Tag::FNumber),
         ("ISO", Tag::PhotographicSensitivity),
-        ("Фокусное", Tag::FocalLength),
-        ("Снято", Tag::DateTimeOriginal),
+        (tr("Фокусное"), Tag::FocalLength),
+        (tr("Снято"), Tag::DateTimeOriginal),
     ] {
         if let Some(v) = text(tag).filter(|v| !v.is_empty()) {
             rows.push((label, v));
@@ -487,13 +488,13 @@ fn scalar(v: &Value) -> Option<String> {
 pub fn human_size(bytes: u64) -> String {
     let b = bytes as f64;
     if b >= 1024.0 * 1024.0 * 1024.0 {
-        format!("{:.2} ГБ", b / 1024.0 / 1024.0 / 1024.0)
+        crate::t!("{} ГБ", format!("{:.2}", b / 1024.0 / 1024.0 / 1024.0))
     } else if b >= 1024.0 * 1024.0 {
-        format!("{:.1} МБ", b / 1024.0 / 1024.0)
+        crate::t!("{} МБ", format!("{:.1}", b / 1024.0 / 1024.0))
     } else if b >= 1024.0 {
-        format!("{:.0} КБ", b / 1024.0)
+        crate::t!("{} КБ", format!("{:.0}", b / 1024.0))
     } else {
-        format!("{bytes} Б")
+        crate::t!("{} Б", bytes)
     }
 }
 

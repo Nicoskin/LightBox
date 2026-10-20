@@ -14,6 +14,7 @@ use windows::Win32::System::Com::{COINIT_MULTITHREADED, CoInitializeEx};
 use windows::core::HSTRING;
 
 use super::{DecodeError, RawImage, SizeHint};
+use crate::i18n::tr;
 
 /// Longest side of a page raster.
 const MAX_SIDE: f64 = 8192.0;
@@ -43,7 +44,7 @@ impl Pdf {
             .and_then(|op| op.join())
             .map_err(|e| {
                 if e.code().0 as u32 == 0x8007_052B {
-                    DecodeError::Other("PDF защищён паролем".into())
+                    DecodeError::Other(tr("PDF защищён паролем").into())
                 } else {
                     err(e)
                 }
@@ -136,7 +137,7 @@ pub fn decode(path: &Path, hint: Option<SizeHint>) -> Result<RawImage, DecodeErr
     let pdf = Pdf::open(path)?;
     let pages = pdf.pages();
     if pages == 0 {
-        return Err(DecodeError::Other("в PDF нет страниц".into()));
+        return Err(DecodeError::Other(tr("в PDF нет страниц").into()));
     }
     let raster = pdf.raster_size(0, hint)?;
     let region = [0.0, 0.0, f64::from(raster.0), f64::from(raster.1)];

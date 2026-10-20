@@ -19,6 +19,7 @@ use windows::core::HSTRING;
 
 use crate::decode;
 use crate::encode::{self, EncodeError};
+use crate::i18n::tr;
 use crate::orientation::Orientation;
 use crate::settings::ImperfectJpeg;
 
@@ -175,9 +176,9 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
                 edit,
                 undo,
                 note: if crop.is_some() {
-                    "Обрезка сохранена · Ctrl+Z — вернуть"
+                    tr("Обрезка сохранена · Ctrl+Z — вернуть")
                 } else {
-                    "Поворот сохранён"
+                    tr("Поворот сохранён")
                 },
             },
             Ok(None) => Outcome::NeedsJpegChoice {
@@ -224,7 +225,7 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
                 path,
                 edit,
                 undo,
-                note: "Коррекция сохранена · Ctrl+Z — вернуть",
+                note: tr("Коррекция сохранена · Ctrl+Z — вернуть"),
             },
             Err(e) => Outcome::Failed {
                 path,
