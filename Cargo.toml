@@ -34,6 +34,7 @@ png = "0.18.1"
 gif = "0.14.2"
 kamadak-exif = "0.6.1"
 windows-numerics = "0.3.1"
+windows-core = "0.62.2"
 serde = { version = "1.0.229", features = ["derive"] }
 toml = "1.1.8"
 miniz_oxide = "0.8.9"
@@ -62,6 +63,7 @@ features = [
     "Win32_Graphics_Direct2D",
     "Win32_Graphics_Direct2D_Common",
     "Win32_Graphics_Direct3D",
+    "Win32_Graphics_Direct3D10",
     "Win32_Graphics_Direct3D11",
     "Win32_Graphics_DirectComposition",
     "Win32_Graphics_DirectWrite",
@@ -70,6 +72,8 @@ features = [
     "Win32_Graphics_Dxgi_Common",
     "Win32_Graphics_Gdi",
     "Win32_Graphics_Imaging",
+    "Win32_Media",
+    "Win32_Media_MediaFoundation",
     "Win32_Networking_WinHttp",
     "Win32_Security",
     "Win32_Security_Cryptography",

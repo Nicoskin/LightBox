@@ -33,6 +33,7 @@ mod rating;
 mod settings;
 mod ui;
 mod update;
+mod video;
 mod view;
 mod win;
 

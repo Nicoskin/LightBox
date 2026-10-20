@@ -64,6 +64,12 @@ impl App {
                 return Ok(Some(LRESULT(0)));
             }
         }
+        if matches!(msg, WM_LBUTTONDOWN | WM_LBUTTONUP)
+            && self.movie.is_some()
+            && self.video_input(msg, client_point(lparam))?
+        {
+            return Ok(Some(LRESULT(0)));
+        }
         if self.tone.is_some()
             && msg != WM_MOUSEWHEEL
             && self.tone_input(msg, wparam.0, client_point(lparam))?
@@ -284,6 +290,12 @@ impl App {
                 self.on_escape()?;
                 return Ok(Some(LRESULT(0)));
             }
+            // Shift+← / → seek a video.
+            0x25 | 0x27
+                if shift && !ctrl && self.video_seek_by(if vk == 0x25 { -5.0 } else { 5.0 })? =>
+            {
+                return Ok(Some(LRESULT(0)));
+            }
             // ↑ / ↓ turn document pages.
             0x26 | 0x28 if !ctrl && self.step_page(if vk == 0x26 { -1 } else { 1 })? => {
                 return Ok(Some(LRESULT(0)));
@@ -365,6 +377,8 @@ impl App {
             Command::ToggleMode => self.toggle_mode(),
             Command::RotateCw => self.rotate(Orientation::ROTATE_CW),
             Command::RotateCcw => self.rotate(Orientation::ROTATE_CCW),
+            // In a video M mutes.
+            Command::FlipH if self.video_mute()? => Ok(()),
             Command::FlipH => self.rotate(Orientation::FLIP_H),
             Command::FlipV => self.rotate(Orientation::FLIP_V),
             Command::TiltLeft => self.set_angle(tilt(self.angle, -1.0)),
@@ -380,6 +394,7 @@ impl App {
             Command::Slideshow => self.toggle_slideshow(),
             Command::Compare => self.toggle_compare(),
             Command::CompareLayout => self.toggle_compare_layout(),
+            Command::PlayPause if self.video_pause()? => Ok(()),
             Command::PlayPause => self.toggle_playback().map(drop),
             Command::FramePrev => self.step_frame(-1),
             Command::FrameNext => self.step_frame(1),

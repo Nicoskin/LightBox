@@ -70,6 +70,8 @@ pub struct Ui {
     pub crop: Option<CropView>,
     /// The adjustments card.
     pub adjust: Option<AdjustView>,
+    /// The video bar.
+    pub video: Option<VideoBarView>,
 }
 
 impl Ui {
@@ -89,6 +91,7 @@ impl Ui {
             && self.home.is_empty()
             && self.crop.is_none()
             && self.adjust.is_none()
+            && self.video.is_none()
     }
 }
 
@@ -311,6 +314,9 @@ impl Overlay {
             }
             if let Some(a) = &ui.adjust {
                 self.adjust_card(a, ui.scale);
+            }
+            if let Some(v) = &ui.video {
+                self.video_bar(v, ui.scale);
             }
             if let Some(caption) = &ui.caption {
                 self.caption(caption);
@@ -613,4 +619,16 @@ pub struct AdjustView {
     pub sliders: Vec<SliderView>,
     pub note: (Rect, String),
     pub buttons: Vec<SegmentView>,
+}
+
+/// The video bar: play / pause, the track with the position, the time.
+pub struct VideoBarView {
+    pub bar: Rect,
+    pub button: Rect,
+    pub playing: bool,
+    pub track: Rect,
+    /// Position, 0…1.
+    pub progress: f64,
+    pub time: String,
+    pub muted: bool,
 }

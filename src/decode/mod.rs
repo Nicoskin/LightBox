@@ -59,7 +59,11 @@ fn ext_of(path: &Path) -> String {
 
 /// Everything the viewer opens: image [`EXTENSIONS`] and 3D models.
 pub fn all_extensions() -> impl Iterator<Item = &'static str> {
-    EXTENSIONS.iter().chain(crate::model::EXTENSIONS).copied()
+    EXTENSIONS
+        .iter()
+        .chain(crate::model::EXTENSIONS)
+        .chain(crate::video::EXTENSIONS)
+        .copied()
 }
 
 /// Documents shown on Space (PDF, text): not part of folder browsing.

@@ -695,6 +695,7 @@ dependencies = [
  "tracing-subscriber",
  "turbojpeg",
  "windows",
+ "windows-core",
  "windows-numerics",
  "zune-core",
  "zune-jpeg",

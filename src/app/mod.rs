@@ -17,6 +17,7 @@ mod input;
 mod inspector;
 mod mode;
 mod model3d;
+mod movie;
 mod nav;
 mod organize;
 mod panel;
@@ -116,6 +117,8 @@ const ANIM_TIMER: usize = 5;
 const SLIDE_TIMER: usize = 6;
 /// Folder changes settled.
 const WATCH_TIMER: usize = 7;
+/// Video frames while playing.
+const VIDEO_TIMER: usize = 8;
 /// Filmstrip glide: time constant of the exponential approach, seconds.
 const STRIP_TAU: f64 = 0.06;
 /// Posted by the thumbnail thread.
@@ -148,6 +151,8 @@ const WM_APP_RATING: u32 = WM_APP + 16;
 const WM_APP_BATCH: u32 = WM_APP + 17;
 /// Posted by the map thread (info panel).
 const WM_APP_MAP: u32 = WM_APP + 18;
+/// Posted by the video engine (wParam: `video::Event` code).
+const WM_APP_VIDEO: u32 = WM_APP + 19;
 
 /// Result of the background hardware-device creation.
 pub type PendingGpu = Receiver<Result<Gpu>>;
@@ -365,6 +370,8 @@ pub struct App {
     crop: Option<crop::CropState>,
     /// The adjustments card, while open.
     tone: Option<tone::ToneState>,
+    /// The video being played.
+    movie: Option<movie::Movie>,
 
     // Input.
     drag: Option<Drag>,
@@ -491,6 +498,7 @@ impl App {
             doc: None,
             crop: None,
             tone: None,
+            movie: None,
             drag: None,
             wheel_accum: 0,
             fast_nav: false,
@@ -927,6 +935,7 @@ impl App {
             home: self.home_view(),
             crop: self.crop_view(),
             adjust: self.tone_view(),
+            video: self.video_bar_view(),
         };
         self.gpu.draw(&params, &ui)
     }
@@ -1159,6 +1168,11 @@ impl App {
         {
             tracing::error!("folder: {e:#}");
         }
+        if id == VIDEO_TIMER
+            && let Err(e) = self.video_tick()
+        {
+            tracing::error!("video: {e:#}");
+        }
         if id == ANIM_TIMER
             && let Err(e) = self.frame_timer()
         {
@@ -1261,6 +1275,10 @@ impl App {
             }
             m if m == self.quit_msg && m != 0 => {
                 self.quit();
+                Ok(Some(LRESULT(0)))
+            }
+            WM_APP_VIDEO => {
+                self.on_video(wparam.0)?;
                 Ok(Some(LRESULT(0)))
             }
             WM_APP_MAP => {
@@ -1381,5 +1399,18 @@ fn srgb_to_linear(v: f32) -> f32 {
         v / 12.92
     } else {
         ((v + 0.055) / 1.055).powf(2.4)
+    }
+}
+
+/// [`post`] with a `wparam`.
+pub fn post_with(hwnd: isize, msg: u32, wparam: usize) {
+    // SAFETY: PostMessageW has no memory-safety preconditions.
+    unsafe {
+        let _ = windows::Win32::UI::WindowsAndMessaging::PostMessageW(
+            Some(HWND(hwnd as *mut _)),
+            msg,
+            WPARAM(wparam),
+            LPARAM(0),
+        );
     }
 }
