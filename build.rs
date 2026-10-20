@@ -197,7 +197,7 @@ fn build_stamp(dir: &Path) {
         git.join("refs").join("heads").display()
     );
     let stamp = Command::new("git")
-        .args(["log", "-1", "--format=%h от %cd", "--date=format:%d.%m.%Y"])
+        .args(["log", "-1", "--format=%h · %cd", "--date=format:%d.%m.%Y"])
         .current_dir(dir)
         .output()
         .ok()

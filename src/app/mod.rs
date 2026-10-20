@@ -581,6 +581,7 @@ impl App {
         };
         let _old = std::mem::replace(&mut self.gpu, gpu);
         self.reupload_model()?;
+        self.reopen_video()?;
         self.shown = new_tex.map(|t| {
             let key = cache::key(&self.current);
             self.textures.insert(key.clone(), Rc::clone(&t));

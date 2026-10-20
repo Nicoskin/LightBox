@@ -273,7 +273,7 @@ fn all_rows(tab: Tab) -> Vec<Row> {
     }
 }
 
-/// "Lightbox 0.1.0 · сборка 485c787 от 19.10.2026".
+/// "Lightbox 0.1.0 · сборка 485c787 · 19.10.2026".
 pub fn version_text() -> String {
     let build = env!("LIGHTBOX_BUILD");
     let mut s = format!("{} {}", crate::APP_NAME, crate::update::VERSION);

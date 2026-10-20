@@ -333,4 +333,55 @@ mod tests {
         assert!(is_video(Path::new("a/B.MP4")) && !is_video(Path::new("a.png")));
         assert_eq!(Event::from_code(Event::Ended.code()), Some(Event::Ended));
     }
+
+    /// The generated sample plays on a hardware device: within a few
+    /// seconds a frame arrives with visible (non-black) pixels.
+    #[test]
+    #[ignore = "needs testdata/sample.mp4 and a GPU with video decoding"]
+    fn frames_arrive() {
+        use crate::gfx::{Adapter, Gpu};
+        use windows::Win32::Graphics::Direct3D11::{
+            D3D11_CPU_ACCESS_READ, D3D11_MAP_READ, D3D11_MAPPED_SUBRESOURCE, D3D11_USAGE_STAGING,
+        };
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("testdata/sample.mp4");
+        let gpu = Gpu::new(Adapter::Hardware, 64, 64).expect("gpu");
+        let mut p = Player::open(&gpu.device, &path, |_| {}).expect("open");
+        let start = std::time::Instant::now();
+        let mut last_err = None;
+        while start.elapsed().as_secs() < 5 {
+            std::thread::sleep(std::time::Duration::from_millis(30));
+            match p.frame(&gpu.device, &gpu.context) {
+                Ok(Some((tex, _, w, h))) => {
+                    // SAFETY: test-only readback of the frame texture.
+                    let lit = unsafe {
+                        let mut d = D3D11_TEXTURE2D_DESC::default();
+                        tex.GetDesc(&mut d);
+                        d.Usage = D3D11_USAGE_STAGING;
+                        d.BindFlags = 0;
+                        d.CPUAccessFlags = D3D11_CPU_ACCESS_READ.0 as u32;
+                        let mut st = None;
+                        gpu.device.CreateTexture2D(&d, None, Some(&mut st)).unwrap();
+                        let st = st.unwrap();
+                        gpu.context.CopyResource(&st, &tex);
+                        let mut m = D3D11_MAPPED_SUBRESOURCE::default();
+                        gpu.context.Map(&st, 0, D3D11_MAP_READ, 0, Some(&mut m)).unwrap();
+                        let row = std::slice::from_raw_parts(m.pData as *const u8, (w * 4) as usize);
+                        let mid = std::slice::from_raw_parts(
+                            (m.pData as *const u8).add((h / 2 * m.RowPitch) as usize),
+                            (w * 4) as usize,
+                        );
+                        let n = row.iter().chain(mid).filter(|b| **b > 16).count();
+                        gpu.context.Unmap(&st, 0);
+                        n
+                    };
+                    if lit > 0 {
+                        return;
+                    }
+                }
+                Ok(None) => {}
+                Err(e) => last_err = Some(format!("{e:#}")),
+            }
+        }
+        panic!("no visible frame; last error: {last_err:?}");
+    }
 }

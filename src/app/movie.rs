@@ -57,6 +57,33 @@ impl App {
         Ok(true)
     }
 
+    /// After a GPU switch: the engine writes frames on its own device, so
+    /// the video is opened again on the new one, where it was.
+    pub(super) fn reopen_video(&mut self) -> Result<()> {
+        let Some(m) = self.movie.take() else {
+            return Ok(());
+        };
+        let ((now, _), paused, muted) = (m.player.time(), m.player.paused(), m.player.muted());
+        drop(m);
+        let hwnd = self.hwnd.0 as isize;
+        let player = Player::open(&self.gpu.device, &self.current, move |e| {
+            post_with(hwnd, WM_APP_VIDEO, e.code());
+        })?;
+        if now > 0.0 {
+            player.seek(now);
+        }
+        player.set_muted(muted);
+        if paused {
+            player.toggle_pause();
+        }
+        self.movie = Some(Movie {
+            key: cache::key(&self.current),
+            player,
+        });
+        self.start_frames();
+        Ok(())
+    }
+
     /// Leaving a video: stop its sound and threads.
     pub(super) fn stop_video(&mut self) {
         if self.movie.take().is_some() {

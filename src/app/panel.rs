@@ -54,7 +54,7 @@ impl App {
             self.strip_height(),
             windowed,
             !self.preview(),
-            self.model_tools(),
+            self.model_mode(),
         )
     }
 
@@ -189,6 +189,9 @@ impl App {
                 },
                 enabled: match b.action {
                     Action::Save => self.dirty(),
+                    Action::Wireframe | Action::Section | Action::Measure | Action::LayFlat => {
+                        self.model_tools()
+                    }
                     Action::Reset => self.edits.contains_key(&cache::key(&self.current)),
                     _ => true,
                 },
@@ -286,7 +289,7 @@ impl App {
         }
         if let Some(p) = self.page_label() {
             parts.push(p);
-        } else if let Some((w, h)) = self.display() {
+        } else if let Some((w, h)) = self.display().filter(|_| !self.model_mode()) {
             parts.push(format!("{w:.0} × {h:.0}"));
         }
         if self.edits.contains_key(&cache::key(&self.current)) {
