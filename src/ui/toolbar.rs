@@ -27,6 +27,11 @@ pub enum Action {
     Crop,
     /// Adjustments (A).
     Adjust,
+    /// Model tools: wireframe (W), section (P), ruler (D), lay flat (B).
+    Wireframe,
+    Section,
+    Measure,
+    LayFlat,
     /// Tags (Ctrl+K).
     Tags,
     /// Batch rename / convert (Ctrl+B).
@@ -147,7 +152,8 @@ fn width(items: &[Item], s: f64) -> f64 {
 
 /// Panel layout for a `vp`-sized viewport at UI scale `s`. `compact` is the
 /// windowed-mode variant (no caption, no strip, fewer buttons if narrow);
-/// `strip_h` is the filmstrip height (96-DPI pixels) when it is shown.
+/// `strip_h` is the filmstrip height (96-DPI pixels) when it is shown;
+/// `model`: a 3D model is shown, with its own tools instead of the photo ones.
 pub fn layout(
     vp: (f64, f64),
     s: f64,
@@ -155,6 +161,7 @@ pub fn layout(
     strip_h: Option<f64>,
     windowed: bool,
     browse: bool,
+    model: bool,
 ) -> Layout {
     use Action::*;
     let bar_h = if compact { BAR_H_COMPACT } else { BAR_H } * s;
@@ -258,6 +265,13 @@ pub fn layout(
         Item::Button(Crop, Icon::Glyph('\u{E7A8}'), false),
         Item::Button(Adjust, Icon::Glyph('\u{E706}'), false),
     ];
+    let model_tools = [
+        Item::Button(Wireframe, Icon::Grid, false),
+        Item::Button(Section, Icon::Glyph('\u{E8C6}'), false),
+        Item::Button(Measure, Icon::Glyph('\u{ED5E}'), false),
+        Item::Button(LayFlat, Icon::Glyph('\u{E74B}'), false),
+    ];
+    let tools: &[Item] = if model { &model_tools } else { &tools };
     let files = [
         Item::Button(Save, Icon::Glyph('\u{E74E}'), false),
         Item::Button(SaveAs, Icon::Glyph('\u{E792}'), false),
@@ -265,13 +279,13 @@ pub fn layout(
         Item::Button(Tags, Icon::Glyph('\u{E8EC}'), false),
         Item::Button(Batch, Icon::Glyph('\u{E762}'), false),
     ];
-    let (tw, fw) = (width(&tools, s), width(&files, s));
+    let (tw, fw) = (width(tools, s), width(&files, s));
     let split = c0 - gap - tw > pad && right_x > c1 + gap + fw + gap;
     let mut caption_right = c0 - gap;
     if split {
         row(&files, c1 + gap, cy, s, &mut out);
         row(&right, right_x, cy, s, &mut out);
-        row(&tools, caption_right - tw, cy, s, &mut out);
+        row(tools, caption_right - tw, cy, s, &mut out);
         caption_right -= tw + gap;
     } else {
         // Drop the right group on narrow screens rather than overlap.
@@ -371,10 +385,15 @@ mod tests {
 
     #[test]
     fn fullscreen_layout() {
-        let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false, true);
+        let l = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false, true, false);
         no_overlaps(&l);
         assert_eq!(l.buttons.len(), 27);
         assert!(l.caption.is_some() && l.zoom_text.is_some());
+        // A model: its own tools in place of the photo ones.
+        let m = layout((2560.0, 1440.0), 1.0, false, Some(78.0), false, true, true);
+        no_overlaps(&m);
+        let has = |a| m.buttons.iter().any(|b| b.action == a);
+        assert!(has(Action::Measure) && has(Action::LayFlat) && !has(Action::Crop));
         let strip = l.strip.unwrap();
         assert_eq!(strip.y1, l.bar.y0);
         // Previous / next sit around the centre.
@@ -392,7 +411,7 @@ mod tests {
     #[test]
     fn middle_group_is_symmetric() {
         for (w, s) in [(2560.0, 1.0), (1920.0, 1.0), (2560.0, 1.25), (3840.0, 1.5)] {
-            let l = layout((w, 1440.0), s, false, Some(64.0), false, true);
+            let l = layout((w, 1440.0), s, false, Some(64.0), false, true, false);
             no_overlaps(&l);
             let find = |a| l.buttons.iter().find(|b| b.action == a).unwrap().rect;
             let (left, right) = (find(Action::FlipH), find(Action::Batch));
@@ -405,13 +424,21 @@ mod tests {
     #[test]
     fn compact_layouts_fit() {
         for w in [160.0, 300.0, 500.0, 1400.0] {
-            let l = layout((w, 400.0), 1.0, true, Some(78.0), true, true);
+            let l = layout((w, 400.0), 1.0, true, Some(78.0), true, true, false);
             no_overlaps(&l);
             assert!(l.strip.is_none());
             assert!(l.buttons.iter().any(|b| b.action == Action::Next), "w={w}");
         }
         // Narrow screens drop the right group instead of overlapping.
-        no_overlaps(&layout((700.0, 400.0), 1.5, false, None, false, true));
+        no_overlaps(&layout(
+            (700.0, 400.0),
+            1.5,
+            false,
+            None,
+            false,
+            true,
+            false,
+        ));
     }
 
     /// Previous / next sit exactly in the middle at every width and scale,
@@ -421,7 +448,7 @@ mod tests {
         for s in [1.0, 1.25, 1.5, 2.0] {
             for w in [320.0, 640.0, 900.0, 1280.0, 1920.0, 2560.0, 3840.0] {
                 for compact in [false, true] {
-                    let l = layout((w * s, 900.0), s, compact, Some(64.0), compact, true);
+                    let l = layout((w * s, 900.0), s, compact, Some(64.0), compact, true, false);
                     let find = |a| l.buttons.iter().find(|b| b.action == a).map(|b| b.rect);
                     let (Some(p), Some(n)) = (find(Action::Prev), find(Action::Next)) else {
                         panic!("no prev/next at {w}×{s}");

@@ -15,6 +15,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 };
 
 use super::mode::lparam_point;
+use super::model3d::Tool;
 use super::panel::Hot;
 use super::{Anim, AnimKind, App, Drag, Mode, ZOOM_ANIM};
 use crate::keymap::{Command, Key};
@@ -263,6 +264,10 @@ impl App {
             Action::Straighten => self.toggle_dial(),
             Action::Crop => self.toggle_crop(),
             Action::Adjust => self.toggle_tone(),
+            Action::Wireframe => self.toggle_wire(),
+            Action::Section => self.toggle_section(),
+            Action::Measure => self.toggle_model_tool(Tool::Measure),
+            Action::LayFlat => self.toggle_model_tool(Tool::LayFlat),
             Action::Tags => self.edit_tags(),
             Action::Batch => self.batch_dialog(),
             Action::Grid => self.toggle_grid(),
@@ -296,16 +301,13 @@ impl App {
             {
                 return Ok(Some(LRESULT(0)));
             }
-            // ↑ / ↓: document pages, toolpath layers, project plates.
+            // ↑ / ↓: document pages, toolpath layers, the model's section,
+            // project plates.
             0x26 | 0x28
                 if !ctrl
                     && (self.step_page(if vk == 0x26 { -1 } else { 1 })?
-                        || self.step_layer(match (vk == 0x28, shift) {
-                            (true, false) => -1,
-                            (true, true) => -10,
-                            (false, false) => 1,
-                            (false, true) => 10,
-                        })?
+                        || self.step_layer(up_down(vk, shift))?
+                        || self.step_section(up_down(vk, shift))?
                         || self.step_plate(if vk == 0x26 { -1 } else { 1 })?) =>
             {
                 return Ok(Some(LRESULT(0)));
@@ -344,6 +346,9 @@ impl App {
     /// Esc closes what is open, from the top: selection, comparison,
     /// slideshow, menus and panels, then the window.
     fn on_escape(&mut self) -> Result<()> {
+        if self.end_model_tool()? {
+            return Ok(());
+        }
         if !self.selected.is_empty() {
             self.clear_selection()
         } else if self.compare.is_some() {
@@ -429,6 +434,10 @@ impl App {
             Command::Tags => self.edit_tags(),
             Command::Batch => self.batch_dialog(),
             Command::Crop => self.toggle_crop(),
+            Command::Wireframe => self.toggle_wire(),
+            Command::Section => self.toggle_section(),
+            Command::Measure => self.toggle_model_tool(Tool::Measure),
+            Command::LayFlat => self.toggle_model_tool(Tool::LayFlat),
             Command::Adjust => self.toggle_tone(),
         }
     }
@@ -445,8 +454,9 @@ impl App {
             self.step_page(if delta > 0 { -1 } else { 1 })?;
             return Ok(());
         }
-        // Shift + wheel over a toolpath: layers.
-        if key_down(VK_SHIFT.0) && self.step_layer(if delta > 0 { 1 } else { -1 })? {
+        // Shift + wheel over a toolpath: layers; over a cut model: the cut.
+        let step = if delta > 0 { 1 } else { -1 };
+        if key_down(VK_SHIFT.0) && (self.step_layer(step)? || self.step_section(step)?) {
             return Ok(());
         }
         // Shift + wheel in the difference view: the gain.
@@ -526,6 +536,9 @@ impl App {
     }
 
     fn on_click(&mut self, p: (f64, f64)) -> Result<()> {
+        if !self.over_panel(p) && self.model_click(p)? {
+            return Ok(());
+        }
         // Click on the free (dimmed) area → windowed mode.
         let ip = self.to_image_space(p);
         if self.mode == Mode::Fullscreen
@@ -648,4 +661,10 @@ impl App {
         // Zooming in past the preview's resolution needs the full image.
         self.schedule();
     }
+}
+
+/// ↑ / ↓ as a layer or section step: up +1, down −1, Shift: 10.
+fn up_down(vk: u16, shift: bool) -> i64 {
+    let n = if shift { 10 } else { 1 };
+    if vk == 0x28 { -n } else { n }
 }

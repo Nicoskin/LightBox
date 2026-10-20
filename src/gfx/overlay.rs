@@ -72,6 +72,8 @@ pub struct Ui {
     pub adjust: Option<AdjustView>,
     /// The video bar.
     pub video: Option<VideoBarView>,
+    /// Points picked on a model (the ruler), joined by a line.
+    pub marks: Vec<(f64, f64)>,
 }
 
 impl Ui {
@@ -92,6 +94,7 @@ impl Ui {
             && self.crop.is_none()
             && self.adjust.is_none()
             && self.video.is_none()
+            && self.marks.is_empty()
     }
 }
 
@@ -308,6 +311,9 @@ impl Overlay {
             }
             if !ui.home.is_empty() {
                 self.home_buttons(&ui.home, ui.scale);
+            }
+            if !ui.marks.is_empty() {
+                self.marks(&ui.marks, ui.scale);
             }
             if let Some(c) = &ui.crop {
                 self.crop(c, ui.scale);

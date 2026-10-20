@@ -3,6 +3,7 @@
 
 pub mod gcode;
 mod obj;
+pub mod pick;
 pub mod raster;
 mod stl;
 mod threemf;

@@ -52,6 +52,7 @@ impl App {
             self.strip_height(),
             windowed,
             !self.preview(),
+            self.model_tools(),
         )
     }
 
@@ -174,6 +175,9 @@ impl App {
                     Action::Straighten => self.dial_open,
                     Action::Crop => self.crop.is_some(),
                     Action::Adjust => self.tone.is_some(),
+                    Action::Wireframe | Action::Section | Action::Measure | Action::LayFlat => {
+                        self.model_tool_on(b.action)
+                    }
                     Action::Grid => self.settings.pixel_grid,
                     Action::Info => self.info_state.open,
                     Action::Histogram => self.hist_state.open,

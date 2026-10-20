@@ -937,18 +937,24 @@ impl App {
             info: self.info_view(),
             histogram: self.histogram_view(),
             tooltip: self.tooltip_view(),
-            labels: self.compare_labels(),
+            labels: self
+                .compare_labels()
+                .into_iter()
+                .chain(self.ruler_label())
+                .collect(),
             home: self.home_view(),
             crop: self.crop_view(),
             adjust: self.tone_view(),
             video: self.video_bar_view(),
+            marks: self.model_marks(),
         };
         self.gpu.draw(&params, &ui)
     }
 
     /// Zoom level badge ("150 %") with its current opacity.
     fn badge_text(&self) -> Option<(String, f32)> {
-        if !self.badge || self.shown.is_none() {
+        // Notices also show over models (nothing is "shown" there).
+        if !self.badge || (self.shown.is_none() && self.notice.is_none()) {
             return None;
         }
         let opacity = self.badge_fade.map_or(1.0, |f| {

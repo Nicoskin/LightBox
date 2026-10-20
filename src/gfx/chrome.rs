@@ -443,6 +443,44 @@ impl Overlay {
 }
 
 impl Overlay {
+    /// Ruler points on a model: accent dots joined by a line, both with a
+    /// dark outline to stand out on any surface.
+    pub(super) unsafe fn marks(&self, points: &[(f64, f64)], s: f32) {
+        let at = |p: (f64, f64)| Vector2 {
+            X: p.0 as f32,
+            Y: p.1 as f32,
+        };
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            for (color, grow) in [
+                (rgba(0.0, 0.0, 0.0, 0.6), 2.0 * s),
+                (rgba(ACCENT.0, ACCENT.1, ACCENT.2, 1.0), 0.0),
+            ] {
+                self.brush.SetColor(&color);
+                for w in points.windows(2) {
+                    self.ctx.DrawLine(
+                        at(w[0]),
+                        at(w[1]),
+                        &self.brush,
+                        2.0 * s + grow,
+                        None::<&ID2D1StrokeStyle>,
+                    );
+                }
+                for p in points {
+                    let r = 5.0 * s + grow / 2.0;
+                    self.ctx.FillEllipse(
+                        &D2D1_ELLIPSE {
+                            point: at(*p),
+                            radiusX: r,
+                            radiusY: r,
+                        },
+                        &self.brush,
+                    );
+                }
+            }
+        }
+    }
+
     /// Start screen buttons: the main one in the accent colour.
     pub(super) unsafe fn home_buttons(&self, buttons: &[SegmentView], s: f32) {
         // SAFETY: inside BeginDraw/EndDraw.

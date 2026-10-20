@@ -67,6 +67,21 @@ impl Orbit {
         mul(&view, &proj)
     }
 
+    /// The ray from the eye through pixel `p` of a `w` × `h` viewport:
+    /// (origin, unit direction).
+    pub fn ray(&self, p: (f32, f32), w: f32, h: f32) -> ([f32; 3], [f32; 3]) {
+        let (x, y, z) = self.axes();
+        let t = (FOV.to_radians() / 2.0).tan();
+        let sx = (2.0 * p.0 / w.max(1.0) - 1.0) * t * w / h.max(1.0);
+        let sy = (1.0 - 2.0 * p.1 / h.max(1.0)) * t;
+        let d = normalize([
+            x[0] * sx + y[0] * sy - z[0],
+            x[1] * sx + y[1] * sy - z[1],
+            x[2] * sx + y[2] * sy - z[2],
+        ]);
+        (self.eye(), d)
+    }
+
     /// Turns by screen pixels (drag): left/right around the vertical axis,
     /// up/down around the horizontal one.
     pub fn rotate(&mut self, dx: f32, dy: f32) {
@@ -293,5 +308,24 @@ mod tests {
         assert!((clip[0] / clip[3]).abs() < 1e-4 && (clip[1] / clip[3]).abs() < 1e-4);
         let z = clip[2] / clip[3];
         assert!((0.0..1.0).contains(&z), "{z}");
+    }
+
+    #[test]
+    fn ray_through_a_pixel_projects_back_to_it() {
+        let m = cube();
+        let cam = Orbit::fit(&m);
+        let (w, h) = (300.0, 200.0);
+        let vp = cam.view_proj(w / h, m.radius());
+        let (o, d) = cam.ray((210.0, 60.0), w, h);
+        let p = [o[0] + d[0] * 2.0, o[1] + d[1] * 2.0, o[2] + d[2] * 2.0, 1.0];
+        let clip: Vec<f32> = (0..4)
+            .map(|j| (0..4).map(|k| p[k] * vp[k][j]).sum())
+            .collect();
+        let sx = (clip[0] / clip[3] + 1.0) / 2.0 * w;
+        let sy = (1.0 - clip[1] / clip[3]) / 2.0 * h;
+        assert!(
+            (sx - 210.0).abs() < 0.01 && (sy - 60.0).abs() < 0.01,
+            "{sx} {sy}"
+        );
     }
 }

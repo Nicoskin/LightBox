@@ -247,10 +247,14 @@ pub enum Command {
     Batch,
     Crop,
     Adjust,
+    Wireframe,
+    Section,
+    Measure,
+    LayFlat,
 }
 
 impl Command {
-    pub const ALL: [Command; 49] = {
+    pub const ALL: [Command; 53] = {
         use Command::*;
         [
             Prev,
@@ -302,6 +306,10 @@ impl Command {
             Batch,
             Crop,
             Adjust,
+            Wireframe,
+            Section,
+            Measure,
+            LayFlat,
         ]
     };
 
@@ -358,6 +366,10 @@ impl Command {
             Batch => "batch",
             Crop => "crop",
             Adjust => "adjust",
+            Wireframe => "wireframe",
+            Section => "section",
+            Measure => "measure",
+            LayFlat => "lay_flat",
         }
     }
 
@@ -414,6 +426,10 @@ impl Command {
             Batch => "Пакетная обработка",
             Crop => "Обрезать",
             Adjust => "Коррекция",
+            Wireframe => "Каркас модели",
+            Section => "Разрез модели",
+            Measure => "Линейка",
+            LayFlat => "Положить гранью на стол",
         }
     }
 
@@ -471,6 +487,10 @@ impl Command {
             Batch => vec![Key::ctrl(c(b'B'))],
             Crop => vec![Key::plain(c(b'X'))],
             Adjust => vec![Key::plain(c(b'A'))],
+            Wireframe => vec![Key::plain(c(b'W'))],
+            Section => vec![Key::plain(c(b'P'))],
+            Measure => vec![Key::plain(c(b'D'))],
+            LayFlat => vec![Key::plain(c(b'B'))],
         }
     }
 

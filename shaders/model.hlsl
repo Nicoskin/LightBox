@@ -7,8 +7,9 @@ cbuffer Params : register(b0)
     row_major float4x4 view_proj; // world → clip, row vectors
     float4 light;                 // xyz: direction towards the key light
     float4 eye;                   // xyz: camera position
-    uint   mode;                  // 0 = lit surface, 1 = unlit (grid)
+    uint   mode;                  // 0 = lit surface, 1 = unlit (grid), 2 = wireframe
     uint3  pad;
+    float4 section;               // x = 1: cut away everything above y = section.y
 };
 
 struct VSIn
@@ -38,14 +39,32 @@ VSOut VSMain(VSIn i)
 
 float4 PSMain(VSOut i, bool front : SV_IsFrontFace) : SV_Target
 {
+    if (section.x > 0.5 && i.wpos.y > section.y)
+        discard;
     if (mode == 1)
         return i.col; // premultiplied grid colour
+    if (mode == 2)
+    {
+        // Wireframe lines over the surface, not over a cut.
+        if (section.x > 0.5 && dot(i.nrm, eye.xyz - i.wpos) < 0.0)
+            discard;
+        return float4(0.0, 0.0, 0.0, 0.55);
+    }
 
     float3 n = normalize(i.nrm);
     float3 v = normalize(eye.xyz - i.wpos);
-    // Inside faces (open meshes, flipped normals) face the viewer too.
+    // Inside faces (open meshes, flipped normals) face the viewer too. Seen
+    // through a cut they are the inside of the part: hatched in red, which
+    // sets it apart from a surface of any colour.
     if (dot(n, v) < 0.0)
+    {
         n = -n;
+        if (section.x > 0.5)
+        {
+            bool stripe = frac((i.pos.x + i.pos.y) / 10.0) < 0.5;
+            return float4(stripe ? float3(0.70, 0.06, 0.03) : float3(0.30, 0.025, 0.012), 1.0);
+        }
+    }
     float3 l = normalize(light.xyz);
     float key = saturate(dot(n, l));
     float fill = saturate(dot(n, normalize(float3(-l.x, 0.35, -l.z)))) * 0.3;
