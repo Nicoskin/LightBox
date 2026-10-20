@@ -187,6 +187,68 @@ pub fn thumbnail(mesh: &Mesh, size: u32) -> Vec<u8> {
     rgba
 }
 
+/// Line colours of toolpath kinds (sRGB), as in the 3D view.
+const PATH_COLORS: [[u8; 3]; 11] = [
+    [195, 195, 200],
+    [255, 172, 61],
+    [255, 229, 97],
+    [207, 89, 79],
+    [180, 89, 207],
+    [247, 118, 137],
+    [137, 149, 240],
+    [89, 219, 124],
+    [89, 211, 219],
+    [124, 170, 250],
+    [89, 160, 245],
+];
+
+/// A `size` × `size` straight-alpha RGBA thumbnail of a toolpath: its
+/// extruded lines in the same three-quarter view as models.
+pub fn path_thumbnail(mesh: &Mesh, size: u32) -> Vec<u8> {
+    let n = size as usize;
+    let mut rgba = vec![0u8; n * n * 4];
+    let mut depth = vec![f32::MIN; n * n];
+    let Some(path) = &mesh.path else {
+        return rgba;
+    };
+    let cam = Orbit::fit(mesh);
+    let (ax, ay, az) = cam.axes();
+    let c = mesh.center();
+    let r = mesh.radius().max(1e-6);
+    let scale = size as f32 / (2.0 * r * 1.05);
+    let half = size as f32 / 2.0;
+    let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+    let project = |p: [f32; 3]| {
+        let d = sub(p, c);
+        (
+            half + dot(d, ax) * scale,
+            half - dot(d, ay) * scale,
+            dot(d, az),
+        )
+    };
+    // At most ~200k segments drawn: big prints are thinned evenly.
+    let step = (path.segs.len() / 200_000).max(1);
+    for s in path.segs.iter().step_by(step) {
+        let (a, b) = (project(s.a), project(s.b));
+        let col = PATH_COLORS[(s.kind as usize).min(PATH_COLORS.len() - 1)];
+        let steps = ((b.0 - a.0).abs().max((b.1 - a.1).abs()).ceil() as usize).max(1);
+        for i in 0..=steps {
+            let t = i as f32 / steps as f32;
+            let (x, y) = (a.0 + (b.0 - a.0) * t, a.1 + (b.1 - a.1) * t);
+            let z = a.2 + (b.2 - a.2) * t;
+            if x < 0.0 || y < 0.0 || x >= size as f32 || y >= size as f32 {
+                continue;
+            }
+            let k = y as usize * n + x as usize;
+            if z > depth[k] {
+                depth[k] = z;
+                rgba[k * 4..k * 4 + 4].copy_from_slice(&[col[0], col[1], col[2], 255]);
+            }
+        }
+    }
+    rgba
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

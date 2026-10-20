@@ -23,12 +23,15 @@ pub(super) struct ModelState {
     mesh: Arc<Mesh>,
     gpu: Rc<GpuMesh>,
     cam: Orbit,
+    /// G-code: the top layer shown (0-based).
+    layer: usize,
 }
 
 pub(super) type ModelRx = (String, Receiver<Result<Mesh, String>>);
 
-/// One frame's model: the mesh (kept alive), view-projection, eye, light.
-pub(super) type FrameModel = (Rc<GpuMesh>, [[f32; 4]; 4], [f32; 3], [f32; 3]);
+/// One frame's model: the mesh (kept alive), view-projection, eye,
+/// light, and the toolpath segments to draw.
+pub(super) struct FrameModel(Rc<GpuMesh>, [[f32; 4]; 4], [f32; 3], [f32; 3], Option<u32>);
 
 impl App {
     /// `true` while the current file is a model (shown or loading).
@@ -86,11 +89,16 @@ impl App {
             Ok(mesh) => {
                 let gpu = Rc::new(GpuMesh::upload(&self.gpu.device, &mesh)?);
                 let cam = Orbit::fit(&mesh);
+                let layer = mesh
+                    .path
+                    .as_ref()
+                    .map_or(0, |p| p.layer_ends.len().saturating_sub(1));
                 self.model = Some(ModelState {
                     key,
                     mesh: Arc::new(mesh),
                     gpu,
                     cam,
+                    layer,
                 });
                 self.error = None;
                 self.notice = None;
@@ -124,7 +132,12 @@ impl App {
             -0.45 * x[1] + 0.8 * y[1] + 0.55 * z[1],
             -0.45 * x[2] + 0.8 * y[2] + 0.55 * z[2],
         ]);
-        Some((Rc::clone(&m.gpu), vp, m.cam.eye(), light))
+        let limit = m
+            .mesh
+            .path
+            .as_ref()
+            .and_then(|p| p.layer_ends.get(m.layer).copied());
+        Some(FrameModel(Rc::clone(&m.gpu), vp, m.cam.eye(), light, limit))
     }
 
     /// Mouse drag in the picture: turn, or move with Shift / Ctrl.
@@ -177,9 +190,16 @@ impl App {
         Ok(true)
     }
 
-    /// "12 345 треугольников · 120 × 80 × 35" for the caption.
+    /// "12 345 треугольников · 120 × 80 × 35" for the caption (G-code: the
+    /// layer, print time and filament).
     pub(super) fn model_details(&self) -> Option<String> {
         let m = self.current_model()?;
+        if let Some(p) = &m.mesh.path {
+            let mut parts = vec![format!("слой {} из {}", m.layer + 1, p.layer_ends.len())];
+            parts.extend(p.time.clone());
+            parts.extend(p.filament.clone());
+            return Some(parts.join("  ·  "));
+        }
         let s = m.mesh.size();
         // Back to the file's Z-up axes for the dimensions: X, Y (depth), Z.
         Some(format!(
@@ -199,5 +219,28 @@ pub(super) fn draw_desc(d: &FrameModel) -> ModelDraw<'_> {
         view_proj: d.1,
         eye: d.2,
         light: d.3,
+        limit: d.4,
+    }
+}
+
+// G-code layers.
+impl App {
+    /// ↑ / ↓ (Shift: 10): the top layer shown. `false` when the current
+    /// file is not a toolpath.
+    pub(super) fn step_layer(&mut self, delta: i64) -> Result<bool> {
+        let key = cache::key(&self.current);
+        let Some(m) = self.model.as_mut().filter(|m| m.key == key) else {
+            return Ok(false);
+        };
+        let Some(p) = &m.mesh.path else {
+            return Ok(false);
+        };
+        let last = p.layer_ends.len().saturating_sub(1) as i64;
+        m.layer = (m.layer as i64 + delta).clamp(0, last) as usize;
+        let z = p.layer_z.get(m.layer).copied().unwrap_or(0.0);
+        let text = format!("Слой {} из {} · {z:.2} мм", m.layer + 1, last + 1).replace('.', ",");
+        self.notice(&text);
+        self.render()?;
+        Ok(true)
     }
 }

@@ -344,7 +344,7 @@ const FOOTER_H: f64 = 40.0;
 /// Keys page: row height, column gap, chip width.
 const KEY_ROW_H: f64 = 30.0;
 const KEY_COL_GAP: f64 = 20.0;
-const CHIP_W: f64 = 74.0;
+const CHIP_W: f64 = 66.0;
 
 /// Rows on the longest page: every page gets this height, so the card does
 /// not jump when switching pages.

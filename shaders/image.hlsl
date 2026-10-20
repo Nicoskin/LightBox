@@ -26,6 +26,8 @@ cbuffer Params : register(b0)
     uint   edges;          // sides of this part that are image edges: 1 left, 2 top, 4 right, 8 bottom
     float  diff_gain;      // PSDiff: amplification of |B - A|
     float4 adjust;         // exposure (EV), contrast, saturation, warmth; 0 = none
+    uint   opaque;         // 1: ignore the texture's alpha (video frames)
+    uint3  pad2;
 };
 
 Texture2D<float4> image : register(t0);
@@ -116,6 +118,8 @@ float3 tone(float3 c)
 float4 PSMain(VSOut i) : SV_Target
 {
     float4 c = image.Sample(samp, i.uv); // premultiplied, linear
+    if (opaque != 0)
+        c.a = 1.0;
     if (any(adjust != 0.0) && c.a > 0.0)
         c = float4(tone(c.rgb / c.a) * c.a, c.a);
 

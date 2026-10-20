@@ -297,7 +297,16 @@ impl App {
                 return Ok(Some(LRESULT(0)));
             }
             // ↑ / ↓ turn document pages.
-            0x26 | 0x28 if !ctrl && self.step_page(if vk == 0x26 { -1 } else { 1 })? => {
+            0x26 | 0x28
+                if !ctrl
+                    && (self.step_page(if vk == 0x26 { -1 } else { 1 })?
+                        || self.step_layer(match (vk == 0x28, shift) {
+                            (true, false) => -1,
+                            (true, true) => -10,
+                            (false, false) => 1,
+                            (false, true) => 10,
+                        })?) =>
+            {
                 return Ok(Some(LRESULT(0)));
             }
             // Shift+1..4: one channel; Shift+0: all channels.
@@ -433,6 +442,10 @@ impl App {
         // Documents: the wheel turns pages, Ctrl + wheel zooms.
         if self.is_doc() && !key_down(VK_CONTROL.0) && !self.over_panel(p) {
             self.step_page(if delta > 0 { -1 } else { 1 })?;
+            return Ok(());
+        }
+        // Shift + wheel over a toolpath: layers.
+        if key_down(VK_SHIFT.0) && self.step_layer(if delta > 0 { 1 } else { -1 })? {
             return Ok(());
         }
         // Shift + wheel in the difference view: the gain.

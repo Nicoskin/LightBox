@@ -224,3 +224,11 @@ impl App {
         })
     }
 }
+
+impl App {
+    /// The current video's size, once the engine knows it.
+    pub(super) fn video_size(&self) -> Option<(f64, f64)> {
+        let (w, h) = self.movie()?.player.size()?;
+        Some((f64::from(w), f64::from(h)))
+    }
+}

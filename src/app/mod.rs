@@ -673,6 +673,11 @@ impl App {
             .as_ref()
             .map(|(k, t)| self.display_of(k, t))
             .or_else(|| self.model_mode().then_some(model3d::MODEL_DISPLAY))
+            // A video before its first frame: its size once known, else 16:9.
+            .or_else(|| {
+                self.video_mode()
+                    .then(|| self.video_size().unwrap_or((1280.0, 720.0)))
+            })
     }
 
     /// Screen area photos are fitted into; fullscreen keeps the bottom free
@@ -838,6 +843,7 @@ impl App {
             channel: self.channel,
             grid,
             adjust: self.adjust_preview(key),
+            opaque: !img.has_alpha,
         })
     }
 
@@ -917,11 +923,11 @@ impl App {
             } else {
                 None
             },
-            badge_lift: if self.panel_target > 0.5 {
+            badge_lift: self.card_lift().unwrap_or(if self.panel_target > 0.5 {
                 self.panel_height() as f32
             } else {
                 0.0
-            },
+            }),
             panel: self.panel_view(),
             border: self.mode == Mode::Windowed,
             card: self.card_view(),

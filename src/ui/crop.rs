@@ -201,7 +201,7 @@ pub fn bar(vp: (f64, f64), s: f64, bottom: f64) -> BarLayout {
     let (seg, btn, h, gap) = (78.0 * s, 110.0 * s, 34.0 * s, 10.0 * s);
     let total = seg * Aspect::ALL.len() as f64 + gap * 2.0 + btn * 2.0 + gap;
     let x0 = ((vp.0 - total) / 2.0).max(4.0).round();
-    let y0 = (bottom - h - 14.0 * s).round();
+    let y0 = (bottom - h - 52.0 * s).round();
     let rect = |x: f64, w: f64| Rect {
         x0: x.round(),
         y0,

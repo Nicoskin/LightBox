@@ -37,6 +37,7 @@ impl App {
             return Ok(());
         }
         self.crop = None;
+        self.notice = None;
         self.tone = Some(ToneState {
             key: cache::key(&self.current),
             values: Adjust::default(),
@@ -225,5 +226,25 @@ impl App {
                 button(l.cancel, "Отмена", Hit::Cancel, false),
             ],
         })
+    }
+}
+
+impl App {
+    /// Notices go above an open crop bar or adjustments card: their
+    /// distance from the bottom edge.
+    pub(super) fn card_lift(&self) -> Option<f32> {
+        let top = if self.tone.is_some() {
+            self.tone_layout().card.y0
+        } else if self.crop.is_some() {
+            let b = crate::ui::crop::bar(
+                self.viewport(),
+                self.ui_scale(),
+                self.viewport().1 - self.panel_height(),
+            );
+            b.apply.y0
+        } else {
+            return None;
+        };
+        Some((self.viewport().1 - top + 6.0 * self.ui_scale()) as f32)
     }
 }

@@ -1,6 +1,7 @@
 //! 3D models (STL, OBJ, 3MF): parsed into one triangle soup with flat
 //! normals and optional colours, ready for the GPU and for thumbnails.
 
+pub mod gcode;
 mod obj;
 pub mod raster;
 mod stl;
@@ -9,7 +10,7 @@ mod threemf;
 use std::path::Path;
 
 /// Model file extensions (lower case).
-pub const EXTENSIONS: &[&str] = &["stl", "obj", "3mf"];
+pub const EXTENSIONS: &[&str] = &["stl", "obj", "3mf", "gcode", "gco"];
 
 pub fn is_model(path: &Path) -> bool {
     path.extension()
@@ -30,6 +31,8 @@ pub struct Mesh {
     pub colors: Option<Vec<[f32; 4]>>,
     pub min: [f32; 3],
     pub max: [f32; 3],
+    /// G-code: the toolpath (instead of triangles).
+    pub path: Option<Box<gcode::Toolpath>>,
 }
 
 impl Mesh {
@@ -151,7 +154,9 @@ pub fn load(path: &Path) -> Result<Mesh, String> {
     match ext.as_str() {
         "stl" => stl::parse(&data),
         "obj" => obj::parse(&data, path.parent()),
+        "3mf" if is_gcode_3mf(path) => gcode::parse(&data),
         "3mf" => threemf::parse(&data),
+        "gcode" | "gco" => gcode::parse(&data),
         _ => Err("неизвестный формат модели".into()),
     }
 }
@@ -191,4 +196,11 @@ mod samples {
             }
         }
     }
+}
+
+/// Bambu Studio's printable project (`name.gcode.3mf`).
+pub fn is_gcode_3mf(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| n.to_ascii_lowercase().ends_with(".gcode.3mf"))
 }

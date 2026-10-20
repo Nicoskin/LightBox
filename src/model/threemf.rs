@@ -190,7 +190,7 @@ fn add_object(
 }
 
 /// The files of a ZIP archive (stored or deflated), by name.
-fn unzip(data: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
+pub(crate) fn unzip(data: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
     let u16le = |o: usize| data.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
     let u32le = |o: usize| {
         data.get(o..o + 4)

@@ -21,6 +21,12 @@ const SHADERS: &[(&str, &str, &str, &str)] = &[
     ),
     ("shaders/model.hlsl", "VSMain", "vs_5_0", "model_vs.cso"),
     ("shaders/model.hlsl", "PSMain", "ps_5_0", "model_ps.cso"),
+    (
+        "shaders/model.hlsl",
+        "VSPath",
+        "vs_5_0",
+        "model_path_vs.cso",
+    ),
 ];
 
 fn main() {

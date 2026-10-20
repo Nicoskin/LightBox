@@ -55,3 +55,67 @@ float4 PSMain(VSOut i, bool front : SV_IsFrontFace) : SV_Target
     float3 c = i.col.rgb * (sky + 0.72 * key + fill) + spec;
     return float4(c, 1.0);
 }
+
+// G-code toolpaths: one instance per extruded segment, expanded here into
+// a bar (top and two sides, 18 vertices) of the line's width.
+struct Seg
+{
+    float3 a;
+    float3 b;
+    uint   kind;
+    float  width;
+};
+StructuredBuffer<Seg> segs : register(t0);
+
+// Line colours by type (linear), close to the slicers' own.
+static const float3 PALETTE[11] =
+{
+    float3(0.55, 0.55, 0.58), // other
+    float3(1.00, 0.42, 0.05), // outer wall
+    float3(1.00, 0.78, 0.12), // inner wall
+    float3(0.62, 0.10, 0.08), // sparse infill
+    float3(0.45, 0.10, 0.62), // solid infill
+    float3(0.92, 0.18, 0.25), // top surface
+    float3(0.25, 0.30, 0.85), // bottom surface
+    float3(0.10, 0.70, 0.20), // support
+    float3(0.10, 0.65, 0.70), // skirt / brim
+    float3(0.20, 0.40, 0.95), // bridge
+    float3(0.10, 0.35, 0.90), // overhang
+};
+
+VSOut VSPath(uint vid : SV_VertexID, uint iid : SV_InstanceID)
+{
+    Seg s = segs[iid];
+    float3 d = s.b - s.a;
+    float len = length(d);
+    float3 dir = len > 1e-6 ? d / len : float3(1, 0, 0);
+    float3 side = cross(float3(0, 1, 0), dir);
+    side = dot(side, side) > 1e-8 ? normalize(side) : float3(1, 0, 0);
+    float hw = s.width * 0.5;
+    float h = s.width * 0.45;
+
+    uint q = vid / 6;          // 0 top, 1 left side, 2 right side
+    uint k = vid % 6;
+    uint corner = k == 0 ? 0 : (k == 1 || k == 4) ? 1 : (k == 2 || k == 3) ? 2 : 3;
+    float along = (float)(corner & 1);
+    float across = (float)(corner >> 1);
+    float3 p = lerp(s.a, s.b, along);
+    float3 pos, n;
+    if (q == 0)
+    {
+        pos = p + side * (across * 2.0 - 1.0) * hw;
+        n = float3(0, 1, 0);
+    }
+    else
+    {
+        float sgn = q == 1 ? -1.0 : 1.0;
+        pos = p + side * sgn * hw - float3(0, across * h, 0);
+        n = side * sgn;
+    }
+    VSOut o;
+    o.pos = mul(float4(pos, 1.0), view_proj);
+    o.nrm = n;
+    o.col = float4(PALETTE[min(s.kind, 10u)], 1.0);
+    o.wpos = pos;
+    return o;
+}

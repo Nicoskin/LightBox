@@ -236,7 +236,33 @@ unsafe fn bitmap_pixels(hbmp: HBITMAP) -> Option<Thumb> {
 /// A 3D model rendered on the CPU.
 fn model_thumbnail(path: &Path, size: u32) -> Option<Thumb> {
     let mesh = crate::model::load(path).ok()?;
-    let mut bgra = crate::model::raster::thumbnail(&mesh, size);
+    // G-code: the slicer's own preview, else the toolpath drawn as lines.
+    if let Some(p) = &mesh.path
+        && let Some((w, h, rgba)) = &p.thumbnail
+    {
+        let (tw, th) = scale::fit_size(*w, *h, size);
+        let small = scale::rgba8(rgba, *w, *h, tw, th);
+        let bgra = small
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .flat_map(|p| {
+                let a = u32::from(p[3]);
+                let pm = |c: u8| ((u32::from(c) * a + 127) / 255) as u8;
+                [pm(p[2]), pm(p[1]), pm(p[0]), p[3]]
+            })
+            .collect();
+        return Some(Thumb {
+            id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
+            width: tw,
+            height: th,
+            bgra,
+        });
+    }
+    let mut bgra = match &mesh.path {
+        Some(_) => crate::model::raster::path_thumbnail(&mesh, size),
+        None => crate::model::raster::thumbnail(&mesh, size),
+    };
     for p in bgra.as_chunks_mut::<4>().0 {
         let a = u32::from(p[3]);
         let pm = |c: u8| ((u32::from(c) * a + 127) / 255) as u8;

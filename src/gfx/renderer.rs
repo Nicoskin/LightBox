@@ -74,6 +74,8 @@ pub struct Layer<'a> {
     pub grid: bool,
     /// Tonal adjustments previewed (see `crate::adjust`), zero: none.
     pub adjust: [f32; 4],
+    /// Draw as fully opaque whatever the texture's alpha says (video).
+    pub opaque: bool,
 }
 
 /// Everything needed to draw one frame.
@@ -110,6 +112,8 @@ struct Constants {
     edges: u32,
     diff_gain: f32,
     adjust: [f32; 4],
+    opaque: u32,
+    pad2: [u32; 3],
 }
 
 const _: () = assert!(std::mem::size_of::<Constants>().is_multiple_of(16));
@@ -282,6 +286,8 @@ impl Renderer {
                 edges: part.edges,
                 diff_gain,
                 adjust: layer.adjust,
+                opaque: u32::from(layer.opaque),
+                pad2: [0; 3],
             };
             // SAFETY: see the caller; the constants outlive the call.
             unsafe {

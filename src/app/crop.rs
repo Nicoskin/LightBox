@@ -53,9 +53,14 @@ impl App {
         if self.angle != 0.0 {
             self.set_angle(0.0)?;
         }
+        // A little smaller than fitted, so that every handle can be reached
+        // (not under the panel or the title bar).
         if let Some(v) = self.fit_view() {
-            self.view = v;
-            self.fitted = true;
+            self.view = crate::view::View {
+                scale: v.scale * 0.86,
+                ..v
+            };
+            self.fitted = false;
         }
         let Some((w, h)) = self.display() else {
             return Ok(());

@@ -609,7 +609,8 @@ mod tests {
             let model = [".stl", ".obj", ".mtl", ".3mf"]
                 .iter()
                 .any(|e| name.ends_with(e));
-            let viewable = is_supported(&path) || is_document(&path);
+            let viewable =
+                (is_supported(&path) || is_document(&path)) && !crate::video::is_video(&path);
             if name.starts_with("broken_") || name.starts_with("huge") || model || !viewable {
                 continue;
             }

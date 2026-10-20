@@ -5,25 +5,29 @@
 use anyhow::{Context as _, Result};
 use windows::Win32::Graphics::Direct3D::{
     D3D11_PRIMITIVE_TOPOLOGY_LINELIST, D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST,
+    D3D11_SRV_DIMENSION_BUFFER,
 };
 use windows::Win32::Graphics::Direct3D11::{
     D3D11_BIND_CONSTANT_BUFFER, D3D11_BIND_DEPTH_STENCIL, D3D11_BIND_RENDER_TARGET,
-    D3D11_BIND_VERTEX_BUFFER, D3D11_BLEND_DESC, D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_ONE,
-    D3D11_BLEND_OP_ADD, D3D11_BUFFER_DESC, D3D11_CLEAR_DEPTH, D3D11_COLOR_WRITE_ENABLE_ALL,
-    D3D11_COMPARISON_LESS_EQUAL, D3D11_CULL_NONE, D3D11_DEPTH_STENCIL_DESC,
-    D3D11_DEPTH_STENCIL_VIEW_DESC, D3D11_DEPTH_WRITE_MASK_ALL, D3D11_DEPTH_WRITE_MASK_ZERO,
-    D3D11_DSV_DIMENSION_TEXTURE2DMS, D3D11_FILL_SOLID, D3D11_INPUT_ELEMENT_DESC,
-    D3D11_INPUT_PER_VERTEX_DATA, D3D11_RASTERIZER_DESC, D3D11_RENDER_TARGET_BLEND_DESC,
-    D3D11_RENDER_TARGET_VIEW_DESC, D3D11_RTV_DIMENSION_TEXTURE2DMS, D3D11_SUBRESOURCE_DATA,
+    D3D11_BIND_SHADER_RESOURCE, D3D11_BIND_VERTEX_BUFFER, D3D11_BLEND_DESC,
+    D3D11_BLEND_INV_SRC_ALPHA, D3D11_BLEND_ONE, D3D11_BLEND_OP_ADD, D3D11_BUFFER_DESC,
+    D3D11_BUFFER_SRV, D3D11_BUFFER_SRV_0, D3D11_BUFFER_SRV_1, D3D11_CLEAR_DEPTH,
+    D3D11_COLOR_WRITE_ENABLE_ALL, D3D11_COMPARISON_LESS_EQUAL, D3D11_CULL_NONE,
+    D3D11_DEPTH_STENCIL_DESC, D3D11_DEPTH_STENCIL_VIEW_DESC, D3D11_DEPTH_WRITE_MASK_ALL,
+    D3D11_DEPTH_WRITE_MASK_ZERO, D3D11_DSV_DIMENSION_TEXTURE2DMS, D3D11_FILL_SOLID,
+    D3D11_INPUT_ELEMENT_DESC, D3D11_INPUT_PER_VERTEX_DATA, D3D11_RASTERIZER_DESC,
+    D3D11_RENDER_TARGET_BLEND_DESC, D3D11_RENDER_TARGET_VIEW_DESC,
+    D3D11_RESOURCE_MISC_BUFFER_STRUCTURED, D3D11_RTV_DIMENSION_TEXTURE2DMS,
+    D3D11_SHADER_RESOURCE_VIEW_DESC, D3D11_SHADER_RESOURCE_VIEW_DESC_0, D3D11_SUBRESOURCE_DATA,
     D3D11_TEXTURE2D_DESC, D3D11_USAGE_DEFAULT, D3D11_USAGE_IMMUTABLE, D3D11_VIEWPORT,
     ID3D11BlendState, ID3D11Buffer, ID3D11DepthStencilState, ID3D11DepthStencilView, ID3D11Device,
     ID3D11DeviceContext, ID3D11InputLayout, ID3D11PixelShader, ID3D11RasterizerState,
-    ID3D11RenderTargetView, ID3D11Texture2D, ID3D11VertexShader,
+    ID3D11RenderTargetView, ID3D11ShaderResourceView, ID3D11Texture2D, ID3D11VertexShader,
 };
 use windows::Win32::Graphics::Dxgi::Common::{
     DXGI_FORMAT_B8G8R8A8_TYPELESS, DXGI_FORMAT_B8G8R8A8_UNORM, DXGI_FORMAT_B8G8R8A8_UNORM_SRGB,
     DXGI_FORMAT_D32_FLOAT, DXGI_FORMAT_R32G32B32_FLOAT, DXGI_FORMAT_R32G32B32A32_FLOAT,
-    DXGI_SAMPLE_DESC,
+    DXGI_FORMAT_UNKNOWN, DXGI_SAMPLE_DESC,
 };
 use windows::core::s;
 
@@ -31,6 +35,7 @@ use crate::model::Mesh;
 
 static VS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/model_vs.cso"));
 static PS: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/model_ps.cso"));
+static VS_PATH: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/model_path_vs.cso"));
 const SAMPLES: u32 = 4;
 
 #[repr(C)]
@@ -52,10 +57,12 @@ struct Constants {
     pad: [u32; 3],
 }
 
-/// A mesh and its floor grid on the GPU.
+/// A mesh (or a G-code toolpath) and its floor grid on the GPU.
 pub struct GpuMesh {
-    vb: ID3D11Buffer,
+    vb: Option<ID3D11Buffer>,
     count: u32,
+    /// Toolpath segments (structured buffer), its view and length.
+    path: Option<(ID3D11Buffer, ID3D11ShaderResourceView, u32)>,
     grid: Option<(ID3D11Buffer, u32)>,
 }
 
@@ -82,6 +89,50 @@ fn buffer(device: &ID3D11Device, data: &[Vertex]) -> Result<ID3D11Buffer> {
     // SAFETY: the data outlives the call and matches the declared size.
     unsafe { device.CreateBuffer(&desc, Some(&init), Some(&mut vb))? };
     vb.context("vertex buffer")
+}
+
+/// Toolpath segments as a structured buffer the path shader reads.
+fn path_buffer(
+    device: &ID3D11Device,
+    segs: &[crate::model::gcode::Seg],
+) -> Result<(ID3D11Buffer, ID3D11ShaderResourceView, u32)> {
+    let stride = std::mem::size_of::<crate::model::gcode::Seg>() as u32;
+    let desc = D3D11_BUFFER_DESC {
+        ByteWidth: stride * segs.len().max(1) as u32,
+        Usage: D3D11_USAGE_IMMUTABLE,
+        BindFlags: D3D11_BIND_SHADER_RESOURCE.0 as u32,
+        MiscFlags: D3D11_RESOURCE_MISC_BUFFER_STRUCTURED.0 as u32,
+        StructureByteStride: stride,
+        ..Default::default()
+    };
+    let init = D3D11_SUBRESOURCE_DATA {
+        pSysMem: segs.as_ptr().cast(),
+        ..Default::default()
+    };
+    // SAFETY: the data outlives the call and matches the declared size.
+    unsafe {
+        let mut b = None;
+        device.CreateBuffer(&desc, Some(&init), Some(&mut b))?;
+        let b = b.context("path buffer")?;
+        let mut srv = None;
+        device.CreateShaderResourceView(
+            &b,
+            Some(&D3D11_SHADER_RESOURCE_VIEW_DESC {
+                Format: DXGI_FORMAT_UNKNOWN,
+                ViewDimension: D3D11_SRV_DIMENSION_BUFFER,
+                Anonymous: D3D11_SHADER_RESOURCE_VIEW_DESC_0 {
+                    Buffer: D3D11_BUFFER_SRV {
+                        Anonymous1: D3D11_BUFFER_SRV_0 { FirstElement: 0 },
+                        Anonymous2: D3D11_BUFFER_SRV_1 {
+                            NumElements: segs.len() as u32,
+                        },
+                    },
+                },
+            }),
+            Some(&mut srv),
+        )?;
+        Ok((b, srv.context("path view")?, segs.len() as u32))
+    }
 }
 
 /// Grid lines on the floor under the model: a "nice" spacing (1, 2 or 5 ×
@@ -148,8 +199,16 @@ impl GpuMesh {
             .collect();
         let g = grid(mesh);
         Ok(Self {
-            vb: buffer(device, &verts)?,
+            vb: if verts.is_empty() {
+                None
+            } else {
+                Some(buffer(device, &verts)?)
+            },
             count: verts.len() as u32,
+            path: match &mesh.path {
+                Some(p) => Some(path_buffer(device, &p.segs)?),
+                None => None,
+            },
             grid: if g.is_empty() {
                 None
             } else {
@@ -162,6 +221,8 @@ impl GpuMesh {
 /// What to draw this frame.
 pub struct ModelDraw<'a> {
     pub mesh: &'a GpuMesh,
+    /// Toolpaths: how many segments to draw (up to a layer).
+    pub limit: Option<u32>,
     pub view_proj: [[f32; 4]; 4],
     pub eye: [f32; 3],
     /// Direction towards the key light.
@@ -177,6 +238,7 @@ struct Targets {
 
 pub struct ModelRenderer {
     vs: ID3D11VertexShader,
+    vs_path: ID3D11VertexShader,
     ps: ID3D11PixelShader,
     layout: ID3D11InputLayout,
     cbuffer: ID3D11Buffer,
@@ -193,6 +255,8 @@ impl ModelRenderer {
         unsafe {
             let mut vs = None;
             device.CreateVertexShader(VS, None, Some(&mut vs))?;
+            let mut vs_path = None;
+            device.CreateVertexShader(VS_PATH, None, Some(&mut vs_path))?;
             let mut ps = None;
             device.CreatePixelShader(PS, None, Some(&mut ps))?;
             let elements = [
@@ -281,6 +345,7 @@ impl ModelRenderer {
             device.CreateBlendState(&blend_desc, Some(&mut blend))?;
             Ok(Self {
                 vs: vs.context("vs")?,
+                vs_path: vs_path.context("vs path")?,
                 ps: ps.context("ps")?,
                 layout: layout.context("layout")?,
                 cbuffer: cbuffer.context("cbuffer")?,
@@ -380,6 +445,7 @@ impl ModelRenderer {
             self.depth_read.clone(),
             self.blend.clone(),
         );
+        let vs_path = self.vs_path.clone();
         let t = self.targets(device, size)?;
         let stride = std::mem::size_of::<Vertex>() as u32;
         let offset = 0u32;
@@ -422,14 +488,21 @@ impl ModelRenderer {
                 0,
             );
             ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
-            ctx.IASetVertexBuffers(
-                0,
-                1,
-                Some(&Some(d.mesh.vb.clone())),
-                Some(&stride),
-                Some(&offset),
-            );
-            ctx.Draw(d.mesh.count, 0);
+            if let Some(vb) = &d.mesh.vb {
+                ctx.IASetVertexBuffers(0, 1, Some(&Some(vb.clone())), Some(&stride), Some(&offset));
+                ctx.Draw(d.mesh.count, 0);
+            }
+            // A toolpath: one bar (18 vertices) per segment, up to `limit`.
+            if let Some((_, srv, n)) = &d.mesh.path {
+                let count = d.limit.unwrap_or(*n).min(*n);
+                ctx.IASetInputLayout(None);
+                ctx.VSSetShader(&vs_path, None);
+                ctx.VSSetShaderResources(0, Some(&[Some(srv.clone())]));
+                ctx.DrawInstanced(18, count, 0, 0);
+                ctx.VSSetShaderResources(0, Some(&[None]));
+                ctx.VSSetShader(&vs, None);
+                ctx.IASetInputLayout(&layout);
+            }
 
             if let Some((grid, n)) = &d.mesh.grid {
                 ctx.OMSetBlendState(&blend, None, 0xffff_ffff);
@@ -489,6 +562,99 @@ mod tests {
         b.finish().unwrap()
     }
 
+    /// A 20 × 20 mm zig-zag of infill drawn as a toolpath: the frame shows
+    /// red lines; with a limit of one segment almost nothing.
+    #[test]
+    fn draws_a_toolpath() {
+        let mut g = String::from("G90\nM82\nG92 E0\nG1 Z0.2\n;TYPE:Sparse infill\n");
+        let mut e = 0.0;
+        for i in 0..50 {
+            let y = i as f32 * 0.4;
+            let (x0, x1) = if i % 2 == 0 { (0.0, 20.0) } else { (20.0, 0.0) };
+            e += 1.0;
+            g.push_str(&format!("G1 X{x0} Y{y}\nG1 X{x1} Y{y} E{e}\n"));
+        }
+        let mesh = crate::model::gcode::parse(g.as_bytes()).unwrap();
+        let gpu = Gpu::new(Adapter::Warp, 64, 64).expect("warp");
+        let gm = GpuMesh::upload(&gpu.device, &mesh).unwrap();
+        let cam = Orbit::fit(&mesh);
+        let (w, h) = (160u32, 120u32);
+        let tex = |usage, bind: u32, cpu: u32| {
+            let mut t = None;
+            unsafe {
+                gpu.device
+                    .CreateTexture2D(
+                        &D3D11_TEXTURE2D_DESC {
+                            Width: w,
+                            Height: h,
+                            MipLevels: 1,
+                            ArraySize: 1,
+                            Format: DXGI_FORMAT_B8G8R8A8_UNORM,
+                            SampleDesc: DXGI_SAMPLE_DESC {
+                                Count: 1,
+                                Quality: 0,
+                            },
+                            Usage: usage,
+                            BindFlags: bind,
+                            CPUAccessFlags: cpu,
+                            ..Default::default()
+                        },
+                        None,
+                        Some(&mut t),
+                    )
+                    .unwrap();
+            }
+            t.unwrap()
+        };
+        let target = tex(D3D11_USAGE_DEFAULT, D3D11_BIND_RENDER_TARGET.0 as u32, 0);
+        let staging = tex(D3D11_USAGE_STAGING, 0, D3D11_CPU_ACCESS_READ.0 as u32);
+        let mut r = ModelRenderer::new(&gpu.device).unwrap();
+        let mut red = |limit: Option<u32>| {
+            let d = ModelDraw {
+                mesh: &gm,
+                view_proj: cam.view_proj(w as f32 / h as f32, mesh.radius()),
+                eye: cam.eye(),
+                light: [0.3, 0.8, 0.5],
+                limit,
+            };
+            r.draw(
+                &gpu.device,
+                &gpu.context,
+                &target,
+                (w, h),
+                [0.0, 0.0, 0.0, 1.0],
+                &d,
+            )
+            .unwrap();
+            unsafe {
+                gpu.context.CopyResource(&staging, &target);
+                let mut m = D3D11_MAPPED_SUBRESOURCE::default();
+                gpu.context
+                    .Map(&staging, 0, D3D11_MAP_READ, 0, Some(&mut m))
+                    .unwrap();
+                let mut n = 0;
+                for y in 0..h {
+                    for x in 0..w {
+                        let p = (m.pData as *const u8).add((y * m.RowPitch + x * 4) as usize);
+                        let (b, g, r) = (*p, *p.add(1), *p.add(2));
+                        if r > 60
+                            && u32::from(r) > u32::from(g) * 2
+                            && u32::from(r) > u32::from(b) * 2
+                        {
+                            n += 1;
+                        }
+                    }
+                }
+                gpu.context.Unmap(&staging, 0);
+                n
+            }
+        };
+        let all = red(None);
+        let one = red(Some(1));
+        assert!(all > 2000, "{all}");
+        assert!(one < all / 10, "{one} vs {all}");
+    }
+
     /// Draws a cube with WARP into an off-screen texture and reads it back.
     #[test]
     fn draws_a_lit_model() {
@@ -531,6 +697,7 @@ mod tests {
             view_proj: cam.view_proj(w as f32 / h as f32, mesh.radius()),
             eye: cam.eye(),
             light: [0.3, 0.8, 0.5],
+            limit: None,
         };
         r.draw(
             &gpu.device,
@@ -631,6 +798,7 @@ mod preview {
                 view_proj: cam.view_proj(w as f32 / h as f32, mesh.radius()),
                 eye: cam.eye(),
                 light,
+                limit: None,
             };
             // The windowed background (#2B2B2B).
             r.draw(

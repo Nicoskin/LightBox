@@ -9,3 +9,4 @@ $dir = $PSScriptRoot
 & $fxc /nologo /O3 /Qstrip_reflect /Qstrip_debug /E PSDiff /T ps_5_0 /Fo "$dir\compiled\image_diff_ps.cso" "$dir\image.hlsl"
 & $fxc /nologo /O3 /Qstrip_reflect /Qstrip_debug /E VSMain /T vs_5_0 /Fo "$dir\compiled\model_vs.cso" "$dir\model.hlsl"
 & $fxc /nologo /O3 /Qstrip_reflect /Qstrip_debug /E PSMain /T ps_5_0 /Fo "$dir\compiled\model_ps.cso" "$dir\model.hlsl"
+& $fxc /nologo /O3 /Qstrip_reflect /Qstrip_debug /E VSPath /T vs_5_0 /Fo "$dir\compiled\model_path_vs.cso" "$dir\model.hlsl"
