@@ -296,7 +296,7 @@ impl App {
             {
                 return Ok(Some(LRESULT(0)));
             }
-            // ↑ / ↓ turn document pages.
+            // ↑ / ↓: document pages, toolpath layers, project plates.
             0x26 | 0x28
                 if !ctrl
                     && (self.step_page(if vk == 0x26 { -1 } else { 1 })?
@@ -305,7 +305,8 @@ impl App {
                             (true, true) => -10,
                             (false, false) => 1,
                             (false, true) => 10,
-                        })?) =>
+                        })?
+                        || self.step_plate(if vk == 0x26 { -1 } else { 1 })?) =>
             {
                 return Ok(Some(LRESULT(0)));
             }

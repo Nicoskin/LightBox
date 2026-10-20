@@ -33,6 +33,15 @@ pub struct Mesh {
     pub max: [f32; 3],
     /// G-code: the toolpath (instead of triangles).
     pub path: Option<Box<gcode::Toolpath>>,
+    /// Slicer projects with several build plates: their triangles.
+    pub plates: Vec<Plate>,
+}
+
+/// A build plate of a slicer project: a run of triangles.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Plate {
+    pub name: String,
+    pub tris: std::ops::Range<usize>,
 }
 
 impl Mesh {
@@ -61,6 +70,28 @@ impl Mesh {
     pub fn radius(&self) -> f32 {
         let s = self.size();
         (s[0] * s[0] + s[1] * s[1] + s[2] * s[2]).sqrt() / 2.0
+    }
+
+    /// The triangles `tris` as a mesh of their own (one plate).
+    pub fn part(&self, tris: std::ops::Range<usize>) -> Mesh {
+        let end = (tris.end * 3).min(self.positions.len());
+        let r = (tris.start * 3).min(end)..end;
+        let positions = self.positions[r.clone()].to_vec();
+        let (mut min, mut max) = ([f32::MAX; 3], [f32::MIN; 3]);
+        for p in &positions {
+            for i in 0..3 {
+                min[i] = min[i].min(p[i]);
+                max[i] = max[i].max(p[i]);
+            }
+        }
+        Mesh {
+            normals: self.normals[r.clone()].to_vec(),
+            colors: self.colors.as_ref().map(|c| c[r].to_vec()),
+            positions,
+            min,
+            max,
+            ..Default::default()
+        }
     }
 }
 
@@ -110,6 +141,15 @@ impl Builder {
             self.colors.push(color.unwrap_or(DEFAULT_COLOR));
         }
         self.colored |= color.is_some();
+    }
+
+    /// Triangles added so far.
+    pub fn count(&self) -> usize {
+        self.mesh.positions.len() / 3
+    }
+
+    pub fn set_plates(&mut self, plates: Vec<Plate>) {
+        self.mesh.plates = plates;
     }
 
     pub fn finish(mut self) -> Result<Mesh, String> {

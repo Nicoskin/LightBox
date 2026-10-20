@@ -21,10 +21,14 @@ pub(super) const MODEL_DISPLAY: (f64, f64) = (1280.0, 960.0);
 pub(super) struct ModelState {
     pub key: String,
     mesh: Arc<Mesh>,
+    /// What is shown: the whole mesh or one build plate.
+    view: Arc<Mesh>,
     gpu: Rc<GpuMesh>,
     cam: Orbit,
     /// G-code: the top layer shown (0-based).
     layer: usize,
+    /// Slicer projects: the plate shown (`None`: all of them).
+    plate: Option<usize>,
 }
 
 pub(super) type ModelRx = (String, Receiver<Result<Mesh, String>>);
@@ -93,12 +97,15 @@ impl App {
                     .path
                     .as_ref()
                     .map_or(0, |p| p.layer_ends.len().saturating_sub(1));
+                let mesh = Arc::new(mesh);
                 self.model = Some(ModelState {
                     key,
-                    mesh: Arc::new(mesh),
+                    view: Arc::clone(&mesh),
+                    mesh,
                     gpu,
                     cam,
                     layer,
+                    plate: None,
                 });
                 self.error = None;
                 self.notice = None;
@@ -115,7 +122,7 @@ impl App {
     /// After a GPU switch: upload the mesh to the new device.
     pub(super) fn reupload_model(&mut self) -> Result<()> {
         if let Some(m) = &mut self.model {
-            m.gpu = Rc::new(GpuMesh::upload(&self.gpu.device, &m.mesh)?);
+            m.gpu = Rc::new(GpuMesh::upload(&self.gpu.device, &m.view)?);
         }
         Ok(())
     }
@@ -124,7 +131,7 @@ impl App {
     pub(super) fn model_draw(&self) -> Option<FrameModel> {
         let m = self.current_model()?;
         let (w, h) = self.viewport();
-        let vp = m.cam.view_proj((w / h.max(1.0)) as f32, m.mesh.radius());
+        let vp = m.cam.view_proj((w / h.max(1.0)) as f32, m.view.radius());
         let (x, y, z) = m.cam.axes();
         // Key light from the upper left, a little in front.
         let light = model::normalize([
@@ -162,7 +169,7 @@ impl App {
         let Some(m) = self.model.as_mut().filter(|m| m.key == key) else {
             return Ok(false);
         };
-        let r = m.mesh.radius().max(1e-6);
+        let r = m.view.radius().max(1e-6);
         m.cam.distance = (m.cam.distance / factor as f32).clamp(r * 0.05, r * 50.0);
         self.render()?;
         Ok(true)
@@ -174,7 +181,7 @@ impl App {
         let Some(m) = self.model.as_mut().filter(|m| m.key == key) else {
             return Ok(false);
         };
-        m.cam = Orbit::fit(&m.mesh);
+        m.cam = Orbit::fit(&m.view);
         self.render()?;
         Ok(true)
     }
@@ -200,15 +207,23 @@ impl App {
             parts.extend(p.filament.clone());
             return Some(parts.join("  ·  "));
         }
-        let s = m.mesh.size();
+        let s = m.view.size();
         // Back to the file's Z-up axes for the dimensions: X, Y (depth), Z.
-        Some(format!(
+        let text = format!(
             "{} треугольников  ·  {:.1} × {:.1} × {:.1}",
-            m.mesh.triangles(),
+            m.view.triangles(),
             s[0],
             s[2],
             s[1]
-        ))
+        );
+        if m.mesh.plates.is_empty() {
+            return Some(text);
+        }
+        let plate = m.plate.map_or_else(
+            || "все столы".to_string(),
+            |i| m.mesh.plates[i].name.clone(),
+        );
+        Some(format!("{plate}  ·  {text}"))
     }
 }
 
@@ -239,6 +254,37 @@ impl App {
         m.layer = (m.layer as i64 + delta).clamp(0, last) as usize;
         let z = p.layer_z.get(m.layer).copied().unwrap_or(0.0);
         let text = format!("Слой {} из {} · {z:.2} мм", m.layer + 1, last + 1).replace('.', ",");
+        self.notice(&text);
+        self.render()?;
+        Ok(true)
+    }
+
+    /// ↑ / ↓ in a slicer project with several plates: all plates, then
+    /// each one alone. `false` when the model has no plates.
+    pub(super) fn step_plate(&mut self, delta: i64) -> Result<bool> {
+        let key = cache::key(&self.current);
+        let Some(m) = self.model.as_mut().filter(|m| m.key == key) else {
+            return Ok(false);
+        };
+        let n = m.mesh.plates.len();
+        if n == 0 {
+            return Ok(false);
+        }
+        let at = m.plate.map_or(0, |i| i as i64 + 1);
+        let to = (at + delta).clamp(0, n as i64);
+        if to != at {
+            m.plate = (to > 0).then(|| to as usize - 1);
+            m.view = match m.plate {
+                Some(i) => Arc::new(m.mesh.part(m.mesh.plates[i].tris.clone())),
+                None => Arc::clone(&m.mesh),
+            };
+            m.gpu = Rc::new(GpuMesh::upload(&self.gpu.device, &m.view)?);
+            m.cam = Orbit::fit(&m.view);
+        }
+        let text = match m.plate {
+            Some(i) => format!("{} из {n}", m.mesh.plates[i].name),
+            None => format!("Все столы ({n})"),
+        };
         self.notice(&text);
         self.render()?;
         Ok(true)
