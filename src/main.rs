@@ -29,6 +29,7 @@ mod map;
 mod metadata;
 mod model;
 mod orientation;
+mod paths;
 mod rating;
 mod settings;
 mod ui;

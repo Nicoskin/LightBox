@@ -80,6 +80,22 @@ fn row(label: &'static str, choices: Vec<(Choice, &'static str)>) -> Row {
 
 /// The rows of one page.
 pub fn rows(tab: Tab) -> Vec<Row> {
+    let mut rows = all_rows(tab);
+    // The portable version stays out of the tray and Windows start-up.
+    if crate::paths::portable() {
+        rows.retain(|r| {
+            !r.choices.iter().any(|(c, _)| {
+                matches!(
+                    c,
+                    Choice::Resident(_) | Choice::QuickLook(_) | Choice::Autostart(_)
+                )
+            })
+        });
+    }
+    rows
+}
+
+fn all_rows(tab: Tab) -> Vec<Row> {
     use Choice::*;
     match tab {
         Tab::View => vec![

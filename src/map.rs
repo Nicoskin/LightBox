@@ -20,12 +20,7 @@ fn world(lat: f64, lon: f64) -> (f64, f64) {
 }
 
 fn cache_dir() -> Option<PathBuf> {
-    std::env::var_os("LOCALAPPDATA").map(|d| {
-        PathBuf::from(d)
-            .join("Lightbox")
-            .join("tiles")
-            .join(ZOOM.to_string())
-    })
+    crate::paths::local_dir().map(|d| d.join("tiles").join(ZOOM.to_string()))
 }
 
 /// One tile as straight RGBA8, from the cache or the tile server.

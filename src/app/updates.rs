@@ -115,6 +115,25 @@ impl App {
 
     fn offer_update(&mut self, release: Release) -> Result<()> {
         let notes: String = release.notes.chars().take(600).collect();
+        // The portable version is updated by hand: the download page.
+        if crate::paths::portable() {
+            let (choice, _) = dialogs::ask(
+                self.hwnd,
+                &format!("Доступна версия {}", release.version),
+                &format!("Сейчас у вас {}.\n\n{notes}", update::VERSION),
+                &[(
+                    ID_UPDATE,
+                    "Открыть страницу загрузки\nПортативная версия обновляется вручную: замените файлы в папке",
+                )],
+                None,
+            );
+            if choice == Some(ID_UPDATE)
+                && let Some(repo) = update::REPO
+            {
+                crate::win::shell_open(&format!("https://github.com/{repo}/releases/latest"));
+            }
+            return Ok(());
+        }
         let (choice, _) = dialogs::ask(
             self.hwnd,
             &format!("Доступна версия {}", release.version),

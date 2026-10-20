@@ -313,10 +313,8 @@ fn set_wallpaper(path: &Path, edit: Orientation) -> Result<()> {
     } else {
         let (px, w, h) = oriented(path, edit)?;
         let jpeg = encode::encode_jpeg(&px, w, h, 95)?;
-        let dir = std::env::var_os("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(std::env::temp_dir)
-            .join(crate::APP_NAME);
+        let dir =
+            crate::paths::local_dir().unwrap_or_else(|| std::env::temp_dir().join(crate::APP_NAME));
         std::fs::create_dir_all(&dir)?;
         let out = dir.join("wallpaper.jpg");
         std::fs::write(&out, jpeg)?;

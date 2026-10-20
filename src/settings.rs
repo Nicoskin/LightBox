@@ -1,4 +1,5 @@
-//! User settings, persisted in `%APPDATA%\Lightbox\settings.toml`.
+//! User settings, persisted in `%APPDATA%\Lightbox\settings.toml` (the
+//! portable version: `data\settings.toml` next to the exe).
 //!
 //! Missing or unknown keys fall back to defaults, so old files keep working
 //! as options are added.
@@ -220,21 +221,24 @@ impl Default for Settings {
 }
 
 fn path() -> Option<PathBuf> {
-    let appdata = std::env::var_os("APPDATA")?;
-    Some(
-        PathBuf::from(appdata)
-            .join("Lightbox")
-            .join("settings.toml"),
-    )
+    crate::paths::config_dir().map(|d| d.join("settings.toml"))
 }
 
 impl Settings {
     /// Reads the settings file; defaults if it is missing or unreadable.
     pub fn load() -> Self {
-        path()
+        let mut s: Self = path()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .map(|s| Self::parse(&s))
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // The portable version has no tray (and so no Space in Explorer)
+        // and does not start with Windows.
+        if crate::paths::portable() {
+            s.resident = false;
+            s.quick_look = false;
+            s.autostart = false;
+        }
+        s
     }
 
     fn parse(text: &str) -> Self {

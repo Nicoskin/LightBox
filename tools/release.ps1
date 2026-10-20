@@ -6,8 +6,9 @@
 # -Repo (or $env:LIGHTBOX_UPDATE_REPO) is the GitHub repository whose
 # Releases the viewer checks for updates; without it updates are off.
 # Output in dist/: lightbox-setup.exe and its .sha256 (a fixed name, so that
-# .../releases/latest/download/lightbox-setup.exe always works). Publish
-# with the command printed at the end (GitHub CLI).
+# .../releases/latest/download/lightbox-setup.exe always works), and
+# lightbox-portable.zip. Publish with the command printed at the end
+# (GitHub CLI).
 
 param([string]$Repo = $env:LIGHTBOX_UPDATE_REPO)
 $ErrorActionPreference = "Stop"
@@ -32,14 +33,33 @@ Copy-Item "$root\target\dist-setup\release\lightbox-setup.exe" $setup -Force
 $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
 Set-Content -Path "$setup.sha256" -Value "$hash  lightbox-setup.exe" -NoNewline -Encoding ascii
 
+# Portable: the viewer and the marker that keeps its settings beside it.
+$stage = Join-Path $root "target\dist-portable\Lightbox"
+Remove-Item -Recurse -Force $stage -ErrorAction SilentlyContinue
+New-Item -ItemType Directory -Force $stage | Out-Null
+Copy-Item "$root\target\dist\release\lightbox.exe" $stage
+Set-Content -Path "$stage\portable.txt" -Encoding utf8 -Value @"
+Lightbox $version, портативная версия.
+Настройки и кэш хранятся в папке data рядом с lightbox.exe; трей, автозапуск
+и реестр не используются. Удалите этот файл, чтобы Lightbox работал как
+установленный.
+
+Lightbox $version, portable. Settings and caches live in the data folder next
+to lightbox.exe; no tray, start-up entry or registry. Delete this file to
+make Lightbox use the normal locations.
+"@
+$portable = Join-Path $dist "lightbox-portable.zip"
+Compress-Archive -Path $stage -DestinationPath $portable -Force
+
 Write-Host ""
 Write-Host "Lightbox $version" -ForegroundColor Green
 Write-Host "  $setup ($([math]::Round((Get-Item $setup).Length / 1MB, 1)) MB)"
 Write-Host "  sha256 $hash"
+Write-Host "  $portable ($([math]::Round((Get-Item $portable).Length / 1MB, 1)) MB)"
 if ($Repo) {
     Write-Host ""
     Write-Host "Publish:"
-    Write-Host "  gh release create v$version `"$setup`" `"$setup.sha256`" --repo $Repo --title `"Lightbox $version`" --generate-notes"
+    Write-Host "  gh release create v$version `"$setup`" `"$setup.sha256`" `"$portable`" --repo $Repo --title `"Lightbox $version`" --generate-notes"
 } else {
     Write-Host "  (built without -Repo: this build does not check for updates)" -ForegroundColor Yellow
 }
