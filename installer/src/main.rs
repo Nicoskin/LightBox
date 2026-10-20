@@ -2,8 +2,10 @@
 //!
 //! Installs for the current user only (no administrator rights) into
 //! `%LOCALAPPDATA%\Programs\Lightbox`, with a Start menu shortcut and an
-//! entry in "Installed apps". Run over an existing installation it updates
-//! it in place: settings, file associations and the tray mode stay.
+//! entry in "Installed apps", and optionally the Explorer thumbnail handler
+//! for 3D models (`lightbox_thumbs.dll`, see shellext/). Run over an
+//! existing installation it updates it in place: settings, file
+//! associations, the tray mode and the thumbnails choice stay.
 //!
 //!   lightbox-setup.exe                 interactive install / update
 //!   lightbox-setup.exe /update [file]  silent update (started by the
@@ -15,10 +17,11 @@ use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{Duration, Instant};
 
-use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, FreeLibrary, HWND, LPARAM, WPARAM};
 use windows::Win32::System::Com::{
     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, IPersistFile,
 };
+use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Registry::{
     HKEY_CURRENT_USER, REG_DWORD, REG_SZ, RRF_RT_REG_SZ, RegGetValueW, RegSetKeyValueW,
 };
@@ -34,16 +37,33 @@ use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowExW, GetWindowThreadProcessId, MB_ICONERROR, MB_OK, MessageBoxW, PostMessageW,
     RegisterWindowMessageW, SW_SHOWNORMAL,
 };
-use windows::core::{BOOL, HSTRING, Interface as _, PCWSTR, PWSTR, w};
+use windows::core::{BOOL, HRESULT, HSTRING, Interface as _, PCSTR, PCWSTR, PWSTR, s, w};
 
 const APP: &str = "Lightbox";
 const VERSION: &str = env!("LIGHTBOX_VERSION");
 /// The viewer this installer installs.
 static PAYLOAD: &[u8] = include_bytes!(env!("LIGHTBOX_EXE"));
+/// Explorer thumbnails for 3D models, installed next to the viewer.
+static THUMBS: &[u8] = include_bytes!(env!("LIGHTBOX_THUMBS_DLL"));
+const THUMBS_DLL: &str = "lightbox_thumbs.dll";
+/// The thumbnail handler's class (shellext/src/register.rs).
+const THUMBS_CLSID: &str = "{BE34661C-1FC5-4BE3-A5DA-4DE11DD6BD54}";
 
 const ID_ALL: i32 = 101;
 const ID_ONLY: i32 = 102;
 const ID_UPDATE: i32 = 103;
+const ID_THUMBS_ON: i32 = 201;
+const ID_THUMBS_OFF: i32 = 202;
+
+/// What the user chose.
+struct Choice {
+    /// Open the default apps page to make Lightbox the default viewer.
+    defaults: bool,
+    /// Start with Windows, in the tray.
+    tray: bool,
+    /// Explorer thumbnails for 3D models.
+    thumbs: bool,
+}
 
 fn main() {
     let mut update = false;
@@ -82,30 +102,48 @@ fn run(update: bool, open: Option<PathBuf>) -> Result<(), String> {
     let exe = dir.join("lightbox.exe");
     let installed = reg_get(&uninstall_key(), "DisplayVersion");
 
+    let had_thumbs = thumbs_registered();
+
     // What to do.
-    let (defaults, tray) = if update {
-        (false, false)
+    let Choice {
+        defaults,
+        tray,
+        thumbs,
+    } = if update {
+        Choice {
+            defaults: false,
+            tray: false,
+            thumbs: had_thumbs,
+        }
     } else {
-        match ask(installed.as_deref()) {
+        // Suggested on: new installations and those from before the option
+        // (no DLL yet); otherwise as it was.
+        let suggest = had_thumbs || !dir.join(THUMBS_DLL).exists();
+        match ask(installed.as_deref(), suggest) {
             None => return Ok(()),
             Some(choice) => choice,
         }
     };
 
     // Close running copies (a viewer in the tray included) and replace the
-    // program. A running exe can be renamed but not overwritten: the old
-    // one moves aside and is deleted on the next installation.
+    // program and the thumbnail handler (which Explorer may have loaded).
     let was_running = quit_instances(&exe, Duration::from_secs(4));
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     cleanup_old(&dir);
-    if exe.exists() {
-        let old = dir.join(format!("lightbox.exe.old-{}", std::process::id()));
-        std::fs::rename(&exe, &old).map_err(|e| format!("{}: {e}", exe.display()))?;
-    }
-    std::fs::write(&exe, PAYLOAD).map_err(|e| format!("{}: {e}", exe.display()))?;
+    replace(&exe, PAYLOAD)?;
+    let dll = dir.join(THUMBS_DLL);
+    replace(&dll, THUMBS)?;
 
     shortcut(&exe).map_err(|e| format!("{}: {e}", l("ярлык", "shortcut")))?;
     uninstall_entry(&dir, &exe)?;
+    // Registered again on updates too: refreshes the DLL's path.
+    let thumbs_error = if thumbs {
+        call_dll(&dll, s!("DllRegisterServer")).err()
+    } else if had_thumbs {
+        call_dll(&dll, s!("DllUnregisterServer")).err()
+    } else {
+        None
+    };
     // File types for "Open with" and Default Apps (also refreshes the path).
     let _ = Command::new(&exe).arg("--register").status();
     if tray {
@@ -137,9 +175,54 @@ fn run(update: bool, open: Option<PathBuf>) -> Result<(), String> {
             let _ = Command::new(&exe).arg(file).spawn();
         }
     } else {
-        done(installed.is_some());
+        done(installed.is_some(), thumbs && !had_thumbs, thumbs_error);
     }
     Ok(())
+}
+
+/// Writes `bytes` to `path`. A running exe or a loaded DLL can be renamed
+/// but not overwritten: the old file moves aside and is deleted now if it
+/// is free, else on the next installation.
+fn replace(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    if path.exists() {
+        let mut old = path.as_os_str().to_owned();
+        old.push(format!(".old-{}", std::process::id()));
+        std::fs::rename(path, &old).map_err(|e| format!("{}: {e}", path.display()))?;
+        let _ = std::fs::remove_file(&old);
+    }
+    std::fs::write(path, bytes).map_err(|e| format!("{}: {e}", path.display()))
+}
+
+/// `true` if the thumbnail handler is registered for this user.
+fn thumbs_registered() -> bool {
+    reg_get(
+        &format!(r"Software\Classes\CLSID\{THUMBS_CLSID}\InprocServer32"),
+        "",
+    )
+    .is_some()
+}
+
+/// Calls the thumbnail handler's `DllRegisterServer` /
+/// `DllUnregisterServer` (registration lives in the DLL: shellext/).
+fn call_dll(dll: &Path, export: PCSTR) -> Result<(), String> {
+    // SAFETY: our own DLL; the export has the documented COM signature
+    // `HRESULT __stdcall fn(void)`, and the library is freed after the call.
+    unsafe {
+        let h = LoadLibraryW(&HSTRING::from(dll.as_os_str())).map_err(|e| e.message())?;
+        let r = match GetProcAddress(h, export) {
+            Some(f) => {
+                let f: unsafe extern "system" fn() -> HRESULT = std::mem::transmute(f);
+                f().ok().map_err(|e| e.message())
+            }
+            None => Err(format!(
+                "{} {}",
+                l("нет функции", "no function"),
+                export.display()
+            )),
+        };
+        let _ = FreeLibrary(h);
+        r
+    }
 }
 
 fn install_dir() -> Option<PathBuf> {
@@ -155,8 +238,8 @@ fn tray_enabled() -> bool {
     reg_get(r"Software\Microsoft\Windows\CurrentVersion\Run", APP).is_some()
 }
 
-/// Install dialog: (open all images with it, start in the tray).
-fn ask(installed: Option<&str>) -> Option<(bool, bool)> {
+/// Install / update dialog; `thumbs` is the thumbnails option's default.
+fn ask(installed: Option<&str>, thumbs: bool) -> Option<Choice> {
     let (instruction, content, buttons): (String, String, Vec<(i32, &str)>) = match installed {
         Some(old) => (
             format!("{} {APP} {old} → {VERSION}", l("Обновить", "Update")),
@@ -214,6 +297,24 @@ fn ask(installed: Option<&str>) -> Option<(bool, bool)> {
         "Start when Windows starts (in the tray: instant opening and Space preview in Explorer)",
     ));
     let title = HSTRING::from(l("Установка Lightbox", "Lightbox Setup"));
+    let thumbs_on = HSTRING::from(l(
+        "Показывать миниатюры 3D-моделей в Проводнике (STL, OBJ, 3MF)",
+        "Show 3D model thumbnails in Explorer (STL, OBJ, 3MF)",
+    ));
+    let thumbs_off = HSTRING::from(l(
+        "Не показывать миниатюры 3D-моделей",
+        "Don't show 3D model thumbnails",
+    ));
+    let radios = [
+        TASKDIALOG_BUTTON {
+            nButtonID: ID_THUMBS_ON,
+            pszButtonText: PCWSTR(thumbs_on.as_ptr()),
+        },
+        TASKDIALOG_BUTTON {
+            nButtonID: ID_THUMBS_OFF,
+            pszButtonText: PCWSTR(thumbs_off.as_ptr()),
+        },
+    ];
     let config = TASKDIALOGCONFIG {
         cbSize: std::mem::size_of::<TASKDIALOGCONFIG>() as u32,
         dwFlags: TDF_USE_COMMAND_LINKS | TDF_ALLOW_DIALOG_CANCELLATION,
@@ -224,6 +325,9 @@ fn ask(installed: Option<&str>) -> Option<(bool, bool)> {
         cButtons: items.len() as u32,
         pButtons: items.as_ptr(),
         nDefaultButton: buttons[0].0,
+        cRadioButtons: radios.len() as u32,
+        pRadioButtons: radios.as_ptr(),
+        nDefaultRadioButton: if thumbs { ID_THUMBS_ON } else { ID_THUMBS_OFF },
         pszVerificationText: if installed.is_some() {
             PCWSTR::null()
         } else {
@@ -232,19 +336,35 @@ fn ask(installed: Option<&str>) -> Option<(bool, bool)> {
         ..Default::default()
     };
     let mut button = 0;
+    let mut radio = 0;
     let mut checked = BOOL(0);
     // SAFETY: every pointer in `config` refers to data alive for the call.
-    unsafe { TaskDialogIndirect(&config, Some(&mut button), None, Some(&mut checked)) }.ok()?;
-    match button {
-        ID_ALL => Some((true, checked.as_bool())),
-        ID_ONLY => Some((false, checked.as_bool())),
-        ID_UPDATE => Some((false, false)),
-        _ => None,
+    unsafe {
+        TaskDialogIndirect(
+            &config,
+            Some(&mut button),
+            Some(&mut radio),
+            Some(&mut checked),
+        )
     }
+    .ok()?;
+    let (defaults, tray) = match button {
+        ID_ALL => (true, checked.as_bool()),
+        ID_ONLY => (false, checked.as_bool()),
+        ID_UPDATE => (false, false),
+        _ => return None,
+    };
+    Some(Choice {
+        defaults,
+        tray,
+        thumbs: radio == ID_THUMBS_ON,
+    })
 }
 
-fn done(updated: bool) {
-    let text = HSTRING::from(match (updated, ru()) {
+/// `thumbs_on`: the thumbnails were just turned on; `thumbs_error`: they
+/// could not be turned on or off.
+fn done(updated: bool, thumbs_on: bool, thumbs_error: Option<String>) {
+    let mut text = match (updated, ru()) {
         (true, true) => format!("{APP} обновлён до версии {VERSION}."),
         (true, false) => format!("{APP} has been updated to {VERSION}."),
         (false, true) => format!(
@@ -255,18 +375,36 @@ fn done(updated: bool) {
             "{APP} {VERSION} is installed.\n\nIt is in the Start menu and in “Open with”. \
              You can remove it in Installed apps."
         ),
-    });
+    };
+    if let Some(e) = thumbs_error {
+        text.push_str(&format!(
+            "\n\n{}: {e}",
+            l(
+                "Миниатюры 3D-моделей не настроены",
+                "3D model thumbnails were not set up"
+            )
+        ));
+    } else if thumbs_on {
+        // Explorer runs thumbnail handlers in a separate host, which sees a
+        // newly registered per-user class only after signing in again.
+        text.push_str(l(
+            "\n\nМиниатюры 3D-моделей появятся в Проводнике после повторного входа в Windows. \
+             Если он показывает старые, очистите эскизы: «Очистка диска» → «Эскизы».",
+            "\n\n3D model thumbnails appear in Explorer after signing in to Windows again. \
+             If it shows old ones, clear them: Disk Cleanup → Thumbnails.",
+        ));
+    }
     // SAFETY: plain message box.
-    unsafe { MessageBoxW(None, &text, &HSTRING::from(APP), MB_OK) };
+    unsafe { MessageBoxW(None, &HSTRING::from(text), &HSTRING::from(APP), MB_OK) };
 }
 
 /// Old copies moved aside by earlier updates.
 fn cleanup_old(dir: &Path) {
     if let Ok(rd) = std::fs::read_dir(dir) {
         for e in rd.flatten() {
-            if e.file_name()
-                .to_string_lossy()
-                .starts_with("lightbox.exe.old")
+            let name = e.file_name().to_string_lossy().into_owned();
+            if name.starts_with("lightbox.exe.old")
+                || name.starts_with(&format!("{THUMBS_DLL}.old"))
             {
                 let _ = std::fs::remove_file(e.path());
             }
@@ -369,7 +507,8 @@ fn uninstall_entry(dir: &Path, exe: &Path) -> Result<(), String> {
     }
     reg_set_dword(&key, "NoModify", 1)?;
     reg_set_dword(&key, "NoRepair", 1)?;
-    reg_set_dword(&key, "EstimatedSize", (PAYLOAD.len() / 1024) as u32)?;
+    let size = PAYLOAD.len() + THUMBS.len();
+    reg_set_dword(&key, "EstimatedSize", (size / 1024) as u32)?;
     Ok(())
 }
 

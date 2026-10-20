@@ -227,7 +227,7 @@ fn part_name(name: &str) -> String {
 }
 
 pub fn parse(data: &[u8]) -> Result<Mesh, String> {
-    let files = unzip(data)?;
+    let files = unzip(data, |_| true, usize::MAX)?;
     // The root model part is named in _rels/.rels; "3D/3dmodel.model" by default.
     let model_name = files
         .get("_rels/.rels")
@@ -512,8 +512,60 @@ fn add_object(
     }
 }
 
-/// The files of a ZIP archive (stored or deflated), by name.
-pub(crate) fn unzip(data: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
+/// The preview image a slicer saved in the package (PNG or JPEG bytes):
+/// the thumbnail named in _rels/.rels, else `Metadata/thumbnail.png`
+/// (PrusaSlicer, Cura), else `Metadata/plate_1.png` (Bambu, Orca).
+#[cfg_attr(
+    not(test),
+    allow(
+        dead_code,
+        reason = "used by the Explorer thumbnail handler (shellext/)"
+    )
+)]
+pub fn thumbnail(data: &[u8]) -> Option<Vec<u8>> {
+    let want = |n: &str| {
+        let n = n.to_ascii_lowercase();
+        n == "_rels/.rels"
+            || n.starts_with("metadata/")
+                && [".png", ".jpg", ".jpeg"].iter().any(|e| n.ends_with(e))
+    };
+    let mut files = unzip(data, want, 32 << 20).ok()?;
+    let rels_target = files.get("_rels/.rels").and_then(|r| {
+        let text = String::from_utf8_lossy(r).into_owned();
+        let doc = Document::parse(&text).ok()?;
+        doc.descendants()
+            .find(|n| {
+                n.attribute("Type")
+                    .is_some_and(|t| t.ends_with("/metadata/thumbnail"))
+            })
+            .and_then(|n| n.attribute("Target"))
+            .map(|t| t.trim_start_matches('/').to_string())
+    });
+    let names = rels_target.into_iter().chain([
+        "Metadata/thumbnail.png".into(),
+        "Metadata/plate_1.png".into(),
+    ]);
+    for name in names {
+        let key = files
+            .keys()
+            .find(|k| k.eq_ignore_ascii_case(&name) && *k != "_rels/.rels")
+            .cloned();
+        if let Some(bytes) = key.and_then(|k| files.remove(&k))
+            && !bytes.is_empty()
+        {
+            return Some(bytes);
+        }
+    }
+    None
+}
+
+/// The files of a ZIP archive (stored or deflated) whose names pass
+/// `want`, by name; a file inflating past `limit` bytes is an error.
+pub(crate) fn unzip(
+    data: &[u8],
+    want: impl Fn(&str) -> bool,
+    limit: usize,
+) -> Result<HashMap<String, Vec<u8>>, String> {
     let u16le = |o: usize| data.get(o..o + 2).map(|b| u16::from_le_bytes([b[0], b[1]]));
     let u32le = |o: usize| {
         data.get(o..o + 4)
@@ -578,6 +630,9 @@ pub(crate) fn unzip(data: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
             x += 4 + len;
         }
         p += 46 + name_len + extra + comment;
+        if !want(&name) {
+            continue;
+        }
         // Local header: its own name / extra lengths precede the data.
         let (Some(ln), Some(le)) = (u16le(local + 26), u16le(local + 28)) else {
             continue;
@@ -591,7 +646,8 @@ pub(crate) fn unzip(data: &[u8]) -> Result<HashMap<String, Vec<u8>>, String> {
         };
         let bytes = match method {
             0 => raw.to_vec(),
-            8 => miniz_oxide::inflate::decompress_to_vec(raw).map_err(|e| format!("ZIP: {e:?}"))?,
+            8 => miniz_oxide::inflate::decompress_to_vec_with_limit(raw, limit)
+                .map_err(|e| format!("ZIP: {e:?}"))?,
             _ => continue,
         };
         out.insert(name, bytes);
@@ -694,7 +750,35 @@ mod tests {
         tail[16..20].copy_from_slice(&u32::MAX.to_le_bytes());
         data.extend(z64);
         data.extend(tail);
-        assert_eq!(unzip(&data).unwrap()["a.txt"], b"hi");
+        assert_eq!(unzip(&data, |_| true, usize::MAX).unwrap()["a.txt"], b"hi");
+    }
+
+    #[test]
+    fn embedded_thumbnail() {
+        let rels = br#"<?xml version="1.0"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+ <Relationship Target="/3D/3dmodel.model" Id="rel0" Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>
+ <Relationship Target="/Metadata/plate_2.png" Id="rel1" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/thumbnail"/>
+</Relationships>"#;
+        // Named in _rels/.rels.
+        let data = zip(&[
+            ("_rels/.rels", rels),
+            ("Metadata/thumbnail.png", b"default"),
+            ("Metadata/plate_2.png", b"from rels"),
+        ]);
+        assert_eq!(thumbnail(&data).as_deref(), Some(&b"from rels"[..]));
+        // The usual name, any case.
+        let data = zip(&[
+            ("metadata/Thumbnail.PNG", b"png"),
+            ("3D/3dmodel.model", b""),
+        ]);
+        assert_eq!(thumbnail(&data).as_deref(), Some(&b"png"[..]));
+        // Bambu / Orca.
+        let data = zip(&[("Metadata/plate_1.png", b"plate")]);
+        assert_eq!(thumbnail(&data).as_deref(), Some(&b"plate"[..]));
+        // None, or not a ZIP at all.
+        assert_eq!(thumbnail(&zip(&[("3D/3dmodel.model", b"")])), None);
+        assert_eq!(thumbnail(b"solid cube"), None);
     }
 
     const TRIANGLE: &str = r#"<mesh>

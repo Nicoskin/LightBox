@@ -46,7 +46,7 @@ jobs:
           cargo fmt --check --manifest-path installer/Cargo.toml
 
       - name: Clippy
-        run: cargo clippy --release --all-targets --locked -- -D warnings
+        run: cargo clippy --release --workspace --all-targets --locked -- -D warnings
 
       # The full set is ~600 MB, almost all of it the 30000×20000 PNG that
       # only an #[ignore]d test reads. gen_testdata skips that file when it
@@ -59,15 +59,19 @@ jobs:
           cargo run --release --locked --example gen_testdata
 
       - name: Test
-        run: cargo test --release --locked
+        run: cargo test --release --workspace --locked
 
-      - name: Build viewer
-        run: cargo build --release --locked
+      - name: Build viewer and thumbnail handler
+        run: |
+          cargo build --release --locked
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build --profile shellext -p lightbox-thumbs --locked
 
       - name: Build installer
         shell: pwsh
         run: |
           $env:LIGHTBOX_EXE = "$PWD\target\release\lightbox.exe"
+          $env:LIGHTBOX_THUMBS_DLL = "$PWD\target\shellext\lightbox_thumbs.dll"
           $env:LIGHTBOX_VERSION = (Select-String -Path Cargo.toml -Pattern '^version = "(.+)"').Matches[0].Groups[1].Value
           cargo clippy --release --locked --manifest-path installer/Cargo.toml --target-dir target/setup -- -D warnings
           if ($LASTEXITCODE) { exit $LASTEXITCODE }

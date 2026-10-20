@@ -72,10 +72,20 @@ jobs:
           (secret) or SIGNPATH_ORGANIZATION_ID (variable) is not set, so this
           release is NOT signed. See docs/SIGNING.md."
 
-      - name: Build viewer
-        run: cargo build --release --locked --target-dir target/dist
+      - name: Build viewer and thumbnail handler
+        run: |
+          cargo build --release --locked --target-dir target/dist
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cargo build --profile shellext -p lightbox-thumbs --locked --target-dir target/dist
 
-      # --- lightbox.exe -> SignPath ---------------------------------------
+      # --- lightbox.exe and lightbox_thumbs.dll -> SignPath ----------------
+
+      - name: Stage unsigned binaries
+        if: env.SIGNPATH_ENABLED == 'true'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force unsigned | Out-Null
+          Copy-Item target/dist/release/lightbox.exe, target/dist/shellext/lightbox_thumbs.dll unsigned/
 
       - name: Upload unsigned lightbox.exe
         id: unsigned-exe
@@ -83,7 +93,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: unsigned-lightbox-exe
-          path: target/dist/release/lightbox.exe
+          path: unsigned/
           if-no-files-found: error
           retention-days: 7
 
@@ -109,6 +119,9 @@ jobs:
           if (-not $sig.SignerCertificate) { throw "signed/exe/lightbox.exe has no signature" }
           Write-Output "lightbox.exe: $($sig.Status), $($sig.SignerCertificate.Subject)"
           Copy-Item signed/exe/lightbox.exe target/dist/release/lightbox.exe -Force
+          $dll = Get-AuthenticodeSignature signed/exe/lightbox_thumbs.dll
+          if (-not $dll.SignerCertificate) { throw "signed/exe/lightbox_thumbs.dll has no signature" }
+          Copy-Item signed/exe/lightbox_thumbs.dll target/dist/shellext/lightbox_thumbs.dll -Force
 
       # --- installer embedding it -----------------------------------------
 
@@ -118,10 +131,32 @@ jobs:
           LIGHTBOX_VERSION: ${{ steps.version.outputs.version }}
         run: |
           $env:LIGHTBOX_EXE = "$PWD\target\dist\release\lightbox.exe"
+          $env:LIGHTBOX_THUMBS_DLL = "$PWD\target\dist\shellext\lightbox_thumbs.dll"
           cargo build --release --locked --manifest-path installer/Cargo.toml --target-dir target/dist-setup
           if ($LASTEXITCODE) { exit $LASTEXITCODE }
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item target/dist-setup/release/lightbox-setup.exe dist/lightbox-setup.exe -Force
+
+      # The portable version: the (signed) viewer and its marker file, as in
+      # tools/release.ps1.
+      - name: Portable zip
+        shell: pwsh
+        env:
+          LIGHTBOX_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          $stage = "target/dist-portable/Lightbox"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item target/dist/release/lightbox.exe $stage
+          Set-Content -Path "$stage/portable.txt" -Encoding utf8 -Value @"
+          Lightbox $env:LIGHTBOX_VERSION, портативная версия. Настройки и кэш хранятся
+          в папке data рядом с lightbox.exe. Удалите этот файл, чтобы Lightbox
+          работал как установленный.
+
+          Lightbox $env:LIGHTBOX_VERSION, portable. Settings and caches live in the data
+          folder next to lightbox.exe. Delete this file to make Lightbox use the
+          normal locations.
+          "@
+          Compress-Archive -Path $stage -DestinationPath dist/lightbox-portable.zip -Force
 
       - name: Upload unsigned installer
         id: unsigned-setup
@@ -180,7 +215,7 @@ jobs:
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           $tag = $env:GITHUB_REF_NAME
-          $files = "dist/lightbox-setup.exe", "dist/lightbox-setup.exe.sha256"
+          $files = "dist/lightbox-setup.exe", "dist/lightbox-setup.exe.sha256", "dist/lightbox-portable.zip"
           $draft = gh release view $tag --json isDraft --jq .isDraft 2>$null
           if ($LASTEXITCODE -eq 0) {
             # A re-run: replace the files, but never in a published release.

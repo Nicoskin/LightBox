@@ -28,6 +28,7 @@ A fast image and 3D model viewer for Windows 10/11 in the spirit of Picasa Photo
 - **Slideshow, filmstrip, folder watching, drag & drop** into and out of the window.
 - **File handling:** delete to the Recycle Bin, copy the image or its path, quick folders F1–F9, open in an editor, show in Explorer.
 - **Space in Explorer** previews the selected file (like Quick Look on macOS); a window can be pinned on top of the others.
+- **Thumbnails of STL, OBJ and 3MF in Explorer** (chosen during installation): the slicer's preview or the model itself.
 - **Every shortcut can be reassigned** in Settings → Keys.
 
 | 3D models | Pixel grid and the colour under the cursor |
@@ -46,6 +47,20 @@ A fast image and 3D model viewer for Windows 10/11 in the spirit of Picasa Photo
 | Documents | PDF, TXT and code; others through Windows preview handlers |
 
 ¹ HEIC opens with the Windows codec ("HEIF Image Extensions" from the Microsoft Store).
+
+## Speed
+
+Time from starting a program with a file to the photo on screen, ms (median of five runs after two warm-ups):
+
+| | JPEG 24 MP | PNG 24 MP | TIFF 24 MP |
+|---|---:|---:|---:|
+| **Lightbox** without the opening animation | **153** | **224** | **148** |
+| **Lightbox** by default | 204 | 297 | 162 |
+| IrfanView 4.76 | 250 | 368 | 202 |
+| XnView MP 1.12.2 | 390 | 512 | 313 |
+| Windows Photos | 622 | 627 | 610 |
+
+[`tools/bench_open.ps1`](tools/bench_open.ps1) starts the program with the file and captures the screen every 5 ms; the photo counts as shown when its colours fill the middle of the window. Lightbox's default 200 ms opening animation shows the photo from its first frame, but faded in, so the detector counts it about 50 ms later. The machine, the program windows and every run are in [docs/bench.md](docs/bench.md).
 
 ## Installation
 

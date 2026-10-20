@@ -1,13 +1,15 @@
 //! Where the installer puts the program, and `--uninstall` (run from
 //! "Installed apps"): closes running copies, removes the file types, the
-//! shortcut, the uninstall entry and the program folder.
+//! shortcut, the Explorer thumbnail handler, the uninstall entry and the
+//! program folder.
 
 use std::os::windows::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use anyhow::Result;
-use windows::Win32::Foundation::{CloseHandle, HWND, LPARAM, WPARAM};
+use windows::Win32::Foundation::{CloseHandle, FreeLibrary, HWND, LPARAM, WPARAM};
+use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RegDeleteTreeW};
 use windows::Win32::System::Threading::{
     OpenProcess, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, QueryFullProcessImageNameW,
@@ -15,7 +17,7 @@ use windows::Win32::System::Threading::{
 use windows::Win32::UI::WindowsAndMessaging::{
     FindWindowExW, GetWindowThreadProcessId, MB_ICONINFORMATION, MB_OK, MessageBoxW, PostMessageW,
 };
-use windows::core::{HSTRING, PWSTR, w};
+use windows::core::{HRESULT, HSTRING, PWSTR, s, w};
 
 use crate::APP_NAME;
 use crate::i18n::tr;
@@ -95,6 +97,29 @@ pub fn quit_instances(exe: &Path, wait: Duration) {
     }
 }
 
+/// Removes the Explorer thumbnail handler the installer put next to `exe`
+/// (shellext/), which also brings back the handlers it replaced.
+fn unregister_thumbnails(exe: &Path) {
+    let Some(dll) = exe.parent().map(|d| d.join("lightbox_thumbs.dll")) else {
+        return;
+    };
+    if !dll.exists() {
+        return;
+    }
+    // SAFETY: our own DLL; `DllUnregisterServer` is `HRESULT __stdcall
+    // fn(void)`, and the library is freed after the call.
+    unsafe {
+        let Ok(h) = LoadLibraryW(&HSTRING::from(dll.as_os_str())) else {
+            return;
+        };
+        if let Some(f) = GetProcAddress(h, s!("DllUnregisterServer")) {
+            let f: unsafe extern "system" fn() -> HRESULT = std::mem::transmute(f);
+            let _ = f();
+        }
+        let _ = FreeLibrary(h);
+    }
+}
+
 /// `--uninstall`.
 pub fn uninstall() -> Result<()> {
     let exe = std::env::current_exe()?;
@@ -109,6 +134,7 @@ pub fn uninstall() -> Result<()> {
         return Ok(());
     }
     quit_instances(&exe, Duration::from_secs(3));
+    unregister_thumbnails(&exe);
     registry::unregister(&exe)?;
     registry::set_autostart(&exe, false)?;
     if let Some(link) = start_menu_link() {

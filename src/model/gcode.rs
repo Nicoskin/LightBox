@@ -345,7 +345,7 @@ pub fn parse_text(text: &[u8]) -> Result<Toolpath, String> {
 pub fn parse(data: &[u8]) -> Result<Mesh, String> {
     // Bambu Studio's printable project: the G-code of the first plate.
     let tp = if data.starts_with(b"PK") {
-        let files = super::threemf::unzip(data)?;
+        let files = super::threemf::unzip(data, |_| true, usize::MAX)?;
         let mut names: Vec<&String> = files.keys().filter(|n| n.ends_with(".gcode")).collect();
         names.sort();
         let name = names.first().ok_or(tr("в архиве нет G-code"))?;

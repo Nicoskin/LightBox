@@ -1,5 +1,6 @@
-//! Embeds the viewer built by `tools/release.ps1` (LIGHTBOX_EXE) and gives
-//! the installer the viewer's icon, manifest and version.
+//! Embeds the viewer and the Explorer thumbnail handler built by
+//! `tools/release.ps1` (LIGHTBOX_EXE, LIGHTBOX_THUMBS_DLL) and gives the
+//! installer the viewer's icon, manifest and version.
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,9 +10,14 @@ fn main() {
     let exe = env::var("LIGHTBOX_EXE").unwrap_or_else(|_| {
         panic!("set LIGHTBOX_EXE to the release lightbox.exe (see tools/release.ps1)")
     });
+    let dll = env::var("LIGHTBOX_THUMBS_DLL").unwrap_or_else(|_| {
+        panic!("set LIGHTBOX_THUMBS_DLL to the built lightbox_thumbs.dll (see tools/release.ps1)")
+    });
     println!("cargo:rerun-if-env-changed=LIGHTBOX_EXE");
+    println!("cargo:rerun-if-env-changed=LIGHTBOX_THUMBS_DLL");
     println!("cargo:rerun-if-env-changed=LIGHTBOX_VERSION");
     println!("cargo:rerun-if-changed={exe}");
+    println!("cargo:rerun-if-changed={dll}");
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap())
         .parent()
         .unwrap()

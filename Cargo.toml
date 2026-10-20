@@ -131,6 +131,18 @@ debug = "line-tables-only"
 inherits = "release"
 strip = false
 
+# The Explorer thumbnail handler (shellext/, built by tools/release.ps1):
+# like release, but a panic unwinds to the COM boundary and becomes an
+# error instead of killing the thumbnail host process.
+[profile.shellext]
+inherits = "release"
+panic = "unwind"
+
+[workspace]
+members = ["shellext"]
+# Built separately: it embeds the release viewer (tools/release.ps1).
+exclude = ["installer"]
+
 [[example]]
 name = "explorer_tabs"
 path = "tools/explorer_tabs.rs"
