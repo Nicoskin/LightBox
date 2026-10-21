@@ -280,13 +280,15 @@ impl App {
             ));
         }
         // A model has no image rows: its triangles and size instead.
-        if self.model_mode()
-            && let Some(d) = self.model_details()
-        {
-            rows.push((tr("Модель").into(), d));
+        if self.model_mode() {
+            rows.extend(self.model_rows());
         }
-        // The file row goes after the name and size (a model has fewer).
-        let at = rows.len().min(2);
+        // The file row goes after the name and size (a model: after the name).
+        let at = if self.model_mode() {
+            1
+        } else {
+            rows.len().min(2)
+        };
         match self.file_info() {
             Some(f) => {
                 let mut file = inspect::human_size(f.size);

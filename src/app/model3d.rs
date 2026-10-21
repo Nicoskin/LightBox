@@ -342,6 +342,43 @@ impl App {
         );
         Some(format!("{plate}  ·  {text}"))
     }
+
+    /// The model's rows of the info card: one fact per row, so that long
+    /// values are not cut off.
+    pub(super) fn model_rows(&self) -> Vec<(String, String)> {
+        let Some(m) = self.current_model() else {
+            return Vec::new();
+        };
+        if let Some(p) = &m.mesh.path {
+            let mut parts = vec![t!("слой {} из {}", m.layer + 1, p.layer_ends.len())];
+            parts.extend(p.time.clone());
+            parts.extend(p.filament.clone());
+            return parts
+                .into_iter()
+                .enumerate()
+                .map(|(i, v)| (if i == 0 { tr("Модель") } else { "" }.into(), v))
+                .collect();
+        }
+        let mut rows = Vec::new();
+        if !m.mesh.plates.is_empty() {
+            let plate = m.plate.map_or_else(
+                || tr("все столы").to_string(),
+                |i| m.mesh.plates[i].name.clone(),
+            );
+            rows.push((tr("Стол").into(), plate));
+        }
+        let s = m.view.size();
+        rows.push((
+            tr("Модель").into(),
+            t!("{} треугольников", m.view.triangles()),
+        ));
+        // Back to the file's Z-up axes: X, Y (depth), Z.
+        rows.push((
+            tr("Размер").into(),
+            t!("{} × {} × {} мм", dec(s[0], 1), dec(s[2], 1), dec(s[1], 1)),
+        ));
+        rows
+    }
 }
 
 /// The GPU draw description for `model_draw`'s result.
