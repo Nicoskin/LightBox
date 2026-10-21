@@ -695,8 +695,23 @@ fn documents(dir: &Path) {
     )
     .expect("code");
 
-    let document = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>Lightbox — DOCX для предпросмотра</w:t></w:r></w:p></w:body></w:document>"#;
+    // A5 landscape with Word's own margins, a heading style, a table and a
+    // forced page break, long enough for several pages.
+    let mut body = String::from(
+        r#"<w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr><w:r><w:t>Lightbox — DOCX для предпросмотра</w:t></w:r></w:p><w:p><w:r><w:t xml:space="preserve">Обычный текст, </w:t></w:r><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">жирный, </w:t></w:r><w:r><w:rPr><w:i/><w:color w:val="C00000"/></w:rPr><w:t>курсив красным.</w:t></w:r></w:p><w:tbl><w:tr><w:tc><w:p><w:r><w:t>Ячейка 1</w:t></w:r></w:p></w:tc><w:tc><w:p><w:r><w:t>Ячейка 2</w:t></w:r></w:p></w:tc></w:tr></w:tbl>"#,
+    );
+    for i in 1..=40 {
+        body.push_str(&format!(
+            "<w:p><w:r><w:t>Абзац {i}. Страница берёт размер и поля из самого файла: здесь это A5, альбомная.</w:t></w:r></w:p>"
+        ));
+    }
+    body.push_str(r#"<w:p><w:r><w:br w:type="page"/><w:t>После разрыва страницы.</w:t></w:r></w:p><w:sectPr><w:pgSz w:w="11906" w:h="8391" w:orient="landscape"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134"/></w:sectPr>"#);
+    let document = format!(
+        r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>{body}</w:body></w:document>"#
+    );
+    let styles = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Calibri"/><w:sz w:val="22"/></w:rPr></w:rPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/><w:rPr><w:b/><w:color w:val="2F5496"/><w:sz w:val="36"/></w:rPr></w:style></w:styles>"#;
     let types = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/></Types>"#;
     let rels = r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -707,6 +722,7 @@ fn documents(dir: &Path) {
             ("[Content_Types].xml", types.as_bytes()),
             ("_rels/.rels", rels.as_bytes()),
             ("word/document.xml", document.as_bytes()),
+            ("word/styles.xml", styles.as_bytes()),
         ]),
     )
     .expect("docx");

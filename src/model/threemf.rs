@@ -862,9 +862,13 @@ mod tests {
             [("Stand", 0..2), ("Объект 2", 2..3), ("Объект 3", 3..4)]
         );
         // Only the second object, painted green.
-        let one = m.pick(&[(2..3, Some([0.0, 1.0, 0.0, 1.0]))]);
+        let one = m.pick(&[super::super::Part {
+            tris: 2..3,
+            paint: Some([0.0, 1.0, 0.0, 1.0]),
+            alpha: 0.5,
+        }]);
         assert_eq!(one.triangles(), 1);
-        assert_eq!(one.colors.as_ref().unwrap()[0], [0.0, 1.0, 0.0, 1.0]);
+        assert_eq!(one.colors.as_ref().unwrap()[0], [0.0, 1.0, 0.0, 0.5]);
         assert_eq!(m.pick(&[]).triangles(), 0);
         let colors = m.colors.as_ref().unwrap();
         let red = [1.0, 0.0, 0.0, 1.0];

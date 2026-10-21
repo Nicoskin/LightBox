@@ -72,6 +72,8 @@ pub struct Ui {
     pub objects: Option<ObjectsView>,
     /// A row of buttons above the panel (comparing).
     pub bar: Option<BarView>,
+    /// A vertical slider on the right (the section of a model).
+    pub vslider: Option<VSliderView>,
     /// The adjustments card.
     pub adjust: Option<AdjustView>,
     /// Points picked on a model (the ruler), joined by a line.
@@ -96,6 +98,7 @@ impl Ui {
             && self.crop.is_none()
             && self.objects.is_none()
             && self.bar.is_none()
+            && self.vslider.is_none()
             && self.adjust.is_none()
             && self.marks.is_empty()
     }
@@ -321,6 +324,9 @@ impl Overlay {
             }
             if let Some(b) = &ui.bar {
                 self.button_bar(b, ui.scale);
+            }
+            if let Some(v) = &ui.vslider {
+                self.vslider(v, ui.scale);
             }
             if let Some(a) = &ui.adjust {
                 self.adjust_card(a, ui.scale);
@@ -583,11 +589,27 @@ pub struct DialView {
     pub opacity: f32,
 }
 
+/// A vertical slider on a dark card: the value on top, the track below,
+/// filled from the bottom up to the knob.
+pub struct VSliderView {
+    pub card: Rect,
+    pub track: Rect,
+    /// 0 (bottom) … 1 (top).
+    pub value: f32,
+    pub label: String,
+    /// Being dragged.
+    pub hot: bool,
+}
+
 /// A row of buttons on a dark card (the compare bar).
 pub struct BarView {
     pub card: Rect,
     pub buttons: Vec<SegmentView>,
 }
+
+/// The open palette of the objects card: its card, the colour cells (rect,
+/// sRGB, hot) and the "as in the file" button.
+pub type PaletteView = (Rect, Vec<(Rect, [f32; 4], bool)>, SegmentView);
 
 /// The objects card of a 3D project: title, buttons and one row per
 /// object (clipped to `list`).
@@ -597,6 +619,9 @@ pub struct ObjectsView {
     pub buttons: Vec<SegmentView>,
     pub list: Rect,
     pub rows: Vec<ObjectRowView>,
+    /// The open palette: card, colour cells (rect, sRGB), the "as in the
+    /// file" button.
+    pub palette: Option<PaletteView>,
 }
 
 pub struct ObjectRowView {
@@ -606,6 +631,8 @@ pub struct ObjectRowView {
     pub color: [f32; 4],
     pub visible: bool,
     pub hot: bool,
+    /// The opacity slider: rect, value 0…1, the text and where it goes.
+    pub opacity: (Rect, f32, Rect, String),
 }
 
 /// Info panel: rows of label / value, headings, wrapped text blocks and

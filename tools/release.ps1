@@ -5,10 +5,9 @@
 #
 # -Repo (or $env:LIGHTBOX_UPDATE_REPO) is the GitHub repository whose
 # Releases the viewer checks for updates; without it updates are off.
-# Output in dist/: lightbox-setup.exe and its .sha256 (a fixed name, so that
-# .../releases/latest/download/lightbox-setup.exe always works), and
-# lightbox-portable.zip. Publish with the command printed at the end
-# (GitHub CLI).
+# Output in dist/: lightbox-setup-<version>.exe and its .sha256, and
+# lightbox-portable-<version>.zip (the version from Cargo.toml). Publish with
+# the command printed at the end (GitHub CLI).
 
 param([string]$Repo = $env:LIGHTBOX_UPDATE_REPO)
 $ErrorActionPreference = "Stop"
@@ -34,10 +33,11 @@ cargo build --release --manifest-path "$root\installer\Cargo.toml" --target-dir 
 if ($LASTEXITCODE) { throw "installer build failed" }
 
 $dist = New-Item -ItemType Directory -Force "$root\dist"
-$setup = Join-Path $dist "lightbox-setup.exe"
+$setupName = "lightbox-setup-$version.exe"
+$setup = Join-Path $dist $setupName
 Copy-Item "$root\target\dist-setup\release\lightbox-setup.exe" $setup -Force
 $hash = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
-Set-Content -Path "$setup.sha256" -Value "$hash  lightbox-setup.exe" -NoNewline -Encoding ascii
+Set-Content -Path "$setup.sha256" -Value "$hash  $setupName" -NoNewline -Encoding ascii
 
 # Portable: the viewer and the marker that keeps its settings beside it.
 $stage = Join-Path $root "target\dist-portable\Lightbox"
@@ -54,7 +54,7 @@ Lightbox $version, portable. Settings and caches live in the data folder next
 to lightbox.exe; no tray, start-up entry or registry. Delete this file to
 make Lightbox use the normal locations.
 "@
-$portable = Join-Path $dist "lightbox-portable.zip"
+$portable = Join-Path $dist "lightbox-portable-$version.zip"
 Compress-Archive -Path $stage -DestinationPath $portable -Force
 
 Write-Host ""

@@ -8,6 +8,12 @@ pub mod raster;
 mod stl;
 mod threemf;
 
+#[allow(
+    unused_imports,
+    reason = "the Explorer thumbnail handler (shellext/) reads no DOCX"
+)]
+pub(crate) use threemf::unzip;
+
 use crate::i18n::tr;
 use std::path::Path;
 
@@ -39,6 +45,26 @@ pub struct Mesh {
     pub plates: Vec<Group>,
     /// 3MF with several objects: each one's triangles, in order.
     pub objects: Vec<Group>,
+}
+
+/// A run of triangles to show: its own colours or one `paint`, and how
+/// opaque it is.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Part {
+    pub tris: std::ops::Range<usize>,
+    pub paint: Option<[f32; 4]>,
+    pub alpha: f32,
+}
+
+impl Part {
+    /// As in the file.
+    pub fn plain(tris: std::ops::Range<usize>) -> Self {
+        Self {
+            tris,
+            paint: None,
+            alpha: 1.0,
+        }
+    }
 }
 
 /// A named run of triangles: a build plate or an object of a project.
@@ -79,7 +105,7 @@ impl Mesh {
     /// The triangles `tris` as a mesh of their own (one plate).
     #[cfg(test)]
     pub fn part(&self, tris: std::ops::Range<usize>) -> Mesh {
-        self.pick(&[(tris, None)])
+        self.pick(&[Part::plain(tris)])
     }
 
     /// Bounds of the triangles `tris`.
@@ -99,23 +125,29 @@ impl Mesh {
     }
 
     /// Runs of triangles joined into a mesh of their own, each optionally
-    /// painted one colour (the objects shown, in contrasting colours).
-    /// Nothing picked: an empty mesh with this mesh's bounds.
-    pub fn pick(&self, parts: &[(std::ops::Range<usize>, Option<[f32; 4]>)]) -> Mesh {
-        let painted = parts.iter().any(|(_, c)| c.is_some());
+    /// painted one colour and see-through (`alpha` < 1). Nothing picked: an
+    /// empty mesh with this mesh's bounds.
+    pub fn pick(&self, parts: &[Part]) -> Mesh {
+        let painted = parts.iter().any(|p| p.paint.is_some() || p.alpha < 1.0);
         let mut m = Mesh::default();
         let mut colors = Vec::new();
-        for (tris, paint) in parts {
-            let end = (tris.end * 3).min(self.positions.len());
-            let r = (tris.start * 3).min(end)..end;
+        for part in parts {
+            let end = (part.tris.end * 3).min(self.positions.len());
+            let r = (part.tris.start * 3).min(end)..end;
             m.positions.extend_from_slice(&self.positions[r.clone()]);
             m.normals.extend_from_slice(&self.normals[r.clone()]);
-            if let Some(c) = paint {
-                colors.extend(std::iter::repeat_n(*c, r.len()));
+            let start = colors.len();
+            if let Some(c) = part.paint {
+                colors.extend(std::iter::repeat_n(c, r.len()));
             } else if let Some(own) = &self.colors {
                 colors.extend_from_slice(&own[r]);
             } else if painted {
                 colors.extend(std::iter::repeat_n(DEFAULT_COLOR, r.len()));
+            }
+            if part.alpha < 1.0 {
+                for c in &mut colors[start..] {
+                    c[3] = part.alpha;
+                }
             }
         }
         if painted || self.colors.is_some() {

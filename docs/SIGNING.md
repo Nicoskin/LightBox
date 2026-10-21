@@ -142,8 +142,8 @@ gh variable set SIGNPATH_PROJECT_SLUG --repo Nicoskin/LightBox --body "<slug>"
    нажмите *Approve*. Потом то же для «Sign installer» (второй запрос:
    установщик собирается уже с подписанным `lightbox.exe` внутри). Каждый
    запрос ждёт одобрения до часа.
-4. Workflow создаёт **черновик** релиза с `lightbox-setup.exe` и
-   `lightbox-setup.exe.sha256`. Откройте *Releases*, проверьте текст
+4. Workflow создаёт **черновик** релиза с `lightbox-setup-<версия>.exe`,
+   его `.sha256` и `lightbox-portable-<версия>.zip`. Откройте *Releases*, проверьте текст
    (сгенерирован по коммитам) и нажмите *Publish release*. Только после
    публикации релиз становится `latest` и его видит обновлятор программы.
 

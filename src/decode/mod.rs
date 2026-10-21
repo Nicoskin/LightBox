@@ -12,6 +12,7 @@ mod alpha;
 pub mod anim;
 pub use alpha::{f16_to_straight_srgb8, unpremultiply};
 mod avif;
+pub mod docx;
 mod generic;
 mod jpeg;
 pub mod pdf;
@@ -65,7 +66,7 @@ pub fn all_extensions() -> impl Iterator<Item = &'static str> {
 
 /// Documents shown on Space (PDF, text): not part of folder browsing.
 pub fn is_document(path: &Path) -> bool {
-    ext_of(path) == "pdf" || text::is_text(path)
+    ext_of(path) == "pdf" || text::is_text(path) || docx::is_docx(path)
 }
 
 /// `true` if the file name has one of the supported extensions (images or
@@ -359,6 +360,8 @@ pub fn decode_data(
     img.info.format = format_name(sniff(data, &ext));
     if ext == "pdf" {
         img.info.format = "PDF".into();
+    } else if docx::is_docx(path) {
+        img.info.format = "DOCX".into();
     } else if text::is_text(path) {
         let head = &data[..data.len().min(64 << 10)];
         img.info.format = crate::t!("Текст ({})", text::decode_bytes(head).1);
@@ -424,6 +427,9 @@ fn decode_raw(
         }
         if text::is_text(p) {
             return text::decode(p, hint);
+        }
+        if docx::is_docx(p) {
+            return docx::decode(p, hint);
         }
     }
     let format = sniff(data, ext);

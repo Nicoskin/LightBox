@@ -1,5 +1,6 @@
 # A pushed tag v* builds a release and saves it as a draft GitHub release
-# with lightbox-setup.exe and lightbox-setup.exe.sha256 (see docs/SIGNING.md).
+# with lightbox-setup-<version>.exe, its .sha256 and
+# lightbox-portable-<version>.zip (see docs/SIGNING.md).
 #
 # Same steps as tools/release.ps1 (keep the two in sync), plus code signing
 # through SignPath in between: lightbox.exe is signed before the installer
@@ -192,12 +193,18 @@ jobs:
 
       # --- checksum and the draft release ---------------------------------
 
-      # The format the updater (src/update.rs) and release.ps1 use.
-      - name: SHA-256
+      # Download names carry the version; the checksum is in the format the
+      # updater (src/update.rs) and release.ps1 use.
+      - name: Versioned names and SHA-256
         shell: pwsh
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          $hash = (Get-FileHash dist/lightbox-setup.exe -Algorithm SHA256).Hash.ToLower()
-          Set-Content -Path dist/lightbox-setup.exe.sha256 -Value "$hash  lightbox-setup.exe" -NoNewline -Encoding ascii
+          $setup = "lightbox-setup-$env:VERSION.exe"
+          Move-Item dist/lightbox-setup.exe "dist/$setup" -Force
+          Move-Item dist/lightbox-portable.zip "dist/lightbox-portable-$env:VERSION.zip" -Force
+          $hash = (Get-FileHash "dist/$setup" -Algorithm SHA256).Hash.ToLower()
+          Set-Content -Path "dist/$setup.sha256" -Value "$hash  $setup" -NoNewline -Encoding ascii
           Write-Output "sha256 $hash"
 
       - uses: actions/upload-artifact@v7
@@ -215,7 +222,8 @@ jobs:
           PRERELEASE: ${{ steps.version.outputs.prerelease }}
         run: |
           $tag = $env:GITHUB_REF_NAME
-          $files = "dist/lightbox-setup.exe", "dist/lightbox-setup.exe.sha256", "dist/lightbox-portable.zip"
+          $v = $env:VERSION
+          $files = "dist/lightbox-setup-$v.exe", "dist/lightbox-setup-$v.exe.sha256", "dist/lightbox-portable-$v.zip"
           $draft = gh release view $tag --json isDraft --jq .isDraft 2>$null
           if ($LASTEXITCODE -eq 0) {
             # A re-run: replace the files, but never in a published release.

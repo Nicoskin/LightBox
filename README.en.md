@@ -17,9 +17,9 @@ A fast image and 3D model viewer for Windows 10/11 in the spirit of Picasa Photo
 - **Huge images** (30 000 × 20 000 and more) are drawn in tiles.
 - **SVG stays vector at any zoom:** the visible part is redrawn at screen resolution.
 - **Animation** in GIF, WebP and APNG: Space pauses, `,` and `.` step frames.
-- **Documents on Space:** PDF and text files in Lightbox itself; DOCX, XLSX and other types through the Windows preview handlers.
+- **Documents on Space:** PDF, DOCX and text files in Lightbox itself (DOCX page by page, in the page format from the file); XLSX and other types through the Windows preview handlers.
 - **3D models** STL, OBJ (+MTL) and 3MF with colours, including Bambu Studio, OrcaSlicer and PrusaSlicer projects: filament colours and build plates (↑/↓). Drag turns, the wheel zooms. Models are browsed together with photos and appear in the filmstrip.
-- **Model tools:** a ruler between two points (D), wireframe (W), a section by height (P, ↑/↓ move it), lay flat on a face (B), project objects (O): contrast colours, hide and show any object.
+- **Model tools:** a ruler between two points (D), wireframe (W), a section by height (P, the slider on the right or ↑/↓), lay flat on a face (B), project objects (O): contrast or your own colours, opacity of each object, hide and show any of them.
 - **G-code** (.gcode, .gcode.3mf): the toolpath coloured by line type, layers with ↑/↓, print time and filament use.
 - **Inspector:** histogram, single R/G/B/A channels, an info panel (EXIF, camera, GPS with a map, ICC). For PNGs from ComfyUI and A1111 it shows the prompt and generation parameters with copy buttons.
 - **Ratings** (Ctrl+1…5) written the Windows way, so Explorer and Lightroom see them; a filter by rating.
@@ -63,14 +63,14 @@ Time from starting a program with a file to the photo on screen, ms (median of f
 
 ## Installation
 
-**[Download the installer](https://github.com/Nicoskin/LightBox/releases/latest/download/lightbox-setup.exe)** (`lightbox-setup.exe`, latest version) and run it. All versions are on the [Releases](https://github.com/Nicoskin/LightBox/releases) page.
+**[Download the latest version](https://github.com/Nicoskin/LightBox/releases/latest)**: on the release page take the installer `lightbox-setup-<version>.exe` and run it. All versions are on the [Releases](https://github.com/Nicoskin/LightBox/releases) page.
 
 - Installs for the current user only; no administrator rights needed.
 - The installer can make Lightbox the default for all its formats at once: Windows shows the Default apps page, where one click confirms it.
 - The installer is not signed yet, so SmartScreen may warn about an unknown publisher: "More info" → "Run anyway".
 - Remove it in Settings → Apps → Installed apps.
 
-**Portable version:** [lightbox-portable.zip](https://github.com/Nicoskin/LightBox/releases/latest/download/lightbox-portable.zip). Unpack it anywhere, for example onto a USB stick. Settings and caches live in the `data` folder next to `lightbox.exe`. It uses no tray, start-up entry or registry, so Space in Explorer and file associations are only in the installed version.
+**Portable version:** `lightbox-portable-<version>.zip` on [the same page](https://github.com/Nicoskin/LightBox/releases/latest). Unpack it anywhere, for example onto a USB stick. Settings and caches live in the `data` folder next to `lightbox.exe`. It uses no tray, start-up entry or registry, so Space in Explorer and file associations are only in the installed version.
 
 **Updates.** Lightbox checks for a new version once a day; this can be turned off in Settings → System. The new version is downloaded from GitHub, its SHA-256 is verified, and it installs over the old one keeping the settings.
 

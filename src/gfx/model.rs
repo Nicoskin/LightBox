@@ -62,6 +62,9 @@ struct Constants {
 pub struct GpuMesh {
     vb: Option<ID3D11Buffer>,
     count: u32,
+    /// The leading vertices that are opaque; the rest are see-through and
+    /// drawn after them, blended.
+    opaque: u32,
     /// Toolpath segments (structured buffer), its view and length.
     path: Option<(ID3D11Buffer, ID3D11ShaderResourceView, u32)>,
     grid: Option<(ID3D11Buffer, u32)>,
@@ -193,7 +196,7 @@ impl GpuMesh {
                         srgb_to_linear(c[0]),
                         srgb_to_linear(c[1]),
                         srgb_to_linear(c[2]),
-                        1.0,
+                        c[3],
                     ],
                 }
             })
@@ -206,6 +209,7 @@ impl GpuMesh {
                 Some(buffer(device, &verts)?)
             },
             count: verts.len() as u32,
+            opaque: verts.iter().take_while(|v| v.col[3] >= 1.0).count() as u32,
             path: match &mesh.path {
                 Some(p) => Some(path_buffer(device, &p.segs)?),
                 None => None,
@@ -509,7 +513,16 @@ impl ModelRenderer {
             ctx.IASetPrimitiveTopology(D3D11_PRIMITIVE_TOPOLOGY_TRIANGLELIST);
             if let Some(vb) = &d.mesh.vb {
                 ctx.IASetVertexBuffers(0, 1, Some(&Some(vb.clone())), Some(&stride), Some(&offset));
-                ctx.Draw(d.mesh.count, 0);
+                ctx.Draw(d.mesh.opaque, 0);
+                // See-through parts over the opaque ones: blended, behind
+                // them only where the depth says so.
+                if d.mesh.count > d.mesh.opaque {
+                    ctx.OMSetBlendState(&blend, None, 0xffff_ffff);
+                    ctx.OMSetDepthStencilState(&dr, 0);
+                    ctx.Draw(d.mesh.count - d.mesh.opaque, d.mesh.opaque);
+                    ctx.OMSetBlendState(None, None, 0xffff_ffff);
+                    ctx.OMSetDepthStencilState(&dw, 0);
+                }
                 if d.wire {
                     ctx.RSSetState(&wire);
                     ctx.OMSetBlendState(&blend, None, 0xffff_ffff);

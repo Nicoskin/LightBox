@@ -11,15 +11,19 @@ use anyhow::Result;
 
 use super::{App, WM_APP_MODEL, post};
 use crate::cache;
-use crate::gfx::{GpuMesh, ModelDraw};
+use crate::gfx::{GpuMesh, ModelDraw, VSliderView};
 use crate::i18n::{dec, tr};
 use crate::model::raster::Orbit;
-use crate::model::{self, Mesh, pick};
+use crate::model::{self, Mesh, Part, pick};
 use crate::t;
 use crate::ui::objects;
 use crate::ui::toolbar::Action;
 use crate::view::Rect;
 use windows::Win32::Graphics::Direct3D11::ID3D11Device;
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture};
+use windows::Win32::UI::WindowsAndMessaging::{
+    WM_LBUTTONDBLCLK, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE,
+};
 
 /// "Display size" a model reports (for the window size in windowed mode).
 pub(super) const MODEL_DISPLAY: (f64, f64) = (1280.0, 960.0);
@@ -40,6 +44,8 @@ pub(super) struct ModelState {
     wire: bool,
     /// Section (P): everything above this height is cut away.
     section: Option<f32>,
+    /// The section bar is being dragged.
+    section_drag: bool,
     /// A click on the model picks a point or a face.
     tool: Option<Tool>,
     /// Ruler points (at most two).
@@ -48,6 +54,10 @@ pub(super) struct ModelState {
     pub(super) hidden: Vec<bool>,
     /// Projects: every object in its own contrasting colour.
     pub(super) contrast: bool,
+    /// Projects: a colour chosen for an object (over its own or the
+    /// contrasting one) and how opaque it is.
+    pub(super) paint: Vec<Option<[f32; 4]>>,
+    pub(super) alpha: Vec<f32>,
     /// The objects card (O).
     pub(super) card: Option<super::objects::CardState>,
 }
@@ -58,24 +68,35 @@ impl ModelState {
     pub(super) fn rebuild(&mut self, device: &ID3D11Device, refit: bool) -> Result<()> {
         let all = 0..self.mesh.triangles();
         let base = self.plate.map_or(all, |i| self.mesh.plates[i].tris.clone());
-        let plain = !self.contrast && !self.hidden.contains(&true);
+        let plain = !self.contrast
+            && !self.hidden.contains(&true)
+            && self.paint.iter().all(Option::is_none)
+            && self.alpha.iter().all(|a| *a >= 1.0);
         let mut view = if plain && self.plate.is_none() {
             None
         } else if plain || self.mesh.objects.is_empty() {
-            Some(self.mesh.pick(&[(base.clone(), None)]))
+            Some(self.mesh.pick(&[Part::plain(base.clone())]))
         } else {
-            let parts: Vec<_> = self
+            let mut parts: Vec<Part> = self
                 .mesh
                 .objects
                 .iter()
                 .enumerate()
                 .filter(|(i, _)| !self.hidden.get(*i).copied().unwrap_or(false))
                 .filter_map(|(i, o)| {
-                    let r = o.tris.start.max(base.start)..o.tris.end.min(base.end);
-                    let paint = self.contrast.then(|| objects::contrast_color(i));
-                    (r.start < r.end).then_some((r, paint))
+                    let tris = o.tris.start.max(base.start)..o.tris.end.min(base.end);
+                    let paint = self
+                        .paint
+                        .get(i)
+                        .copied()
+                        .flatten()
+                        .or_else(|| self.contrast.then(|| objects::contrast_color(i)));
+                    let alpha = self.alpha.get(i).copied().unwrap_or(1.0);
+                    (tris.start < tris.end).then_some(Part { tris, paint, alpha })
                 })
                 .collect();
+            // Opaque parts first: see-through ones are blended over them.
+            parts.sort_by_key(|p| p.alpha < 1.0);
             Some(self.mesh.pick(&parts))
         };
         // Hiding objects keeps the bed and the zoom where they were.
@@ -186,10 +207,13 @@ impl App {
                     plate: None,
                     wire: false,
                     section: None,
+                    section_drag: false,
                     tool: None,
                     marks: Vec::new(),
                     hidden: vec![false; objects],
                     contrast: false,
+                    paint: vec![None; objects],
+                    alpha: vec![1.0; objects],
                     card: None,
                 });
                 self.error = None;
@@ -617,4 +641,89 @@ fn ruler_text(a: [f32; 3], b: [f32; 3]) -> String {
         dec(d[2].abs(), 2),
         dec(d[1].abs(), 2)
     )
+}
+
+/// Section bar sizes, 96-DPI pixels.
+const SECTION_W: f64 = 56.0;
+const SECTION_PAD: f64 = 14.0;
+const SECTION_LABEL_H: f64 = 26.0;
+
+// The section bar: a vertical slider on the right while a cut is on.
+impl App {
+    /// The bar's card and its track (top = the model's top).
+    fn section_bar(&self) -> Option<(Rect, Rect)> {
+        self.mesh_model().filter(|m| m.section.is_some())?;
+        let s = self.ui_scale();
+        let (vw, vh) = self.viewport();
+        let top = self.overlay_top(true) + 8.0 * s;
+        let bottom = vh - self.panel_height() - 16.0 * s;
+        let card = Rect {
+            x0: vw - (16.0 + SECTION_W) * s,
+            y0: top,
+            x1: vw - 16.0 * s,
+            y1: bottom.max(top + 160.0 * s),
+        };
+        let track = Rect {
+            x0: card.x0,
+            y0: card.y0 + (SECTION_PAD + SECTION_LABEL_H) * s,
+            x1: card.x1,
+            y1: card.y1 - SECTION_PAD * s,
+        };
+        Some((card, track))
+    }
+
+    pub(super) fn section_view(&self) -> Option<VSliderView> {
+        let (card, track) = self.section_bar()?;
+        let m = self.mesh_model()?;
+        let (lo, hi) = (m.view.min[1], m.view.max[1]);
+        let h = m.section?;
+        Some(VSliderView {
+            card,
+            track,
+            value: if hi > lo { (h - lo) / (hi - lo) } else { 1.0 },
+            label: t!("{} мм", dec(h - lo, 1)),
+            hot: m.section_drag,
+        })
+    }
+
+    /// Mouse on the section bar; `true` when consumed.
+    pub(super) fn section_input(&mut self, msg: u32, p: (f64, f64)) -> Result<bool> {
+        let Some((card, track)) = self.section_bar() else {
+            return Ok(false);
+        };
+        let key = cache::key(&self.current);
+        let Some(m) = self.model.as_mut().filter(|m| m.key == key) else {
+            return Ok(false);
+        };
+        let set = |m: &mut ModelState| {
+            let (lo, hi) = (m.view.min[1], m.view.max[1]);
+            let f = ((track.y1 - p.1) / track.height().max(1.0)).clamp(0.0, 1.0) as f32;
+            m.section = Some(lo + (hi - lo) * f);
+        };
+        match msg {
+            WM_LBUTTONDOWN | WM_LBUTTONDBLCLK if card.contains(p) => {
+                m.section_drag = true;
+                set(m);
+                // SAFETY: own window.
+                unsafe { SetCapture(self.hwnd) };
+                self.render()?;
+                Ok(true)
+            }
+            WM_MOUSEMOVE if m.section_drag => {
+                set(m);
+                self.render()?;
+                Ok(true)
+            }
+            WM_LBUTTONUP if m.section_drag => {
+                m.section_drag = false;
+                // SAFETY: releasing our own capture.
+                unsafe {
+                    let _ = ReleaseCapture();
+                }
+                self.render()?;
+                Ok(true)
+            }
+            _ => Ok(false),
+        }
+    }
 }

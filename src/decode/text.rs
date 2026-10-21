@@ -109,7 +109,7 @@ const MARGIN_Y: f32 = 64.0;
 const MAX_SIDE: f64 = 8192.0;
 const MIN_SIDE: f64 = 1600.0;
 
-fn err(e: windows::core::Error) -> DecodeError {
+pub(super) fn err(e: windows::core::Error) -> DecodeError {
     DecodeError::Other(crate::t!("текст: {}", e.message()))
 }
 
@@ -169,14 +169,14 @@ pub struct TextDoc {
 }
 
 /// DirectWrite / Direct2D / WIC objects of the current thread.
-struct Ctx {
-    dwrite: IDWriteFactory,
-    d2d: ID2D1Factory,
-    wic: IWICImagingFactory,
+pub(super) struct Ctx {
+    pub(super) dwrite: IDWriteFactory,
+    pub(super) d2d: ID2D1Factory,
+    pub(super) wic: IWICImagingFactory,
 }
 
 impl Ctx {
-    fn new() -> Result<Self, DecodeError> {
+    pub(super) fn new() -> Result<Self, DecodeError> {
         // SAFETY: COM for this worker thread; factory creation has no other
         // preconditions.
         unsafe {

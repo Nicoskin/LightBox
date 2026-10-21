@@ -9,7 +9,7 @@ use windows_numerics::Vector2;
 
 use super::overlay::{
     AdjustView, BarView, CaptionView, CropView, DialView, MenuView, ObjectsView, Overlay,
-    SegmentView, rgba,
+    SegmentView, VSliderView, rgba,
 };
 use super::panel::rf;
 use crate::view::Rect;
@@ -476,6 +476,55 @@ impl Overlay {
 }
 
 impl Overlay {
+    /// A vertical slider: card, value text, track and knob.
+    pub(super) unsafe fn vslider(&self, v: &VSliderView, s: f32) {
+        // SAFETY: inside BeginDraw/EndDraw.
+        unsafe {
+            let card = rf(v.card);
+            self.brush.SetColor(&rgba(0.11, 0.11, 0.12, 0.92));
+            self.ctx
+                .FillRoundedRectangle(&rounded(card, 10.0 * s), &self.brush);
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.92));
+            self.glyph_str(
+                &v.label,
+                D2D_RECT_F {
+                    top: card.top + 8.0 * s,
+                    bottom: card.top + 34.0 * s,
+                    ..card
+                },
+                &self.formats.option,
+            );
+            let t = rf(v.track);
+            let cx = (t.left + t.right) / 2.0;
+            let inset = 10.0 * s;
+            let (y0, y1) = (t.top + inset, t.bottom - inset);
+            let k = y1 - (y1 - y0) * v.value.clamp(0.0, 1.0);
+            let bar = |a: f32, b: f32| D2D_RECT_F {
+                left: cx - 2.0 * s,
+                top: a,
+                right: cx + 2.0 * s,
+                bottom: b,
+            };
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.18));
+            self.ctx
+                .FillRoundedRectangle(&rounded(bar(y0, y1), 2.0 * s), &self.brush);
+            self.brush
+                .SetColor(&rgba(ACCENT.0, ACCENT.1, ACCENT.2, 0.95));
+            self.ctx
+                .FillRoundedRectangle(&rounded(bar(k, y1), 2.0 * s), &self.brush);
+            let r = if v.hot { 10.0 } else { 9.0 } * s;
+            self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 1.0));
+            self.ctx.FillEllipse(
+                &D2D1_ELLIPSE {
+                    point: Vector2 { X: cx, Y: k },
+                    radiusX: r,
+                    radiusY: r,
+                },
+                &self.brush,
+            );
+        }
+    }
+
     /// A row of buttons on a dark rounded card.
     pub(super) unsafe fn button_bar(&self, b: &BarView, s: f32) {
         // SAFETY: inside BeginDraw/EndDraw.
@@ -547,6 +596,33 @@ impl Overlay {
                     right: r.left + 24.0 * s,
                     bottom: cy + 7.0 * s,
                 };
+                // Opacity: the value and a small slider on the right.
+                let (track, value, text_rect, text) = &row.opacity;
+                let t = rf(*track);
+                let (x0, x1) = (t.left + 6.0 * s, t.right - 6.0 * s);
+                let k = x0 + (x1 - x0) * value.clamp(0.0, 1.0);
+                let line = |a: f32, b: f32| D2D_RECT_F {
+                    left: a,
+                    top: cy - 1.5 * s,
+                    right: b,
+                    bottom: cy + 1.5 * s,
+                };
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.18));
+                self.ctx.FillRectangle(&line(x0, x1), &self.brush);
+                self.brush
+                    .SetColor(&rgba(ACCENT.0, ACCENT.1, ACCENT.2, 0.9));
+                self.ctx.FillRectangle(&line(x0, k), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 1.0));
+                self.ctx.FillEllipse(
+                    &D2D1_ELLIPSE {
+                        point: Vector2 { X: k, Y: cy },
+                        radiusX: 5.5 * s,
+                        radiusY: 5.5 * s,
+                    },
+                    &self.brush,
+                );
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.6));
+                self.glyph_str(text, rf(*text_rect), &self.formats.option);
                 let [cr, cg, cb, _] = row.color;
                 self.brush.SetColor(&rgba(cr, cg, cb, 1.0));
                 if row.visible {
@@ -566,13 +642,49 @@ impl Overlay {
                     &row.name,
                     D2D_RECT_F {
                         left: sw.right + 10.0 * s,
-                        right: r.right - 8.0 * s,
+                        right: rf(row.opacity.2).left - 6.0 * s,
                         ..r
                     },
                     &self.formats.label,
                 );
             }
             self.ctx.PopAxisAlignedClip();
+            // The palette over the rows.
+            if let Some((card, cells, reset)) = &o.palette {
+                let c = rf(*card);
+                self.brush.SetColor(&rgba(0.16, 0.16, 0.17, 0.99));
+                self.ctx
+                    .FillRoundedRectangle(&rounded(c, 8.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.12));
+                self.ctx.DrawRoundedRectangle(
+                    &rounded(c, 8.0 * s),
+                    &self.brush,
+                    s,
+                    None::<&ID2D1StrokeStyle>,
+                );
+                for (cell, [cr, cg, cb, _], hot) in cells {
+                    let cr_ = rf(*cell);
+                    self.brush.SetColor(&rgba(*cr, *cg, *cb, 1.0));
+                    self.ctx
+                        .FillRoundedRectangle(&rounded(cr_, 4.0 * s), &self.brush);
+                    if *hot {
+                        self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.9));
+                        self.ctx.DrawRoundedRectangle(
+                            &rounded(cr_, 4.0 * s),
+                            &self.brush,
+                            2.0 * s,
+                            None::<&ID2D1StrokeStyle>,
+                        );
+                    }
+                }
+                let rr = rf(reset.rect);
+                self.brush
+                    .SetColor(&rgba(1.0, 1.0, 1.0, if reset.hot { 0.16 } else { 0.08 }));
+                self.ctx
+                    .FillRoundedRectangle(&rounded(rr, 6.0 * s), &self.brush);
+                self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.95));
+                self.glyph_str(&reset.text, rr, &self.formats.option);
+            }
         }
     }
 

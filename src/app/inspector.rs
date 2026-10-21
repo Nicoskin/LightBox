@@ -279,16 +279,24 @@ impl App {
                     .unwrap_or_else(|| tr("sRGB (нет профиля)").into()),
             ));
         }
+        // A model has no image rows: its triangles and size instead.
+        if self.model_mode()
+            && let Some(d) = self.model_details()
+        {
+            rows.push((tr("Модель").into(), d));
+        }
+        // The file row goes after the name and size (a model has fewer).
+        let at = rows.len().min(2);
         match self.file_info() {
             Some(f) => {
                 let mut file = inspect::human_size(f.size);
                 if let Some(m) = &f.modified {
                     file = format!("{file}   ·   {m}");
                 }
-                rows.insert(2, (tr("Файл").into(), file));
+                rows.insert(at, (tr("Файл").into(), file));
                 rows.extend(f.exif.iter().map(|(l, v)| ((*l).to_string(), v.clone())));
             }
-            None => rows.insert(2, (tr("Файл").into(), "…".into())),
+            None => rows.insert(at, (tr("Файл").into(), "…".into())),
         }
         rows
     }

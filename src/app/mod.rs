@@ -282,6 +282,10 @@ pub struct App {
     card_capture: Option<(crate::keymap::Command, usize)>,
     /// The dimming slider is being dragged.
     card_drag: bool,
+    /// The dimming value being typed (and `true` until the first key,
+    /// which replaces it); the value before, for Esc.
+    card_edit: Option<(String, bool)>,
+    card_dim_before: u8,
     /// Scroll offset of the keys page, pixels.
     card_scroll: f64,
     /// Keyboard shortcuts (rebuilt when reassigned).
@@ -447,6 +451,8 @@ impl App {
             card_tab: Default::default(),
             card_capture: None,
             card_drag: false,
+            card_edit: None,
+            card_dim_before: 0,
             card_scroll: 0.0,
             on_top: false,
             strip_pos: 0.0,
@@ -937,6 +943,7 @@ impl App {
             crop: self.crop_view(),
             objects: self.objects_view(),
             bar: self.compare_bar_view(),
+            vslider: self.section_view(),
             adjust: self.tone_view(),
             marks: self.model_marks(),
         };

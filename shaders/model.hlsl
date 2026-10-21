@@ -72,7 +72,8 @@ float4 PSMain(VSOut i, bool front : SV_IsFrontFace) : SV_Target
     float3 h = normalize(l + v);
     float spec = pow(saturate(dot(n, h)), 48.0) * 0.22 * key;
     float3 c = i.col.rgb * (sky + 0.72 * key + fill) + spec;
-    return float4(c, 1.0);
+    // Premultiplied: see-through parts are blended (alpha < 1).
+    return float4(c * i.col.a, i.col.a);
 }
 
 // G-code toolpaths: one instance per extruded segment, expanded here into

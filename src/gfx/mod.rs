@@ -20,7 +20,7 @@ pub use model::{GpuMesh, ModelDraw};
 pub use overlay::{
     AdjustView, BarView, ButtonView, CaptionButtonView, CaptionView, CardView, CellView, CropView,
     DialView, HistogramView, Icon, InfoView, MenuItemView, MenuView, ObjectRowView, ObjectsView,
-    PanelView, SegmentView, SliderView, TextStyle, TextView, Thumb, Ui,
+    PanelView, SegmentView, SliderView, TextStyle, TextView, Thumb, Ui, VSliderView,
 };
 pub use renderer::{Background, DrawParams, Filter, Layer, Part};
 pub use texture::GpuImage;

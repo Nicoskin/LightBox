@@ -14,7 +14,7 @@ use anyhow::Result;
 
 use super::{App, WM_APP_VECTOR, post};
 use crate::cache;
-use crate::decode::{self, DecodeError, DecodedImage, SizeHint, pdf, svg, text};
+use crate::decode::{self, DecodeError, DecodedImage, SizeHint, docx, pdf, svg, text};
 use crate::gfx::GpuImage;
 use crate::orientation::Orientation;
 use crate::view::{self, Quad, Rect, View};
@@ -127,12 +127,16 @@ enum Doc {
     Svg(Box<svg::Tree>),
     Pdf(pdf::Pdf),
     Text(text::TextDoc),
+    Docx(docx::DocxDoc),
 }
 
 impl Doc {
     fn open(path: &Path) -> Result<Self, DecodeError> {
         if text::is_text(path) {
             return Ok(Doc::Text(text::TextDoc::open(path)?));
+        }
+        if docx::is_docx(path) {
+            return Ok(Doc::Docx(docx::DocxDoc::open(path)?));
         }
         if decode::is_document(path) {
             return Ok(Doc::Pdf(pdf::Pdf::open(path)?));
@@ -152,6 +156,7 @@ impl Doc {
             Doc::Svg(t) => svg::render_region(t, raster, region, out),
             Doc::Pdf(p) => decode::finish_page(p.render(page, raster, region, out)?),
             Doc::Text(t) => decode::finish_page(t.render(page, raster, region, out)?),
+            Doc::Docx(d) => decode::finish_page(d.render(page, raster, region, out)?),
         }
     }
 
@@ -160,6 +165,7 @@ impl Doc {
         match self {
             Doc::Pdf(p) => p.raster_size(page, Some(hint)),
             Doc::Text(_) => Ok(text::raster_size(Some(hint))),
+            Doc::Docx(d) => Ok(pdf::raster_size(d.page_size(), Some(hint))),
             Doc::Svg(_) => Err(DecodeError::Unsupported),
         }
     }

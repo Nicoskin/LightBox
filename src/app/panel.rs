@@ -445,15 +445,19 @@ impl App {
                     sliders.push((*rect, f32::from(self.settings.dim_percent) / 100.0, hot));
                     continue;
                 }
-                let text = if *c == settings_card::Choice::DimValue {
-                    format!("{} %", self.settings.dim_percent)
-                } else {
-                    (*text).to_string()
+                let editing = *c == settings_card::Choice::DimValue && self.card_edit.is_some();
+                let text = match (&self.card_edit, *c) {
+                    // A caret while typing.
+                    (Some((typed, _)), settings_card::Choice::DimValue) => format!("{typed}| %"),
+                    (None, settings_card::Choice::DimValue) => {
+                        format!("{} %", self.settings.dim_percent)
+                    }
+                    _ => (*text).to_string(),
                 };
                 segments.push(SegmentView {
                     rect: *rect,
                     text,
-                    selected: settings_card::is_selected(&self.settings, *c),
+                    selected: editing || settings_card::is_selected(&self.settings, *c),
                     hot: self.card_hot == Some(settings_card::Hit::Choice(*c)),
                     first: i == 0,
                     last: i + 1 == n,
@@ -526,6 +530,7 @@ impl App {
     }
 
     pub(super) fn close_settings(&mut self) -> Result<()> {
+        self.end_dim_edit(true)?;
         self.card_open = false;
         self.card_capture = None;
         self.render()
@@ -603,6 +608,47 @@ impl App {
                     self.render()?;
                 }
             }
+            // Typing the dimming value: digits, Backspace, Enter / Esc.
+            WM_KEYDOWN if self.card_edit.is_some() => {
+                let vk = wparam as u16;
+                match vk {
+                    0x30..=0x39 | 0x60..=0x69 => {
+                        // The digit row or the numeric keypad.
+                        let n = if vk >= 0x60 { vk - 0x60 } else { vk - 0x30 };
+                        let digit = char::from(b'0' + n as u8);
+                        if let Some((text, fresh)) = &mut self.card_edit {
+                            if *fresh {
+                                text.clear();
+                                *fresh = false;
+                            }
+                            if text.len() < 3 {
+                                text.push(digit);
+                            }
+                        }
+                        self.preview_dim()?;
+                    }
+                    0x08 => {
+                        if let Some((text, fresh)) = &mut self.card_edit {
+                            if *fresh {
+                                text.clear();
+                            }
+                            *fresh = false;
+                            text.pop();
+                        }
+                        self.preview_dim()?;
+                    }
+                    0x0D => self.end_dim_edit(true)?,
+                    0x1B => self.end_dim_edit(false)?,
+                    _ => {}
+                }
+            }
+            WM_LBUTTONUP
+                if self.card_edit.is_some()
+                    && l.hit(p) != Some(Hit::Choice(settings_card::Choice::DimValue)) =>
+            {
+                // A click elsewhere keeps what was typed.
+                self.end_dim_edit(true)?;
+            }
             WM_LBUTTONUP => match l.hit(p) {
                 None | Some(Hit::Close) => self.close_settings()?,
                 Some(Hit::Tab(t)) => {
@@ -611,7 +657,13 @@ impl App {
                     self.card_capture = None;
                     self.render()?;
                 }
-                Some(Hit::Choice(settings_card::Choice::DimValue)) => self.type_dim()?,
+                Some(Hit::Choice(settings_card::Choice::DimValue)) => {
+                    if self.card_edit.is_none() {
+                        self.card_dim_before = self.settings.dim_percent;
+                        self.card_edit = Some((self.settings.dim_percent.to_string(), true));
+                        self.render()?;
+                    }
+                }
                 Some(Hit::Choice(settings_card::Choice::DimSlider)) => {}
                 Some(Hit::Choice(c)) => self.choose(c)?,
                 Some(Hit::KeySlot(cmd, slot)) => {
@@ -675,17 +727,28 @@ impl App {
         }
     }
 
-    /// A click on the dimming value: type it.
-    fn type_dim(&mut self) -> Result<()> {
-        let Some(value) = crate::win::form::ask_number(
-            self.hwnd,
-            tr("Затемнение фона"),
-            tr("Затемнение фона, % (0–100)"),
-            u32::from(self.settings.dim_percent),
-        ) else {
+    /// While typing the dimming value: shows it as it is typed.
+    fn preview_dim(&mut self) -> Result<()> {
+        let typed = self
+            .card_edit
+            .as_ref()
+            .and_then(|(t, _)| t.parse::<u32>().ok());
+        match typed {
+            Some(v) => self.set_dim(v.min(100) as u8),
+            None => self.render(),
+        }
+    }
+
+    /// Ends typing the dimming value: kept and saved, or the old one back.
+    fn end_dim_edit(&mut self, keep: bool) -> Result<()> {
+        let Some((text, _)) = self.card_edit.take() else {
             return Ok(());
         };
-        self.set_dim(value.min(100) as u8)?;
+        let value = match text.parse::<u32>() {
+            Ok(v) if keep => v.min(100) as u8,
+            _ => self.card_dim_before,
+        };
+        self.set_dim(value)?;
         self.settings.save();
         Ok(())
     }

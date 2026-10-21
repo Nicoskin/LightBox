@@ -123,6 +123,7 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("Профиль", "Profile"),
     ("sRGB (нет профиля)", "sRGB (no profile)"),
     ("Файл", "File"),
+    ("Модель", "Model"),
     ("Генерация · {}", "Generation · {}"),
     ("Промпт", "Prompt"),
     ("Негативный промпт", "Negative prompt"),
@@ -673,8 +674,6 @@ pub(super) const EN: &[(&str, &str)] = &[
     ("Держите: A", "Hold: A"),
     ("Усиление ×{}", "Gain ×{}"),
     ("Закрыть", "Close"),
-    (
-        "Затемнение фона, % (0–100)",
-        "Background dimming, % (0–100)",
-    ),
+    ("{} мм", "{} mm"),
+    ("Как в файле", "As in the file"),
 ];

@@ -86,6 +86,13 @@ impl App {
                 return Ok(Some(LRESULT(0)));
             }
         }
+        if matches!(
+            msg,
+            WM_MOUSEMOVE | WM_LBUTTONDOWN | WM_LBUTTONUP | WM_LBUTTONDBLCLK
+        ) && self.section_input(msg, client_point(lparam))?
+        {
+            return Ok(Some(LRESULT(0)));
+        }
         if self.compare.is_some()
             && matches!(
                 msg,
