@@ -197,8 +197,14 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
             edit,
             format,
             quality,
-        } => match export(&src, &dst, edit, format, quality) {
-            Ok(()) => Outcome::Exported { dst },
+        } => match export(&src, &dst, edit, format, quality, backups, n) {
+            Ok(Some(undo)) => Outcome::Rotated {
+                path: dst,
+                edit,
+                undo,
+                note: tr("Поворот сохранён"),
+            },
+            Ok(None) => Outcome::Exported { dst },
             Err(e) => Outcome::Failed {
                 path: dst,
                 error: e.to_string(),
@@ -351,7 +357,9 @@ fn export(
     edit: Orientation,
     format: ExportFormat,
     quality: u8,
-) -> Result<(), WriteError> {
+    backups: &Path,
+    n: u32,
+) -> Result<Option<Undo>, WriteError> {
     let data = fs::read(src)?;
     let img = decode::decode_for_export(&data, src)?;
     let display = img.orientation.then(edit);
@@ -367,6 +375,11 @@ fn export(
         ExportFormat::Jpeg => encode::encode_jpeg(&px, w, h, quality)?,
         ExportFormat::Png => encode::encode_png(&px, w, h)?,
     };
+    // Overwriting the source is a save: keep undo and report the baked edit
+    // so the UI removes it when the new pixels arrive.
+    if crate::cache::key(src) == crate::cache::key(dst) {
+        return write_with_backup(dst, &data, &bytes, false, backups, n).map(Some);
+    }
     if dst.exists() {
         replace_file(dst, &bytes, None)?;
     } else {
@@ -375,7 +388,7 @@ fn export(
         fs::rename(&tmp, dst)?;
         notify_shell(dst);
     }
-    Ok(())
+    Ok(None)
 }
 
 /// `.name.lbtmp` next to the target (same volume, as ReplaceFileW requires).
@@ -488,6 +501,41 @@ mod tests {
         assert_eq!((img.width, img.height), (16, 32));
         restore(&undo).unwrap();
         assert_eq!(fs::read(&p).unwrap(), original);
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn export_over_source_reports_saved_edit_and_can_be_undone() {
+        let d = temp_dir("export-over-source");
+        let path = d.join("photo.jpg");
+        let original = sample_jpeg();
+        fs::write(&path, &original).unwrap();
+        let outcome = run(
+            Job::Export {
+                src: path.clone(),
+                dst: path.clone(),
+                edit: Orientation::ROTATE_CW,
+                format: ExportFormat::Jpeg,
+                quality: 90,
+            },
+            &d.join("backups"),
+            1,
+        );
+        let Outcome::Rotated {
+            path: saved,
+            edit,
+            undo,
+            ..
+        } = outcome
+        else {
+            panic!("overwriting the source must report a saved edit");
+        };
+        assert_eq!(saved, path);
+        assert_eq!(edit, Orientation::ROTATE_CW);
+        let img = decode::decode_file(&path, None).unwrap();
+        assert_eq!((img.width, img.height), (16, 32));
+        restore(&undo).unwrap();
+        assert_eq!(fs::read(&path).unwrap(), original);
         fs::remove_dir_all(&d).unwrap();
     }
 

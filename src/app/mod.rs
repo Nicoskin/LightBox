@@ -205,7 +205,7 @@ pub struct App {
     /// Hardware device still being created while `gpu` is WARP.
     pending_hw: Option<PendingGpu>,
     /// Start-up decoder, while the first frame shows the EXIF thumbnail.
-    initial: Option<Receiver<Startup>>,
+    initial: Option<(PathBuf, Receiver<Startup>)>,
     monitor: Monitor,
     mode: Mode,
 
@@ -401,7 +401,7 @@ impl App {
             gpu,
             compositor,
             pending_hw,
-            initial,
+            initial: initial.map(|rx| (path.clone(), rx)),
             monitor,
             mode: Mode::Fullscreen,
             files: vec![path.clone()],

@@ -3,3 +3,4 @@ target/
 # Test images: `cargo run --release --example gen_testdata`
 /testdata/
 /dist
+/PROJECT_NOTES.md

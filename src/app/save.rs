@@ -61,7 +61,7 @@ impl App {
         let Some(edit) = self.edits.get(&key).copied() else {
             return;
         };
-        if self.saving.contains(&key) {
+        if self.saving.contains(&key) || self.reloading.contains_key(&key) {
             return;
         }
         let Some(writer) = &self.writer else {
@@ -82,7 +82,10 @@ impl App {
     /// writes, asks or keeps its rotation according to the setting.
     pub(super) fn leave_current(&mut self) {
         let key = cache::key(&self.current);
-        if !self.edits.contains_key(&key) || self.saving.contains(&key) {
+        if !self.edits.contains_key(&key)
+            || self.saving.contains(&key)
+            || self.reloading.contains_key(&key)
+        {
             return;
         }
         let path = self.current.clone();
@@ -152,6 +155,11 @@ impl App {
         else {
             return Ok(());
         };
+        let key = cache::key(&self.current);
+        let overwrite = cache::key(&dst) == key;
+        if overwrite && (self.saving.contains(&key) || self.reloading.contains_key(&key)) {
+            return Ok(());
+        }
         if quality != self.settings.jpeg_quality {
             self.settings.jpeg_quality = quality;
             self.settings.save();
@@ -169,6 +177,9 @@ impl App {
                 format,
                 quality,
             });
+            if overwrite {
+                self.saving.insert(key);
+            }
             self.notice(tr("Сохранение…"));
         }
         self.render()
@@ -188,7 +199,7 @@ impl App {
     }
 
     /// A file changed on disk: forget everything decoded from it.
-    fn invalidate(&mut self, path: &Path) {
+    pub(super) fn invalidate(&mut self, path: &Path) {
         let key = cache::key(path);
         self.cache.remove(path);
         self.textures.remove(&key);
@@ -334,6 +345,8 @@ impl App {
     /// Whether the current photo has an unsaved rotation.
     pub(super) fn dirty(&self) -> bool {
         let key = cache::key(&self.current);
-        self.edits.contains_key(&key) && !self.saving.contains(&key)
+        self.edits.contains_key(&key)
+            && !self.saving.contains(&key)
+            && !self.reloading.contains_key(&key)
     }
 }

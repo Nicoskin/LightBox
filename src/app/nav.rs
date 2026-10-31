@@ -132,13 +132,15 @@ impl App {
     pub(super) fn on_decoded(&mut self) -> Result<()> {
         let mut redraw = false;
         // The start-up preview that follows the EXIF thumbnail.
-        if let Some(rx) = &self.initial
+        if let Some((path, rx)) = &self.initial
             && let Ok(super::Startup::Final(result)) = rx.try_recv()
         {
+            let path = path.clone();
             self.initial = None;
-            let current = self.current.clone();
-            self.store_result(&current, result.map(Arc::new).map_err(|e| e.to_string()));
-            redraw |= self.show_current()?;
+            self.store_result(&path, result.map(Arc::new).map_err(|e| e.to_string()));
+            if cache::key(&path) == cache::key(&self.current) {
+                redraw |= self.show_current()?;
+            }
         }
         while let Some(done) = self.loader.as_ref().and_then(Loader::try_recv) {
             // No EXIF thumbnail is not an error: the preview is on its way.
@@ -393,7 +395,10 @@ impl App {
             .as_ref()
             .is_some_and(|(k, _)| *k == cache::key(cur));
         // (The start-up decoder is still producing the current preview.)
-        let starting = self.initial.is_some();
+        let starting = self
+            .initial
+            .as_ref()
+            .is_some_and(|(path, _)| cache::key(path) == cache::key(cur));
         if self.cache.image(cur).is_none() && !on_screen && !starting {
             wanted.push(Request {
                 path: cur.clone(),

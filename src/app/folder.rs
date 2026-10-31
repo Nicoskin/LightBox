@@ -55,11 +55,8 @@ impl App {
         let current = cache::key(&self.current);
         for p in &changed {
             // Rewritten or replaced files are decoded again.
-            let key = cache::key(p);
-            self.cache.remove(p);
-            if key != current {
-                self.textures.remove(&key);
-            }
+            // `shown` retains the old texture until its replacement arrives.
+            self.invalidate(p);
         }
         if changed.iter().any(|p| cache::key(p) == current) && self.current.exists() {
             // Keep showing the old pixels until the new ones are decoded.
