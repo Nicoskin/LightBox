@@ -8,7 +8,7 @@ use anyhow::Result;
 
 use super::{App, WM_APP_SAVED, post};
 use crate::cache;
-use crate::edit::{Job, Outcome, Writer};
+use crate::edit::{FileVersion, Job, Outcome, Writer};
 use crate::i18n::tr;
 use crate::orientation::Orientation;
 use crate::settings::{ImperfectJpeg, SaveMode};
@@ -21,6 +21,30 @@ const CHOICE_TRIM: i32 = 200;
 const CHOICE_EXIF: i32 = 201;
 
 impl App {
+    pub(super) fn edit_version(&self, path: &Path) -> std::io::Result<Option<FileVersion>> {
+        match self.edit_versions.get(&cache::key(path)) {
+            Some(version) => Ok(*version),
+            None => FileVersion::read(path),
+        }
+    }
+
+    pub(super) fn clear_rotation_edit(&mut self, key: &str) -> bool {
+        self.edit_versions.remove(key);
+        self.edits.remove(key).is_some()
+    }
+
+    pub(super) fn set_rotation_edit(&mut self, path: &Path, edit: Orientation) -> Result<()> {
+        let key = cache::key(path);
+        if edit == Orientation::IDENTITY {
+            self.clear_rotation_edit(&key);
+        } else {
+            let version = self.edit_version(path)?;
+            self.edit_versions.insert(key.clone(), version);
+            self.edits.insert(key, edit);
+        }
+        Ok(())
+    }
+
     pub(super) fn start_writer(&mut self) {
         let hwnd = self.hwnd.0 as isize;
         self.writer = Some(Writer::new(move || post(hwnd, WM_APP_SAVED)));
@@ -67,14 +91,24 @@ impl App {
         let Some(writer) = &self.writer else {
             return;
         };
-        writer.submit(Job::Rotate {
-            path: path.to_path_buf(),
-            display: self.base_orientation(path).then(edit),
-            edit,
-            keep_dates: self.settings.keep_file_dates,
-            imperfect: self.settings.imperfect_jpeg,
-            crop: None,
-        });
+        let version = match self.edit_version(path) {
+            Ok(v) => v,
+            Err(e) => {
+                self.notice(&e.to_string());
+                return;
+            }
+        };
+        writer.submit_versioned(
+            Job::Rotate {
+                path: path.to_path_buf(),
+                display: self.base_orientation(path).then(edit),
+                edit,
+                keep_dates: self.settings.keep_file_dates,
+                imperfect: self.settings.imperfect_jpeg,
+                crop: None,
+            },
+            version,
+        );
         self.saving.insert(key);
     }
 
@@ -109,7 +143,7 @@ impl App {
                 match choice {
                     Some(ASK_SAVE) => self.save_rotation(&path),
                     Some(ASK_DISCARD) => {
-                        self.edits.remove(&key);
+                        self.clear_rotation_edit(&key);
                     }
                     _ => {}
                 }
@@ -131,7 +165,7 @@ impl App {
 
     /// "Сбросить": back to the file's own orientation.
     pub(super) fn reset_current(&mut self) -> Result<()> {
-        if self.edits.remove(&cache::key(&self.current)).is_some()
+        if self.clear_rotation_edit(&cache::key(&self.current))
             && let Some(v) = self.fit_view()
         {
             self.view = v;
@@ -170,15 +204,18 @@ impl App {
             .copied()
             .unwrap_or(Orientation::IDENTITY);
         if let Some(w) = &self.writer {
-            w.submit(Job::Export {
+            let job = Job::Export {
                 src: self.current.clone(),
                 dst,
                 edit,
                 format,
                 quality,
-            });
+            };
             if overwrite {
+                w.submit_versioned(job, self.edit_version(&self.current)?);
                 self.saving.insert(key);
+            } else {
+                w.submit(job);
             }
             self.notice(tr("Сохранение…"));
         }
@@ -219,6 +256,9 @@ impl App {
                 } => {
                     let key = cache::key(&path);
                     self.saving.remove(&key);
+                    if self.edits.contains_key(&key) {
+                        self.edit_versions.insert(key.clone(), undo.saved_version);
+                    }
                     self.undo.push(undo);
                     self.invalidate(&path);
                     if key == cache::key(&self.current) {
@@ -234,6 +274,7 @@ impl App {
                     path,
                     edit,
                     display,
+                    version,
                 } => {
                     let key = cache::key(&path);
                     self.saving.remove(&key);
@@ -270,14 +311,17 @@ impl App {
                         self.settings.save();
                     }
                     if let Some(w) = &self.writer {
-                        w.submit(Job::Rotate {
-                            path,
-                            display,
-                            edit,
-                            keep_dates: self.settings.keep_file_dates,
-                            imperfect: Some(imperfect),
-                            crop: None,
-                        });
+                        w.submit_versioned(
+                            Job::Rotate {
+                                path,
+                                display,
+                                edit,
+                                keep_dates: self.settings.keep_file_dates,
+                                imperfect: Some(imperfect),
+                                crop: None,
+                            },
+                            version,
+                        );
                         self.saving.insert(key);
                     }
                 }
@@ -289,10 +333,18 @@ impl App {
                 }
                 Outcome::Restored { path } => {
                     let key = cache::key(&path);
-                    self.edits.remove(&key);
+                    self.clear_rotation_edit(&key);
                     self.reloading.remove(&key);
                     self.invalidate(&path);
                     self.notice(tr("Сохранение отменено"));
+                }
+                Outcome::RestoreFailed { undo, error } => {
+                    self.notice(&t!(
+                        "Не удалось отменить сохранение {}: {}",
+                        Self::file_name(&undo.path),
+                        error
+                    ));
+                    self.undo.push(undo);
                 }
                 Outcome::Failed { path, error } => {
                     self.saving.remove(&cache::key(&path));
@@ -320,7 +372,7 @@ impl App {
             .unwrap_or(Orientation::IDENTITY);
         let rest = saved.inverse().then(current);
         if rest == Orientation::IDENTITY {
-            self.edits.remove(key);
+            self.clear_rotation_edit(key);
         } else {
             self.edits.insert(key.to_string(), rest);
         }

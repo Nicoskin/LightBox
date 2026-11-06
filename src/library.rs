@@ -9,14 +9,15 @@ use std::time::SystemTime;
 
 use crate::decode;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SortMode {
-    /// Natural, case-insensitive file-name order (`img2` before `img10`).
     #[default]
+    Explorer,
     Name,
-    /// Last-modified time, oldest first (ties broken by name).
-    #[expect(dead_code, reason = "selectable in settings (M6)")]
     Modified,
+    Rating,
+    Type,
 }
 
 #[derive(Debug, Clone)]
@@ -36,7 +37,9 @@ pub fn scan(dir: &Path, current: &Path, mode: SortMode) -> Vec<PathBuf> {
             .filter(|p| decode::is_supported(p))
             .map(|path| Entry {
                 // On Windows this comes from the directory listing itself.
-                modified: std::fs::metadata(&path).and_then(|m| m.modified()).ok(),
+                modified: (mode == SortMode::Modified)
+                    .then(|| std::fs::metadata(&path).and_then(|m| m.modified()).ok())
+                    .flatten(),
                 path,
             })
             .collect(),
@@ -53,7 +56,38 @@ pub fn scan(dir: &Path, current: &Path, mode: SortMode) -> Vec<PathBuf> {
         });
     }
     sort(&mut entries, mode);
-    entries.into_iter().map(|e| e.path).collect()
+    let mut paths: Vec<_> = entries.into_iter().map(|e| e.path).collect();
+    if mode == SortMode::Explorer
+        && let Some(order) = crate::win::explorer::folder_order(dir)
+    {
+        order_like_explorer(&mut paths, &order);
+    }
+    paths
+}
+
+fn order_like_explorer(paths: &mut [PathBuf], order: &[PathBuf]) {
+    let positions: std::collections::HashMap<_, _> = order
+        .iter()
+        .enumerate()
+        .map(|(i, p)| (crate::cache::key(p), i))
+        .collect();
+    paths.sort_by_cached_key(|p| {
+        positions
+            .get(&crate::cache::key(p))
+            .copied()
+            .unwrap_or(usize::MAX)
+    });
+}
+
+pub fn file_type(path: &Path) -> String {
+    path.extension()
+        .map(|e| e.to_string_lossy().to_lowercase())
+        .unwrap_or_default()
+}
+
+pub fn matches(path: &Path, query: &str, extension: &str) -> bool {
+    (query.is_empty() || file_key(path).contains(query))
+        && (extension.is_empty() || file_type(path) == extension)
 }
 
 fn sort(entries: &mut [Entry], mode: SortMode) {
@@ -66,7 +100,10 @@ fn sort(entries: &mut [Entry], mode: SortMode) {
     keyed.sort_by(|a, b| {
         let by_name = || natural_cmp(&a.0, &b.0);
         match mode {
-            SortMode::Name => by_name(),
+            SortMode::Explorer | SortMode::Name | SortMode::Rating => by_name(),
+            SortMode::Type => file_type(&entries[a.1].path)
+                .cmp(&file_type(&entries[b.1].path))
+                .then_with(by_name),
             SortMode::Modified => entries[a.1]
                 .modified
                 .cmp(&entries[b.1].modified)
@@ -157,6 +194,19 @@ fn char_at(s: &[u8]) -> (char, usize) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explorer_order_preserves_view_sequence_and_unlisted_files() {
+        let mut files = ["a.jpg", "b.png", "c.jpg", "d.webp"].map(PathBuf::from);
+        let explorer = ["C.JPG", "unrelated.txt", "b.png"].map(PathBuf::from);
+        order_like_explorer(&mut files, &explorer);
+        assert_eq!(
+            files,
+            ["c.jpg", "b.png", "a.jpg", "d.webp"].map(PathBuf::from)
+        );
+        assert!(matches(Path::new("Лето/Кадр 10.JPG"), "кадр 1", "jpg"));
+        assert!(!matches(Path::new("Лето/Кадр 10.JPG"), "кадр 1", "png"));
+    }
 
     fn sorted(names: &[&str]) -> Vec<String> {
         let mut v: Vec<String> = names.iter().map(|s| s.to_lowercase()).collect();

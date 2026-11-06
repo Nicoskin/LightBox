@@ -7,13 +7,15 @@
 //! the rest of the session so that Ctrl+Z can restore them exactly.
 
 use std::fs::{self, FileTimes, OpenOptions};
-use std::io;
+use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::thread::{self, JoinHandle};
 use std::time::SystemTime;
 
-use windows::Win32::Storage::FileSystem::{REPLACEFILE_IGNORE_MERGE_ERRORS, ReplaceFileW};
+use windows::Win32::Storage::FileSystem::{
+    MoveFileW, REPLACEFILE_IGNORE_MERGE_ERRORS, ReplaceFileW,
+};
 use windows::Win32::UI::Shell::{SHCNE_UPDATEITEM, SHCNF_PATHW, SHChangeNotify};
 use windows::core::HSTRING;
 
@@ -69,6 +71,51 @@ pub struct Undo {
     pub path: PathBuf,
     pub backup: PathBuf,
     pub modified: Option<SystemTime>,
+    pub saved_version: Option<FileVersion>,
+    saved_digest: String,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FileVersion {
+    len: u64,
+    modified: SystemTime,
+    created: Option<SystemTime>,
+}
+
+impl FileVersion {
+    pub fn read(path: &Path) -> io::Result<Option<Self>> {
+        match fs::metadata(path) {
+            Ok(m) => Ok(Some(Self {
+                len: m.len(),
+                modified: m.modified()?,
+                created: m.created().ok(),
+            })),
+            Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+}
+
+impl Job {
+    fn target(&self) -> &Path {
+        match self {
+            Self::Rotate { path, .. } | Self::Adjust { path, .. } => path,
+            Self::Export { dst, .. } => dst,
+            Self::Restore { undo } => &undo.path,
+        }
+    }
+}
+
+struct Pending {
+    job: Job,
+    version: io::Result<Option<FileVersion>>,
+}
+
+impl From<Job> for Pending {
+    fn from(job: Job) -> Self {
+        let version = FileVersion::read(job.target());
+        Self { job, version }
+    }
 }
 
 pub enum Outcome {
@@ -84,12 +131,17 @@ pub enum Outcome {
         path: PathBuf,
         edit: Orientation,
         display: Orientation,
+        version: Option<FileVersion>,
     },
     Exported {
         dst: PathBuf,
     },
     Restored {
         path: PathBuf,
+    },
+    RestoreFailed {
+        undo: Undo,
+        error: String,
     },
     Failed {
         path: PathBuf,
@@ -98,7 +150,7 @@ pub enum Outcome {
 }
 
 pub struct Writer {
-    tx: Option<Sender<Job>>,
+    tx: Option<Sender<Pending>>,
     rx: Receiver<Outcome>,
     thread: Option<JoinHandle<()>>,
     backups: PathBuf,
@@ -110,7 +162,7 @@ impl Writer {
         let backups = std::env::temp_dir()
             .join("Lightbox")
             .join(format!("undo-{}", std::process::id()));
-        let (tx, jobs) = channel::<Job>();
+        let (tx, jobs) = channel::<Pending>();
         let (done, rx) = channel();
         let dir = backups.clone();
         let thread = thread::Builder::new()
@@ -136,8 +188,19 @@ impl Writer {
     }
 
     pub fn submit(&self, job: Job) {
+        self.queue(job.into());
+    }
+
+    pub fn submit_versioned(&self, job: Job, version: Option<FileVersion>) {
+        self.queue(Pending {
+            job,
+            version: Ok(version),
+        });
+    }
+
+    fn queue(&self, pending: Pending) {
         if let Some(tx) = &self.tx {
-            let _ = tx.send(job);
+            let _ = tx.send(pending);
         }
     }
 
@@ -161,7 +224,26 @@ impl Drop for Writer {
     }
 }
 
-fn run(job: Job, backups: &Path, n: u32) -> Outcome {
+fn run(Pending { job, version }: Pending, backups: &Path, n: u32) -> Outcome {
+    // Undo is checked against the actual bytes written by Lightbox, rather
+    // than against the timestamp of whatever file happens to be here now.
+    let version = if matches!(job, Job::Restore { .. }) {
+        None
+    } else {
+        let path = job.target();
+        match version.map_err(WriteError::from).and_then(|v| {
+            Expected::Version(v).check(path)?;
+            Ok(v)
+        }) {
+            Ok(v) => v,
+            Err(e) => {
+                return Outcome::Failed {
+                    path: path.to_owned(),
+                    error: e.to_string(),
+                };
+            }
+        }
+    };
     match job {
         Job::Rotate {
             path,
@@ -185,6 +267,7 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
                 path,
                 edit,
                 display,
+                version,
             },
             Err(e) => Outcome::Failed {
                 path,
@@ -197,7 +280,7 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
             edit,
             format,
             quality,
-        } => match export(&src, &dst, edit, format, quality, backups, n) {
+        } => match export(&src, &dst, edit, format, quality, (backups, n), version) {
             Ok(Some(undo)) => Outcome::Rotated {
                 path: dst,
                 edit,
@@ -240,8 +323,8 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
         },
         Job::Restore { undo } => match restore(&undo) {
             Ok(()) => Outcome::Restored { path: undo.path },
-            Err(e) => Outcome::Failed {
-                path: undo.path,
+            Err(e) => Outcome::RestoreFailed {
+                undo,
                 error: e.to_string(),
             },
         },
@@ -250,6 +333,8 @@ fn run(job: Job, backups: &Path, n: u32) -> Outcome {
 
 #[derive(Debug, thiserror::Error)]
 enum WriteError {
+    #[error("{}", tr("Файл изменился на диске. Перезапись отменена."))]
+    Changed,
     #[error("{0}")]
     Io(#[from] io::Error),
     #[error("{0}")]
@@ -310,11 +395,18 @@ fn write_with_backup(
         .unwrap_or_default();
     let backup = backups.join(format!("{n:04}-{name}"));
     fs::write(&backup, old)?;
-    replace_file(path, new, keep_dates.then_some(modified).flatten())?;
+    replace_file(
+        path,
+        new,
+        keep_dates.then_some(modified).flatten(),
+        Expected::Bytes(old),
+    )?;
     Ok(Undo {
         path: path.to_path_buf(),
         backup,
         modified,
+        saved_version: FileVersion::read(path).ok().flatten(),
+        saved_digest: crate::update::sha256(new),
     })
 }
 
@@ -347,7 +439,12 @@ fn adjust_file(
 
 fn restore(undo: &Undo) -> Result<(), WriteError> {
     let data = fs::read(&undo.backup)?;
-    replace_file(&undo.path, &data, undo.modified)?;
+    replace_file(
+        &undo.path,
+        &data,
+        undo.modified,
+        Expected::Digest(&undo.saved_digest),
+    )?;
     Ok(())
 }
 
@@ -357,8 +454,8 @@ fn export(
     edit: Orientation,
     format: ExportFormat,
     quality: u8,
-    backups: &Path,
-    n: u32,
+    (backups, n): (&Path, u32),
+    version: Option<FileVersion>,
 ) -> Result<Option<Undo>, WriteError> {
     let data = fs::read(src)?;
     let img = decode::decode_for_export(&data, src)?;
@@ -380,55 +477,110 @@ fn export(
     if crate::cache::key(src) == crate::cache::key(dst) {
         return write_with_backup(dst, &data, &bytes, false, backups, n).map(Some);
     }
-    if dst.exists() {
-        replace_file(dst, &bytes, None)?;
-    } else {
-        let tmp = temp_name(dst);
-        fs::write(&tmp, &bytes)?;
-        fs::rename(&tmp, dst)?;
-        notify_shell(dst);
-    }
+    replace_file(dst, &bytes, None, Expected::Version(version))?;
     Ok(None)
 }
 
-/// `.name.lbtmp` next to the target (same volume, as ReplaceFileW requires).
-fn temp_name(path: &Path) -> PathBuf {
-    let name = path
-        .file_name()
-        .map(|n| n.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    path.with_file_name(format!(".{name}.lbtmp"))
+enum Expected<'a> {
+    Version(Option<FileVersion>),
+    Bytes(&'a [u8]),
+    Digest(&'a str),
 }
 
-/// Atomically replaces `path` with `bytes`; restores the modification time
-/// to `keep_modified` if given.
-pub fn replace_file(
+impl Expected<'_> {
+    fn check(&self, path: &Path) -> Result<(), WriteError> {
+        let matches = match self {
+            Self::Version(version) => FileVersion::read(path)? == *version,
+            Self::Bytes(bytes) => {
+                let mut file = fs::File::open(path)?;
+                if file.metadata()?.len() != bytes.len() as u64 {
+                    return Err(WriteError::Changed);
+                }
+                let mut buf = [0u8; 64 * 1024];
+                for chunk in bytes.chunks(buf.len()) {
+                    let part = &mut buf[..chunk.len()];
+                    if let Err(e) = file.read_exact(part) {
+                        return Err(if e.kind() == io::ErrorKind::UnexpectedEof {
+                            WriteError::Changed
+                        } else {
+                            e.into()
+                        });
+                    }
+                    if part != chunk {
+                        return Err(WriteError::Changed);
+                    }
+                }
+                file.read(&mut buf[..1])? == 0
+            }
+            Self::Digest(hash) => crate::update::sha256(&fs::read(path)?) == *hash,
+        };
+        if matches {
+            Ok(())
+        } else {
+            Err(WriteError::Changed)
+        }
+    }
+}
+
+/// Writes a sibling temporary file before checking the destination, so the
+/// check runs immediately before the final rename or replace.
+fn replace_file(
     path: &Path,
     bytes: &[u8],
     keep_modified: Option<SystemTime>,
-) -> io::Result<()> {
-    let tmp = temp_name(path);
-    fs::write(&tmp, bytes)?;
-    // SAFETY: plain call with NUL-terminated paths.
-    let replaced = unsafe {
-        ReplaceFileW(
-            &HSTRING::from(path.as_os_str()),
-            &HSTRING::from(tmp.as_os_str()),
-            None,
-            REPLACEFILE_IGNORE_MERGE_ERRORS,
-            None,
-            None,
-        )
+    expected: Expected<'_>,
+) -> Result<(), WriteError> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let (tmp, mut file) = loop {
+        let id = NEXT.fetch_add(1, Ordering::Relaxed);
+        let tmp = path.with_file_name(format!(".lightbox-{}-{id}.lbtmp", std::process::id()));
+        match OpenOptions::new().write(true).create_new(true).open(&tmp) {
+            Ok(file) => break (tmp, file),
+            Err(e) if e.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(e) => return Err(e.into()),
+        }
     };
+    let wrote = file.write_all(bytes);
+    drop(file);
+    let replaced = (|| -> Result<(), WriteError> {
+        wrote?;
+        expected.check(path)?;
+        let target = HSTRING::from(path.as_os_str());
+        let source = HSTRING::from(tmp.as_os_str());
+        // SAFETY: both paths are NUL-terminated and live for the call.
+        unsafe {
+            if matches!(expected, Expected::Version(None)) {
+                // MoveFileW fails if another process has created the target.
+                MoveFileW(&source, &target)
+            } else {
+                ReplaceFileW(
+                    &target,
+                    &source,
+                    None,
+                    REPLACEFILE_IGNORE_MERGE_ERRORS,
+                    None,
+                    None,
+                )
+            }
+        }
+        .map_err(io::Error::other)?;
+        Ok(())
+    })();
     if let Err(e) = replaced {
         let _ = fs::remove_file(&tmp);
-        return Err(io::Error::other(e));
+        return Err(e);
     }
     if let Some(t) = keep_modified {
-        OpenOptions::new()
+        // Once the replacement succeeded, report it as saved even if a
+        // separate attempt to preserve the timestamp fails.
+        if let Err(e) = OpenOptions::new()
             .write(true)
-            .open(path)?
-            .set_times(FileTimes::new().set_modified(t))?;
+            .open(path)
+            .and_then(|file| file.set_times(FileTimes::new().set_modified(t)))
+        {
+            tracing::warn!("cannot preserve timestamp for {}: {e}", path.display());
+        }
     }
     notify_shell(path);
     Ok(())
@@ -478,10 +630,10 @@ mod tests {
             .set_times(FileTimes::new().set_modified(old))
             .unwrap();
         let before = fs::metadata(&p).unwrap().modified().unwrap();
-        replace_file(&p, b"new bytes", Some(before)).unwrap();
+        replace_file(&p, b"new bytes", Some(before), Expected::Bytes(b"old")).unwrap();
         assert_eq!(fs::read(&p).unwrap(), b"new bytes");
         assert_eq!(fs::metadata(&p).unwrap().modified().unwrap(), before);
-        assert!(!temp_name(&p).exists());
+        assert_eq!(fs::read_dir(&d).unwrap().count(), 1);
         fs::remove_dir_all(&d).unwrap();
     }
 
@@ -505,6 +657,60 @@ mod tests {
     }
 
     #[test]
+    fn queued_save_rejects_a_changed_source() {
+        let d = temp_dir("changed-before-save");
+        let path = d.join("photo.jpg");
+        fs::write(&path, sample_jpeg()).unwrap();
+        let pending = Pending::from(Job::Rotate {
+            path: path.clone(),
+            display: Orientation::ROTATE_CW,
+            edit: Orientation::ROTATE_CW,
+            keep_dates: true,
+            imperfect: None,
+            crop: None,
+        });
+        fs::write(&path, b"external edit").unwrap();
+        assert!(
+            matches!(run(pending, &d.join("backups"), 1), Outcome::Failed { error, .. } if error == WriteError::Changed.to_string())
+        );
+        assert_eq!(fs::read(&path).unwrap(), b"external edit");
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn replacement_rejects_a_change_during_encoding() {
+        let d = temp_dir("changed-during-save");
+        let path = d.join("photo.jpg");
+        fs::write(&path, b"external").unwrap();
+        let result = replace_file(&path, b"our edit", None, Expected::Bytes(b"original"));
+        assert!(matches!(result, Err(WriteError::Changed)));
+        assert_eq!(fs::read(&path).unwrap(), b"external");
+        assert_eq!(fs::read_dir(&d).unwrap().count(), 1);
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
+    fn undo_rejects_changed_contents_even_with_the_same_size_and_date() {
+        let d = temp_dir("changed-before-undo");
+        let path = d.join("photo.jpg");
+        fs::write(&path, b"original").unwrap();
+        let undo = write_with_backup(&path, b"original", b"our edit", true, &d.join("backups"), 1)
+            .unwrap();
+        let before = fs::metadata(&path).unwrap().modified().unwrap();
+        fs::write(&path, b"external").unwrap();
+        OpenOptions::new()
+            .write(true)
+            .open(&path)
+            .unwrap()
+            .set_times(FileTimes::new().set_modified(before))
+            .unwrap();
+        assert!(matches!(restore(&undo), Err(WriteError::Changed)));
+        assert_eq!(fs::read(&path).unwrap(), b"external");
+        assert_eq!(fs::read(&undo.backup).unwrap(), b"original");
+        fs::remove_dir_all(&d).unwrap();
+    }
+
+    #[test]
     fn export_over_source_reports_saved_edit_and_can_be_undone() {
         let d = temp_dir("export-over-source");
         let path = d.join("photo.jpg");
@@ -517,7 +723,8 @@ mod tests {
                 edit: Orientation::ROTATE_CW,
                 format: ExportFormat::Jpeg,
                 quality: 90,
-            },
+            }
+            .into(),
             &d.join("backups"),
             1,
         );

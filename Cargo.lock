@@ -668,7 +668,7 @@ dependencies = [
 
 [[package]]
 name = "lightbox"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "anyhow",
  "avif-parse",
@@ -703,7 +703,7 @@ dependencies = [
 
 [[package]]
 name = "lightbox-thumbs"
-version = "0.3.2"
+version = "0.3.3"
 dependencies = [
  "crc32fast",
  "image",

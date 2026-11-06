@@ -2,6 +2,7 @@
 
 pub mod clipboard;
 pub mod dialogs;
+pub mod explorer;
 pub mod menu;
 pub mod monitor;
 pub mod registry;

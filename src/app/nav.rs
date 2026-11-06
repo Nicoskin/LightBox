@@ -13,7 +13,7 @@ use super::{Anim, AnimKind, App, Mode, TURN_SHIFT, WM_APP_DECODED, WM_APP_LIBRAR
 use crate::cache::{self, Slot};
 use crate::decode::{DecodedImage, SizeHint};
 use crate::gfx::GpuImage;
-use crate::library::{self, SortMode};
+use crate::library;
 use crate::loader::{self, Loader, Quality, Request};
 use crate::win::window;
 
@@ -77,11 +77,12 @@ impl App {
             .parent()
             .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         let (tx, rx) = channel();
+        let mode = self.settings.folder_sort;
         self.library_rx = Some(rx);
         let spawned = thread::Builder::new()
             .name("library".into())
             .spawn(move || {
-                let files = library::scan(&dir, &current, SortMode::Name);
+                let files = library::scan(&dir, &current, mode);
                 if tx.send(files).is_ok() {
                     post(hwnd, WM_APP_LIBRARY);
                 }
@@ -104,7 +105,7 @@ impl App {
             .position(|p| library::same_path(p, &self.current));
         // The current file vanished (deleted or renamed elsewhere): show the
         // one now at its place.
-        let gone = pos.is_none() && self.files.len() > 1;
+        let gone = pos.is_none();
         self.index = pos.unwrap_or_else(|| self.index.min(files.len() - 1));
         self.all_files = files.clone();
         self.files = files;
@@ -114,19 +115,15 @@ impl App {
         }
         if gone {
             self.angle = 0.0;
-            if self.show_current()? {
-                self.render()?;
-            }
+            self.show_current()?;
         }
-        if self.rating_filter > 0 {
-            self.apply_filter();
-        }
+        self.apply_filter();
         self.read_ratings();
         self.watch_folder();
         self.update_title();
         self.request_thumbs();
         self.schedule();
-        Ok(())
+        self.render()
     }
 
     pub(super) fn on_decoded(&mut self) -> Result<()> {
@@ -228,7 +225,11 @@ impl App {
         self.index = index;
         // The free rotation belongs to the photo being left.
         self.angle = 0.0;
+        let drop_anchor = !self.matches_folder_filter(&self.current);
         self.current = self.files[index].clone();
+        if drop_anchor {
+            self.apply_filter();
+        }
         self.update_title();
         let shown = self.show_current()?;
         if shown {

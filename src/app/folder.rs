@@ -14,13 +14,185 @@ use windows::core::HSTRING;
 
 use super::{App, WATCH_TIMER, WM_APP_WATCH, post};
 use crate::i18n::tr;
+use crate::library::SortMode;
+use crate::win::menu::Item;
 use crate::win::watch::Watcher;
 use crate::{cache, decode, library};
 
 /// Changes are collected this long before the folder is read again.
 const SETTLE_MS: u32 = 250;
+const SORTS: [SortMode; 5] = [
+    SortMode::Explorer,
+    SortMode::Name,
+    SortMode::Modified,
+    SortMode::Rating,
+    SortMode::Type,
+];
+const SORT: u32 = 400;
+const REVERSE: u32 = 405;
+const SEARCH: u32 = 406;
+const RESET: u32 = 407;
+const RATING: u32 = 410;
+const TYPE: u32 = 420;
 
 impl App {
+    pub(super) fn search_folder(&mut self) -> Result<()> {
+        if self.preview() || self.is_doc() || self.current.as_os_str().is_empty() {
+            return Ok(());
+        }
+        self.folder_menu_action(SEARCH)
+    }
+
+    fn folder_types(&self) -> Vec<String> {
+        let mut types: Vec<_> = self
+            .all_files
+            .iter()
+            .map(|p| library::file_type(p))
+            .filter(|s| !s.is_empty())
+            .collect();
+        types.sort_unstable();
+        types.dedup();
+        types
+    }
+
+    pub(super) fn folder_menu(&self) -> Item {
+        let option = |id, label: &str, active, enabled| {
+            Item::Command(
+                id,
+                if active {
+                    format!("✓ {label}")
+                } else {
+                    label.to_owned()
+                },
+                enabled,
+            )
+        };
+        let labels = [
+            "Как в Проводнике",
+            "По имени",
+            "По дате изменения",
+            "По рейтингу",
+            "По типу файла",
+        ];
+        let mut sorts: Vec<_> = SORTS
+            .iter()
+            .zip(labels)
+            .enumerate()
+            .map(|(i, (mode, label))| {
+                option(
+                    SORT + i as u32,
+                    tr(label),
+                    self.settings.folder_sort == *mode,
+                    true,
+                )
+            })
+            .collect();
+        sorts.push(Item::Separator);
+        sorts.push(option(
+            REVERSE,
+            tr("Обратный порядок"),
+            self.settings.folder_reverse && self.settings.folder_sort != SortMode::Explorer,
+            self.settings.folder_sort != SortMode::Explorer,
+        ));
+        let mut types = vec![option(
+            TYPE,
+            tr("Все типы"),
+            self.folder_extension.is_empty(),
+            true,
+        )];
+        for (i, ext) in self.folder_types().iter().enumerate() {
+            types.push(option(
+                TYPE + 1 + i as u32,
+                &format!("*.{ext}"),
+                self.folder_extension == *ext,
+                true,
+            ));
+        }
+        let ratings = (0..=5)
+            .map(|stars| {
+                let label = if stars == 0 {
+                    tr("Любой рейтинг").to_owned()
+                } else {
+                    crate::t!("фильтр: от {}", super::stars::stars_text(stars))
+                };
+                option(
+                    RATING + u32::from(stars),
+                    &label,
+                    self.rating_filter == stars,
+                    true,
+                )
+            })
+            .collect();
+        Item::Submenu(
+            tr("Папка").into(),
+            vec![
+                Item::Submenu(tr("Сортировка").into(), sorts),
+                Item::Submenu(tr("Тип файла").into(), types),
+                Item::Submenu(tr("Рейтинг").into(), ratings),
+                option(
+                    SEARCH,
+                    tr("Поиск по имени…"),
+                    !self.folder_query.is_empty(),
+                    true,
+                ),
+                option(
+                    RESET,
+                    tr("Сбросить фильтры"),
+                    false,
+                    self.filter_label().is_some(),
+                ),
+            ],
+        )
+    }
+
+    pub(super) fn folder_menu_action(&mut self, id: u32) -> Result<()> {
+        match id {
+            SORT..REVERSE => {
+                self.settings.folder_sort = SORTS[(id - SORT) as usize];
+                self.settings.folder_reverse = false;
+                self.settings.save();
+                self.rescan_folder();
+                return Ok(());
+            }
+            REVERSE => {
+                self.settings.folder_reverse = !self.settings.folder_reverse;
+                self.settings.save();
+            }
+            SEARCH => {
+                let Some(query) = crate::win::dialogs::folder_search(self.hwnd, &self.folder_query)
+                else {
+                    return Ok(());
+                };
+                self.folder_query = query.trim().to_lowercase();
+            }
+            RESET => {
+                self.folder_query.clear();
+                self.folder_extension.clear();
+                self.rating_filter = 0;
+            }
+            RATING..TYPE => self.rating_filter = (id - RATING).min(5) as u8,
+            TYPE => self.folder_extension.clear(),
+            id if id > TYPE => {
+                if let Some(ext) = self.folder_types().get((id - TYPE - 1) as usize) {
+                    self.folder_extension = ext.clone();
+                }
+            }
+            _ => return Ok(()),
+        }
+        self.apply_filter();
+        if matches!(id, SEARCH | TYPE..) && !self.matches_folder_filter(&self.current) {
+            if let Some(i) = self
+                .files
+                .iter()
+                .position(|p| self.matches_folder_filter(p))
+            {
+                return self.go_to(i);
+            }
+            self.notice(tr("Файлы не найдены"));
+        }
+        self.render()
+    }
+
     /// Watches the folder of the current file (again, if it changed).
     pub(super) fn watch_folder(&mut self) {
         let Some(dir) = self.current.parent().map(Path::to_path_buf) else {

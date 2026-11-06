@@ -184,6 +184,8 @@ pub struct Settings {
     pub language: crate::i18n::Language,
     /// F1..F9 folders (tables follow the plain keys).
     pub quick_folders: Vec<QuickFolder>,
+    pub folder_sort: crate::library::SortMode,
+    pub folder_reverse: bool,
     /// Reassigned shortcuts (see `keymap`): action → keys.
     pub keys: crate::keymap::Overrides,
 }
@@ -219,6 +221,8 @@ impl Default for Settings {
             map_tiles: true,
             language: crate::i18n::Language::Auto,
             quick_folders: Vec::new(),
+            folder_sort: Default::default(),
+            folder_reverse: false,
             keys: Default::default(),
         }
     }

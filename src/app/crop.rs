@@ -13,7 +13,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::App;
 use crate::cache;
-use crate::edit::Job;
+use crate::edit::{FileVersion, Job};
 use crate::gfx::{CropView, SegmentView};
 use crate::i18n::tr;
 use crate::orientation::Orientation;
@@ -22,6 +22,7 @@ use crate::view::Rect;
 
 pub(super) struct CropState {
     key: String,
+    version: Option<FileVersion>,
     /// x0, y0, x1, y1 in pixels of the photo as shown.
     frame: [f64; 4],
     aspect: Aspect,
@@ -68,6 +69,7 @@ impl App {
         };
         self.crop = Some(CropState {
             key: cache::key(&self.current),
+            version: self.edit_version(&self.current)?,
             frame: [0.0, 0.0, w, h],
             aspect: Aspect::Free,
             drag: None,
@@ -220,14 +222,17 @@ impl App {
             .get(&key)
             .copied()
             .unwrap_or(Orientation::IDENTITY);
-        writer.submit(Job::Rotate {
-            path: path.clone(),
-            display: self.base_orientation(&path).then(edit),
-            edit,
-            keep_dates: self.settings.keep_file_dates,
-            imperfect: self.settings.imperfect_jpeg,
-            crop: Some(rect),
-        });
+        writer.submit_versioned(
+            Job::Rotate {
+                path: path.clone(),
+                display: self.base_orientation(&path).then(edit),
+                edit,
+                keep_dates: self.settings.keep_file_dates,
+                imperfect: self.settings.imperfect_jpeg,
+                crop: Some(rect),
+            },
+            c.version,
+        );
         self.saving.insert(key);
         self.notice(tr("Обрезка сохраняется…"));
         self.render()

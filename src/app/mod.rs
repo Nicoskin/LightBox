@@ -217,6 +217,8 @@ pub struct App {
     /// and the channel of the rating threads.
     ratings: HashMap<String, u8>,
     rating_filter: u8,
+    folder_query: String,
+    folder_extension: String,
     /// A running batch (rename / convert).
     /// The GPS map of the info panel: rendered (file key, image), on its
     /// way, or failed.
@@ -263,6 +265,7 @@ pub struct App {
     /// Rotations / mirrors made by the user, per file (cache key); written
     /// to the file in M2.
     edits: HashMap<String, Orientation>,
+    edit_versions: HashMap<String, Option<crate::edit::FileVersion>>,
     /// Background file writer (rotations, "Save as", undo).
     writer: Option<crate::edit::Writer>,
     /// Files with a rotation being written.
@@ -408,6 +411,8 @@ impl App {
             all_files: vec![path.clone()],
             ratings: HashMap::new(),
             rating_filter: 0,
+            folder_query: String::new(),
+            folder_extension: String::new(),
             map: None,
             map_rx: None,
             map_error: None,
@@ -441,6 +446,7 @@ impl App {
             pressed: None,
             thumbs: None,
             edits: HashMap::new(),
+            edit_versions: HashMap::new(),
             writer: None,
             saving: HashSet::new(),
             reloading: HashMap::new(),

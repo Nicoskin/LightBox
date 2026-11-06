@@ -100,6 +100,15 @@ impl App {
             }
             self.leave_current();
         }
+        if !self
+            .current
+            .parent()
+            .zip(path.parent())
+            .is_some_and(|(a, b)| library::same_path(a, b))
+        {
+            self.folder_query.clear();
+            self.folder_extension.clear();
+        }
         self.current = path.clone();
         self.all_files = vec![path.clone()];
         self.files = vec![path];

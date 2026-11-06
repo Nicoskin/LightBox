@@ -2,6 +2,29 @@
 
 pub(super) const EN: &[(&str, &str)] = &[
     // Viewer: navigation, panel, notices.
+    ("Папка", "Folder"),
+    ("Сортировка", "Sort by"),
+    ("Как в Проводнике", "Same as Explorer"),
+    ("По имени", "Name"),
+    ("По дате изменения", "Date modified"),
+    ("По рейтингу", "Rating"),
+    ("По типу файла", "File type"),
+    ("Обратный порядок", "Reverse order"),
+    ("Тип файла", "File type"),
+    ("Все типы", "All file types"),
+    ("Рейтинг", "Rating"),
+    ("Любой рейтинг", "Any rating"),
+    ("Поиск по имени…", "Find by file name…"),
+    ("Сбросить фильтры", "Clear filters"),
+    ("Файлы не найдены", "No matching files"),
+    (
+        "Файл изменился на диске. Перезапись отменена.",
+        "The file changed on disk. It was not overwritten.",
+    ),
+    (
+        "Не удалось отменить сохранение {}: {}",
+        "Could not undo the save of {}: {}",
+    ),
     ("Воспроизведение", "Playing"),
     ("Пауза", "Paused"),
     (" · пауза", " · paused"),

@@ -337,11 +337,7 @@ impl App {
             .copied()
             .unwrap_or(Orientation::IDENTITY)
             .then(op);
-        if e == Orientation::IDENTITY {
-            self.edits.remove(&key);
-        } else {
-            self.edits.insert(key, e);
-        }
+        self.set_rotation_edit(&self.current.clone(), e)?;
         if let Some(v) = self.fit_view() {
             self.view = v;
             self.fitted = true;

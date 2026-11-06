@@ -19,6 +19,110 @@ use windows::core::{BOOL, HSTRING, Interface as _, PCWSTR, w};
 
 use crate::edit::ExportFormat;
 
+/// Native modal text entry for filtering a folder by file name.
+pub fn folder_search(hwnd: HWND, initial: &str) -> Option<String> {
+    use crate::i18n::tr;
+    use windows::Win32::Foundation::{LPARAM, WPARAM};
+    use windows::Win32::UI::WindowsAndMessaging::*;
+
+    const EDIT: i32 = 100;
+    // DWLP_USER follows the pointer-sized result and dialog procedure.
+    const USER: i32 = (2 * std::mem::size_of::<isize>()) as i32;
+
+    unsafe extern "system" fn proc(hwnd: HWND, msg: u32, w: WPARAM, l: LPARAM) -> isize {
+        // SAFETY: lParam is the caller's live String on WM_INITDIALOG; it
+        // remains alive for the modal loop and is only used on this thread.
+        unsafe {
+            match msg {
+                WM_INITDIALOG => {
+                    SetWindowLongPtrW(hwnd, WINDOW_LONG_PTR_INDEX(USER), l.0);
+                    let text = &*(l.0 as *const String);
+                    let _ = SetDlgItemTextW(hwnd, EDIT, &HSTRING::from(text.as_str()));
+                    1
+                }
+                WM_COMMAND if w.0 as u16 == IDOK.0 as u16 => {
+                    let mut buf = [0u16; 1024];
+                    let n = GetDlgItemTextW(hwnd, EDIT, &mut buf) as usize;
+                    let text = GetWindowLongPtrW(hwnd, WINDOW_LONG_PTR_INDEX(USER)) as *mut String;
+                    if let Some(text) = text.as_mut() {
+                        *text = String::from_utf16_lossy(&buf[..n]);
+                    }
+                    let _ = EndDialog(hwnd, 1);
+                    1
+                }
+                WM_CLOSE | WM_COMMAND if msg == WM_CLOSE || w.0 as u16 == IDCANCEL.0 as u16 => {
+                    let _ = EndDialog(hwnd, 0);
+                    1
+                }
+                _ => 0,
+            }
+        }
+    }
+
+    fn dword(words: &mut Vec<u16>, value: u32) {
+        words.extend([value as u16, (value >> 16) as u16]);
+    }
+
+    let mut words = Vec::new();
+    dword(
+        &mut words,
+        (WS_POPUP | WS_CAPTION | WS_SYSMENU).0 | (DS_CENTER | DS_MODALFRAME | DS_SETFONT) as u32,
+    );
+    dword(&mut words, 0);
+    words.extend([3, 0, 0, 234, 54, 0, 0]); // header, no menu or class
+    words.extend(tr("Поиск по имени…").encode_utf16().chain([0]));
+    words.push(9);
+    words.extend("Segoe UI".encode_utf16().chain([0]));
+    let mut control = |style: u32, rect: [u16; 4], id: u16, class, title: &str| {
+        if words.len() % 2 != 0 {
+            words.push(0);
+        }
+        dword(&mut words, (WS_CHILD | WS_VISIBLE | WS_TABSTOP).0 | style);
+        dword(&mut words, 0);
+        words.extend(rect);
+        words.extend([id, 0xffff, class]);
+        words.extend(title.encode_utf16().chain([0, 0]));
+    };
+    control(
+        WS_BORDER.0 | ES_AUTOHSCROLL as u32,
+        [7, 7, 220, 14],
+        EDIT as u16,
+        0x81,
+        "",
+    );
+    control(
+        BS_DEFPUSHBUTTON as u32,
+        [121, 31, 50, 15],
+        IDOK.0 as u16,
+        0x80,
+        "OK",
+    );
+    control(0, [177, 31, 50, 15], IDCANCEL.0 as u16, 0x80, tr("Отмена"));
+    // Both the template and its control records require DWORD alignment.
+    if words.len() % 2 != 0 {
+        words.push(0);
+    }
+    let template: Vec<u32> = words
+        .as_chunks::<2>()
+        .0
+        .iter()
+        .map(|w| u32::from(w[0]) | (u32::from(w[1]) << 16))
+        .collect();
+    let mut query = initial.to_owned();
+    // SAFETY: the DWORD-aligned dialog template and query live until the
+    // modal dialog returns. Controls use the system's predefined classes.
+    let accepted = unsafe {
+        DialogBoxIndirectParamW(
+            None,
+            template.as_ptr().cast(),
+            Some(hwnd),
+            Some(proc),
+            LPARAM((&mut query as *mut String) as isize),
+        )
+    } == 1;
+    accepted.then_some(query)
+}
+
 /// Command-link task dialog. Returns the chosen button id (`None` when
 /// cancelled) and the state of the verification check box.
 pub fn ask(

@@ -13,7 +13,7 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_MENU};
 use windows::Win32::UI::WindowsAndMessaging::{
     HTBOTTOM, HTBOTTOMLEFT, HTBOTTOMRIGHT, HTCAPTION, HTCLIENT, HTLEFT, HTRIGHT, HTTOP, HTTOPLEFT,
     HTTOPRIGHT, SC_MAXIMIZE, WM_DISPLAYCHANGE, WM_DPICHANGED, WM_NCHITTEST, WM_NCLBUTTONDBLCLK,
-    WM_SIZE, WM_SYSCOMMAND,
+    WM_NCRBUTTONUP, WM_SIZE, WM_SYSCOMMAND,
 };
 
 use super::{Anim, AnimKind, App, MODE_ANIM, Mode};
@@ -287,6 +287,16 @@ impl App {
         let windowed = self.mode == Mode::Windowed;
         Ok(match msg {
             WM_NCHITTEST if windowed => Some(self.hit_test(lparam)),
+            WM_NCRBUTTONUP
+                if windowed
+                    && wparam.0 == HTCAPTION as usize
+                    && !self.over_title_bar(self.screen_to_client(lparam)) =>
+            {
+                // The picture acts as a caption for dragging, but its
+                // right-click opens the same menu as in fullscreen.
+                self.context_menu()?;
+                Some(LRESULT(0))
+            }
             WM_NCLBUTTONDBLCLK if windowed => {
                 self.go_fullscreen()?;
                 Some(LRESULT(0))

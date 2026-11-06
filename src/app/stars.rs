@@ -95,7 +95,9 @@ impl App {
             redraw = true;
         }
         if redraw {
-            if self.rating_filter > 0 {
+            if self.rating_filter > 0
+                || self.settings.folder_sort == crate::library::SortMode::Rating
+            {
                 self.apply_filter();
             }
             self.render()?;
@@ -140,19 +142,24 @@ impl App {
         self.render()
     }
 
-    /// The folder narrowed to the rating filter (the current photo stays).
+    /// Apply folder filters, keeping the open file as a navigation anchor.
     pub(super) fn apply_filter(&mut self) {
-        let min = self.rating_filter;
         let current = cache::key(&self.current);
-        let files: Vec<PathBuf> = self
+        let mut files: Vec<PathBuf> = self
             .all_files
             .iter()
-            .filter(|p| {
-                let k = cache::key(p);
-                min == 0 || k == current || self.ratings.get(&k).copied().unwrap_or(0) >= min
-            })
+            .filter(|p| cache::key(p) == current || self.matches_folder_filter(p))
             .cloned()
             .collect();
+        let mode = self.settings.folder_sort;
+        if mode == crate::library::SortMode::Rating {
+            files.sort_by_cached_key(|p| {
+                std::cmp::Reverse(self.ratings.get(&cache::key(p)).copied().unwrap_or(0))
+            });
+        }
+        if self.settings.folder_reverse && mode != crate::library::SortMode::Explorer {
+            files.reverse();
+        }
         if files.is_empty() || files == self.files {
             return;
         }
@@ -167,9 +174,25 @@ impl App {
         self.schedule();
     }
 
+    pub(super) fn matches_folder_filter(&self, path: &std::path::Path) -> bool {
+        (self.rating_filter == 0
+            || self.ratings.get(&cache::key(path)).copied().unwrap_or(0) >= self.rating_filter)
+            && crate::library::matches(path, &self.folder_query, &self.folder_extension)
+    }
+
     /// "фильтр: от ★★★" while filtering.
     pub(super) fn filter_label(&self) -> Option<String> {
-        (self.rating_filter > 0).then(|| t!("фильтр: от {}", stars_text(self.rating_filter)))
+        let mut filters = Vec::new();
+        if self.rating_filter > 0 {
+            filters.push(t!("фильтр: от {}", stars_text(self.rating_filter)));
+        }
+        if !self.folder_extension.is_empty() {
+            filters.push(format!("*.{}", self.folder_extension));
+        }
+        if !self.folder_query.is_empty() {
+            filters.push(format!("«{}»", self.folder_query));
+        }
+        (!filters.is_empty()).then(|| filters.join(" · "))
     }
 }
 

@@ -81,7 +81,7 @@ impl App {
                 self.settings.save();
             }
         }
-        self.edits.remove(&cache::key(&self.current));
+        self.clear_rotation_edit(&cache::key(&self.current));
         self.submit_file_job(Job::Delete {
             path: self.current.clone(),
             confirm: false,
@@ -271,7 +271,7 @@ impl App {
         self.cache.remove(path);
         self.textures.remove(&key);
         self.reloading.remove(&key);
-        self.edits.remove(&key);
+        self.clear_rotation_edit(&key);
         self.compare_key_removed(&key);
         let Some(i) = self.files.iter().position(|p| library::same_path(p, path)) else {
             return Ok(());
@@ -340,7 +340,7 @@ impl App {
             ));
             v
         };
-        let items = vec![
+        let mut items = vec![
             cmd(CMD_COPY_IMAGE, tr("Копировать изображение\tCtrl+C")),
             cmd(CMD_COPY_PATH, tr("Копировать путь\tCtrl+Shift+C")),
             Item::Separator,
@@ -355,6 +355,10 @@ impl App {
             Item::Separator,
             cmd(CMD_DELETE, tr("Удалить в корзину\tDel")),
         ];
+        if !self.preview() && !self.is_doc() && !self.current.as_os_str().is_empty() {
+            items.push(Item::Separator);
+            items.push(self.folder_menu());
+        }
         let at = crate::win::window::cursor_pos();
         let Some(id) = menu::popup(self.hwnd, &items, at) else {
             return Ok(());
@@ -373,6 +377,7 @@ impl App {
             CMD_WALLPAPER => self.set_wallpaper(),
             CMD_DELETE => self.delete_current(),
             CMD_INFO => self.toggle_info(),
+            400.. => self.folder_menu_action(id),
             CMD_ASSIGN => {
                 // The first free key, else F1.
                 let n = (1..=9u8)

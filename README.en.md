@@ -23,6 +23,9 @@ A fast image and 3D model viewer for Windows 10/11 in the spirit of Picasa Photo
 - **G-code** (.gcode, .gcode.3mf): the toolpath coloured by line type, layers with ↑/↓, print time and filament use.
 - **Inspector:** histogram, single R/G/B/A channels, an info panel (EXIF, camera, GPS with a map, ICC). For PNGs from ComfyUI and A1111 it shows the prompt and generation parameters with copy buttons.
 - **Ratings** (Ctrl+1…5) written the Windows way, so Explorer and Lightroom see them; a filter by rating.
+- **Folder order and filters.** Right-click → Folder: follow an open Explorer tab (name order if the folder is closed there), sort manually, find by file name, or filter by type and rating.
+- Ctrl+Shift+F opens file name search.
+- **Edit protection.** If the file changes on disk after editing starts, Lightbox cancels the overwrite. Ctrl+Z restores a backup only if the current contents match what Lightbox saved.
 - **Compare two photos** side by side with synced zoom, in one place by turns, or as a difference map; on-screen buttons or keys switch them.
 - **Slideshow, filmstrip, folder watching, drag & drop** into and out of the window.
 - **File handling:** delete to the Recycle Bin, copy the image or its path, quick folders F1–F9, open in an editor, show in Explorer.

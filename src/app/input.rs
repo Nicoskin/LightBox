@@ -43,7 +43,7 @@ fn client_point(lparam: LPARAM) -> (f64, f64) {
 
 impl App {
     /// Screen coordinates (wheel, non-client messages) → client coordinates.
-    fn screen_to_client(&self, lparam: LPARAM) -> (f64, f64) {
+    pub(super) fn screen_to_client(&self, lparam: LPARAM) -> (f64, f64) {
         let (sx, sy) = lparam_point(lparam);
         let wr = window::rect(self.hwnd);
         (f64::from(sx - wr.left), f64::from(sy - wr.top))
@@ -447,6 +447,7 @@ impl App {
             Command::Rate4 => self.rate(4),
             Command::Rate5 => self.rate(5),
             Command::RatingFilter => self.cycle_rating_filter(),
+            Command::FolderSearch => self.search_folder(),
             Command::Crop => self.toggle_crop(),
             Command::Wireframe => self.toggle_wire(),
             Command::Section => self.toggle_section(),

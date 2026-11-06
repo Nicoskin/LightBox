@@ -71,11 +71,7 @@ impl App {
                 .copied()
                 .unwrap_or(Orientation::IDENTITY)
                 .then(op);
-            if e == Orientation::IDENTITY {
-                self.edits.remove(&key);
-            } else {
-                self.edits.insert(key, e);
-            }
+            self.set_rotation_edit(p, e)?;
         }
         if self.selected.contains(&current)
             && let Some(v) = self.fit_view()

@@ -14,7 +14,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
 use super::App;
 use crate::adjust::Adjust;
 use crate::cache;
-use crate::edit::Job;
+use crate::edit::{FileVersion, Job};
 use crate::gfx::{AdjustView, SegmentView, SliderView};
 use crate::i18n::tr;
 use crate::orientation::Orientation;
@@ -23,6 +23,7 @@ use crate::ui::adjust::{self, Hit};
 
 pub(super) struct ToneState {
     key: String,
+    version: Option<FileVersion>,
     values: Adjust,
     /// The slider being dragged.
     drag: Option<usize>,
@@ -42,6 +43,7 @@ impl App {
         self.notice = None;
         self.tone = Some(ToneState {
             key: cache::key(&self.current),
+            version: self.edit_version(&self.current)?,
             values: Adjust::default(),
             drag: None,
             hot: None,
@@ -168,15 +170,18 @@ impl App {
             .get(&key)
             .copied()
             .unwrap_or(Orientation::IDENTITY);
-        writer.submit(Job::Adjust {
-            path: path.clone(),
-            display: self.base_orientation(&path).then(edit),
-            edit,
-            adjust: t.values,
-            angle: self.angle,
-            quality: self.settings.jpeg_quality,
-            keep_dates: self.settings.keep_file_dates,
-        });
+        writer.submit_versioned(
+            Job::Adjust {
+                path: path.clone(),
+                display: self.base_orientation(&path).then(edit),
+                edit,
+                adjust: t.values,
+                angle: self.angle,
+                quality: self.settings.jpeg_quality,
+                keep_dates: self.settings.keep_file_dates,
+            },
+            t.version,
+        );
         self.saving.insert(key);
         // The tilt is now in the pixels.
         self.angle = 0.0;
