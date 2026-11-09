@@ -417,6 +417,19 @@ pub(super) const EN: &[(&str, &str)] = &[
         "Update checks are not set up in this build",
     ),
     ("Проверка обновлений…", "Checking for updates…"),
+    ("Проверить обновления…", "Check for updates…"),
+    ("Обновить сейчас", "Update now"),
+    (
+        "Проверка или загрузка обновления уже выполняется",
+        "An update check or download is already in progress",
+    ),
+    ("О программе", "About"),
+    ("Открыть проект на GitHub", "Open the project on GitHub"),
+    (
+        "Просмотр изображений, документов и 3D-моделей",
+        "Image, document, and 3D model viewer",
+    ),
+    ("Лицензия MIT", "MIT license"),
     (
         "Установлена последняя версия ({})",
         "You have the latest version ({})",

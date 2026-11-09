@@ -44,6 +44,9 @@ const INJECTED: usize = 0x4C42_5351;
 /// Tray menu ids.
 const TRAY_OPEN: u32 = 1;
 const TRAY_EXIT: u32 = 2;
+const TRAY_SETTINGS: u32 = 3;
+const TRAY_ABOUT: u32 = 4;
+const TRAY_CHECK_UPDATES: u32 = 5;
 
 /// Window the keyboard hook posts to.
 static HOOK_TARGET: AtomicIsize = AtomicIsize::new(0);
@@ -88,6 +91,9 @@ impl App {
     /// Shows `path`: in the open window (its folder is browsed), or — when
     /// hidden in the tray — in a window that appears once it is decoded.
     pub(super) fn open_external(&mut self, path: &Path) -> Result<()> {
+        if self.standalone_card {
+            self.dismiss_tray_card()?;
+        }
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         // From the start screen the window opens like from the tray: sized
         // to the photo once it is decoded.
@@ -199,6 +205,8 @@ impl App {
         self.cache.clear();
         self.menu = None;
         self.card_open = false;
+        self.standalone_card = false;
+        self.about = None;
         true
     }
 
@@ -276,11 +284,21 @@ impl App {
             WM_RBUTTONUP => {
                 let items = [
                     menu::Item::Command(TRAY_OPEN, tr("Открыть файл…").into(), true),
+                    menu::Item::Command(TRAY_SETTINGS, tr("Настройки").into(), true),
+                    menu::Item::Separator,
+                    menu::Item::Command(TRAY_ABOUT, tr("О программе").into(), true),
+                    menu::Item::Command(
+                        TRAY_CHECK_UPDATES,
+                        tr("Проверить обновления…").into(),
+                        true,
+                    ),
                     menu::Item::Separator,
                     menu::Item::Command(TRAY_EXIT, tr("Выход").into(), true),
                 ];
                 match menu::popup(self.hwnd, &items, window::cursor_pos()) {
                     Some(TRAY_OPEN) => self.open_dialog(),
+                    Some(TRAY_SETTINGS) => self.open_tray_card(None),
+                    Some(TRAY_ABOUT | TRAY_CHECK_UPDATES) => self.open_about(),
                     Some(TRAY_EXIT) => {
                         self.quit();
                         Ok(())

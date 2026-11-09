@@ -286,7 +286,17 @@ impl App {
     ) -> Result<Option<LRESULT>> {
         let windowed = self.mode == Mode::Windowed;
         Ok(match msg {
+            WM_NCHITTEST if self.standalone_card => {
+                let point = self.screen_to_client(lparam);
+                let hit = if self.over_card_header(point) {
+                    HTCAPTION
+                } else {
+                    HTCLIENT
+                };
+                Some(LRESULT(hit as isize))
+            }
             WM_NCHITTEST if windowed => Some(self.hit_test(lparam)),
+            WM_NCRBUTTONUP | WM_NCLBUTTONDBLCLK if self.standalone_card => Some(LRESULT(0)),
             WM_NCRBUTTONUP
                 if windowed
                     && wparam.0 == HTCAPTION as usize
@@ -308,7 +318,9 @@ impl App {
             }
             // Maximise (Win+Up, snap) means "fullscreen" for a photo window.
             WM_SYSCOMMAND if (wparam.0 as u32 & 0xfff0) == SC_MAXIMIZE => {
-                self.go_fullscreen()?;
+                if !self.standalone_card {
+                    self.go_fullscreen()?;
+                }
                 Some(LRESULT(0))
             }
             WM_DPICHANGED | WM_DISPLAYCHANGE => {
@@ -405,6 +417,9 @@ impl App {
     /// Shows the start screen (launched without a file, or from the tray):
     /// a mid-sized window with "Open file…" and "Settings".
     pub fn show_home(&mut self) -> Result<()> {
+        if !self.hidden && self.standalone_card {
+            self.dismiss_tray_card()?;
+        }
         if !self.hidden {
             // Already showing a photo or the start screen.
             self.bring_to_front();
@@ -424,14 +439,20 @@ impl App {
         self.monitor = Monitor::under_cursor();
         let s = self.ui_scale();
         let work = to_rect(self.monitor.work);
+        let standalone = self.standalone_card;
+        let (width, height) = if standalone {
+            crate::ui::settings_card::window_size(self.about.is_some())
+        } else {
+            HOME_SIZE
+        };
         let size = (
-            (HOME_SIZE.0 * s).min(work.width()),
-            (HOME_SIZE.1 * s).min(work.height()),
+            (width * s).min(work.width()),
+            (height * s).min(work.height()),
         );
         let target = view::place_within(size, work.center(), work);
         self.mode = Mode::Windowed;
         self.dim = 0.0;
-        window::set_mode(self.hwnd, true, to_win32(target))?;
+        window::set_mode(self.hwnd, !standalone, to_win32(target))?;
         window::set_topmost(self.hwnd, self.on_top);
         self.gpu.resize(
             target.width().round() as u32,

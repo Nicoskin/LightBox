@@ -30,6 +30,7 @@ pub enum Choice {
     AutoUpdate(bool),
     /// Action: check for updates now (never shown as selected).
     CheckUpdates,
+    ProjectPage,
     ConfirmDelete(bool),
     /// `true`: choose an editor (the app opens a dialog); `false`: system.
     Editor(bool),
@@ -52,6 +53,7 @@ pub enum Tab {
     System,
     /// Keyboard shortcuts (a list of its own, see `KeyRowLayout`).
     Keys,
+    About,
 }
 
 impl Tab {
@@ -70,6 +72,7 @@ impl Tab {
             Tab::Files => tr("Файлы"),
             Tab::System => tr("Система"),
             Tab::Keys => tr("Клавиши"),
+            Tab::About => tr("О программе"),
         }
     }
 }
@@ -270,6 +273,17 @@ fn all_rows(tab: Tab) -> Vec<Row> {
             ),
         ],
         Tab::Keys => vec![],
+        Tab::About => vec![
+            row(tr("Просмотр изображений, документов и 3D-моделей"), vec![]),
+            row("", vec![]),
+            row(
+                "",
+                vec![
+                    (CheckUpdates, tr("Проверить обновления…")),
+                    (ProjectPage, tr("Открыть проект на GitHub")),
+                ],
+            ),
+        ],
     }
 }
 
@@ -302,7 +316,7 @@ pub fn is_selected(s: &Settings, c: Choice) -> bool {
         Choice::QuickLook(v) => (s.quick_look && s.resident) == v,
         Choice::Autostart(v) => s.autostart == v,
         Choice::AutoUpdate(v) => s.check_updates == v,
-        Choice::CheckUpdates => false,
+        Choice::CheckUpdates | Choice::ProjectPage => false,
         Choice::ConfirmDelete(v) => s.confirm_delete == v,
         Choice::Editor(v) => s.editor.is_some() == v,
         Choice::JpegQuality(v) => s.jpeg_quality == v,
@@ -333,7 +347,7 @@ pub fn apply(s: &mut Settings, c: Choice) {
         }
         Choice::Autostart(v) => s.autostart = v,
         Choice::AutoUpdate(v) => s.check_updates = v,
-        Choice::CheckUpdates => {}
+        Choice::CheckUpdates | Choice::ProjectPage => {}
         Choice::ConfirmDelete(v) => s.confirm_delete = v,
         Choice::Editor(false) => s.editor = None,
         // Chosen in a file dialog by the app.
@@ -405,6 +419,15 @@ const ROW_H: f64 = 46.0;
 const LABEL_W: f64 = 220.0;
 const PAD: f64 = 24.0;
 const FOOTER_H: f64 = 40.0;
+
+pub fn window_size(about: bool) -> (f64, f64) {
+    let height = if about {
+        card_height(Tab::About, rows(Tab::About).len())
+    } else {
+        card_height(Tab::View, max_rows())
+    };
+    (CARD_W + 32.0, height + 32.0)
+}
 /// Keys page: row height, column gap, chip width.
 const KEY_ROW_H: f64 = 30.0;
 const KEY_COL_GAP: f64 = 20.0;
@@ -416,11 +439,19 @@ fn max_rows() -> usize {
     Tab::ALL.iter().map(|t| rows(*t).len()).max().unwrap_or(0)
 }
 
+fn card_height(tab: Tab, row_count: usize) -> f64 {
+    let tabs_h = if tab == Tab::About { 0.0 } else { TABS_H };
+    TITLE_H + tabs_h + TABS_GAP + ROW_H * row_count as f64 + FOOTER_H
+}
+
 /// The card for page `tab`, centred in a `vp` viewport at UI scale `s`
 /// (shrunk to fit); `scroll` moves the keys page.
 pub fn layout(vp: (f64, f64), s: f64, tab: Tab, scroll: f64) -> CardLayout {
     let page = rows(tab);
-    let natural_h = TITLE_H + TABS_H + TABS_GAP + ROW_H * max_rows() as f64 + FOOTER_H;
+    let about = tab == Tab::About;
+    let tabs_h = if about { 0.0 } else { TABS_H };
+    let row_count = if about { page.len() } else { max_rows() };
+    let natural_h = card_height(tab, row_count);
     // Scale down on small windows so that the card always fits.
     let s = s
         .min((vp.0 - 16.0) / CARD_W)
@@ -453,6 +484,7 @@ pub fn layout(vp: (f64, f64), s: f64, tab: Tab, scroll: f64) -> CardLayout {
     let ty = y0 + TITLE_H * s;
     let tabs = Tab::ALL
         .iter()
+        .filter(|_| !about)
         .enumerate()
         .map(|(i, t)| {
             let a = tx0 + tw * i as f64;
@@ -467,7 +499,7 @@ pub fn layout(vp: (f64, f64), s: f64, tab: Tab, scroll: f64) -> CardLayout {
             )
         })
         .collect();
-    let rows_y = ty + (TABS_H + TABS_GAP) * s;
+    let rows_y = ty + (tabs_h + TABS_GAP) * s;
     let mut out = Vec::with_capacity(page.len());
     for (i, row) in page.into_iter().enumerate() {
         let row_label = row.label;
@@ -475,12 +507,12 @@ pub fn layout(vp: (f64, f64), s: f64, tab: Tab, scroll: f64) -> CardLayout {
         let label = Rect {
             x0: x0 + PAD * s,
             y0: ry,
-            x1: x0 + (PAD + LABEL_W) * s,
+            x1: if about { tx1 } else { x0 + (PAD + LABEL_W) * s },
             y1: ry + ROW_H * s,
         };
-        let seg_x0 = label.x1;
+        let seg_x0 = if about { tx0 } else { label.x1 };
         let seg_x1 = card.x1 - PAD * s;
-        let n = row.choices.len() as f64;
+        let n = row.choices.len().max(1) as f64;
         let seg_w = (seg_x1 - seg_x0) / n;
         let (sy0, sy1) = (ry + 7.0 * s, ry + (ROW_H - 7.0) * s);
         let choices = if row
@@ -535,7 +567,7 @@ pub fn layout(vp: (f64, f64), s: f64, tab: Tab, scroll: f64) -> CardLayout {
         x0: x0 + PAD * s,
         y0: rows_y,
         x1: card.x1 - PAD * s,
-        y1: rows_y + ROW_H * max_rows() as f64 * s,
+        y1: rows_y + ROW_H * row_count as f64 * s,
     };
     let (keys, max_scroll, reset) = if tab == Tab::Keys {
         let (k, m) = key_rows(list, s, scroll);

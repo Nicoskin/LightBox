@@ -494,17 +494,19 @@ impl Overlay {
         };
         unsafe {
             // Dim everything behind the card.
-            let size = self.ctx.GetSize();
-            self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.35));
-            self.ctx.FillRectangle(
-                &D2D_RECT_F {
-                    left: 0.0,
-                    top: 0.0,
-                    right: size.width,
-                    bottom: size.height,
-                },
-                &self.brush,
-            );
+            if c.dim_background {
+                let size = self.ctx.GetSize();
+                self.brush.SetColor(&rgba(0.0, 0.0, 0.0, 0.35));
+                self.ctx.FillRectangle(
+                    &D2D_RECT_F {
+                        left: 0.0,
+                        top: 0.0,
+                        right: size.width,
+                        bottom: size.height,
+                    },
+                    &self.brush,
+                );
+            }
             // Soft shadow, then the card.
             for (grow, a) in [(10.0, 0.10), (5.0, 0.16), (2.0, 0.22)] {
                 let g = grow * s;
@@ -522,7 +524,8 @@ impl Overlay {
                     &self.brush,
                 );
             }
-            self.brush.SetColor(&rgba(0.125, 0.125, 0.135, 0.98));
+            let alpha = if c.dim_background { 0.98 } else { 1.0 };
+            self.brush.SetColor(&rgba(0.125, 0.125, 0.135, alpha));
             self.ctx
                 .FillRoundedRectangle(&rounded(r, radius), &self.brush);
             self.brush.SetColor(&rgba(1.0, 1.0, 1.0, 0.08));

@@ -415,11 +415,20 @@ pub fn zoom_label(scale: f64) -> String {
 }
 
 impl App {
+    pub(super) fn over_card_header(&self, point: (f64, f64)) -> bool {
+        let layout = self.card_layout();
+        layout.card.contains(point) && point.1 < layout.title.y1 && !layout.close.contains(point)
+    }
+
     fn card_layout(&self) -> settings_card::CardLayout {
         settings_card::layout(
             self.viewport(),
             self.ui_scale(),
-            self.card_tab,
+            if self.about.is_some() {
+                settings_card::Tab::About
+            } else {
+                self.card_tab
+            },
             self.card_scroll,
         )
     }
@@ -432,11 +441,17 @@ impl App {
         let mut labels = Vec::new();
         let mut segments = Vec::new();
         let mut sliders = Vec::new();
-        for row in &l.rows {
-            labels.push((row.label, row.text.to_string()));
+        for (row_index, row) in l.rows.iter().enumerate() {
+            let label = match &self.about {
+                Some(about) if row_index == 1 => about.status.clone(),
+                _ => row.text.to_string(),
+            };
+            labels.push((row.label, label));
             let n = row.choices.len();
             for (i, (c, text, rect)) in row.choices.iter().enumerate() {
                 let hot = self.card_hot == Some(settings_card::Hit::Choice(*c));
+                let install = *c == settings_card::Choice::CheckUpdates
+                    && self.about.as_ref().is_some_and(|a| a.release.is_some());
                 if *c == settings_card::Choice::DimSlider {
                     sliders.push((*rect, f32::from(self.settings.dim_percent) / 100.0, hot));
                     continue;
@@ -448,12 +463,13 @@ impl App {
                     (None, settings_card::Choice::DimValue) => {
                         format!("{} %", self.settings.dim_percent)
                     }
+                    _ if install => tr("Обновить сейчас").to_string(),
                     _ => (*text).to_string(),
                 };
                 segments.push(SegmentView {
                     rect: *rect,
                     text,
-                    selected: editing || settings_card::is_selected(&self.settings, *c),
+                    selected: install || editing || settings_card::is_selected(&self.settings, *c),
                     hot: self.card_hot == Some(settings_card::Hit::Choice(*c)),
                     first: i == 0,
                     last: i + 1 == n,
@@ -481,15 +497,27 @@ impl App {
                 });
             }
         }
-        let keys_page = self.card_tab == settings_card::Tab::Keys;
-        let footer = if keys_page {
+        let keys_page = self.about.is_none() && self.card_tab == settings_card::Tab::Keys;
+        let footer = if self.about.is_some() {
+            format!("© 2026 Nicoskin  ·  {}", tr("Лицензия MIT"))
+        } else if let Some((text, _)) = self.notice.as_ref().filter(|_| self.standalone_card) {
+            text.clone()
+        } else if keys_page {
             tr("Щелчок — назначить клавишу, правый щелчок — убрать").to_string()
         } else {
             settings_card::version_text()
         };
         Some(CardView {
             rect: l.card,
-            title: (l.title, tr("Настройки").to_string()),
+            dim_background: !self.standalone_card,
+            title: (
+                l.title,
+                if self.about.is_some() {
+                    format!("{} ({})", settings_card::version_text(), std::env::consts::ARCH)
+                } else {
+                    tr("Настройки").to_string()
+                },
+            ),
             close: (l.close, self.card_hot == Some(settings_card::Hit::Close)),
             tabs: l
                 .tabs
@@ -519,17 +547,64 @@ impl App {
     }
 
     pub(super) fn open_settings(&mut self) -> Result<()> {
-        self.card_open = true;
-        self.card_hot = None;
-        self.card_capture = None;
+        self.open_card(None)?;
         self.render()
     }
 
+    pub(super) fn open_tray_card(&mut self, about: Option<super::updates::About>) -> Result<()> {
+        if self.standalone_card {
+            if self.about.is_none() && about.is_none() {
+                self.bring_to_front();
+                return Ok(());
+            }
+            self.dismiss_tray_card()?;
+        }
+        self.open_card(about)?;
+        self.standalone_card = self.hidden;
+        if self.hidden {
+            self.show_home()
+        } else {
+            self.bring_to_front();
+            self.render()
+        }
+    }
+
+    fn open_card(&mut self, about: Option<super::updates::About>) -> Result<()> {
+        self.end_dim_edit(true)?;
+        self.about = about;
+        self.card_open = true;
+        self.card_hot = None;
+        self.card_capture = None;
+        Ok(())
+    }
+
     pub(super) fn close_settings(&mut self) -> Result<()> {
+        if self.standalone_card {
+            self.dismiss_tray_card()?;
+            if !self.settings.resident {
+                self.quit();
+            }
+            return Ok(());
+        }
         self.end_dim_edit(true)?;
         self.card_open = false;
         self.card_capture = None;
+        self.about = None;
         self.render()
+    }
+
+    pub(super) fn dismiss_tray_card(&mut self) -> Result<()> {
+        use windows::Win32::UI::WindowsAndMessaging::{SW_HIDE, ShowWindow};
+
+        self.end_dim_edit(true)?;
+        self.standalone_card = false;
+        self.card_open = false;
+        self.card_capture = None;
+        self.about = None;
+        self.hidden = true;
+        // SAFETY: own window.
+        unsafe { let _ = ShowWindow(self.hwnd, SW_HIDE); }
+        Ok(())
     }
 
     /// Input while the card is open: it takes all mouse and keyboard input.
@@ -588,7 +663,7 @@ impl App {
                     self.render()?;
                 }
             }
-            WM_MOUSEWHEEL if self.card_tab == settings_card::Tab::Keys => {
+            WM_MOUSEWHEEL if self.about.is_none() && self.card_tab == settings_card::Tab::Keys => {
                 let delta = f64::from((wparam >> 16) as u16 as i16);
                 let step = 3.0 * 30.0 * self.ui_scale();
                 self.card_scroll =
@@ -751,6 +826,14 @@ impl App {
 
     fn choose(&mut self, c: settings_card::Choice) -> Result<()> {
         use settings_card::Choice;
+        match c {
+            Choice::ProjectPage => {
+                crate::win::shell_open("https://github.com/Nicoskin/LightBox");
+                return Ok(());
+            }
+            Choice::CheckUpdates => return self.check_updates_from_card(),
+            _ => {}
+        }
         settings_card::apply(&mut self.settings, c);
         self.settings.save();
         match c {
@@ -772,7 +855,6 @@ impl App {
                 }
                 self.apply_resident();
             }
-            Choice::CheckUpdates => self.check_updates(true),
             Choice::Cache(mb) => self.cache.set_budget(mb as usize * (1 << 20)),
             Choice::Preload(_) => self.schedule(),
             Choice::Language(l) => crate::i18n::init(l),

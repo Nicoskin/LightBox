@@ -32,7 +32,7 @@ mod updates;
 pub use system::quit_message;
 mod vector;
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -278,6 +278,8 @@ pub struct App {
     notice: Option<(String, Instant)>,
     /// Settings card shown, and the item under the mouse.
     card_open: bool,
+    standalone_card: bool,
+    about: Option<updates::About>,
     card_hot: Option<crate::ui::settings_card::Hit>,
     /// Settings page shown.
     card_tab: crate::ui::settings_card::Tab,
@@ -381,6 +383,7 @@ pub struct App {
 
 thread_local! {
     static APP: RefCell<Option<App>> = const { RefCell::new(None) };
+    static UPDATE_READY: Cell<bool> = const { Cell::new(false) };
 }
 
 impl App {
@@ -453,6 +456,8 @@ impl App {
             undo: Vec::new(),
             notice: None,
             card_open: false,
+            standalone_card: false,
+            about: None,
             card_hot: None,
             card_tab: Default::default(),
             card_capture: None,
@@ -853,6 +858,21 @@ impl App {
     }
 
     fn render(&mut self) -> Result<()> {
+        if self.standalone_card {
+            let params = DrawParams {
+                clear: [0.0; 4],
+                layers: &[],
+                filter: self.filter(),
+                model: None,
+                diff: None,
+            };
+            let ui = Ui {
+                scale: self.ui_scale() as f32,
+                card: self.card_view(),
+                ..Default::default()
+            };
+            return self.gpu.draw(&params, &ui);
+        }
         self.refresh_inspector();
         let shown = self.shown.clone();
         let detail = self.detail_tex();
@@ -1296,10 +1316,6 @@ impl App {
                 self.on_model()?;
                 Ok(Some(LRESULT(0)))
             }
-            WM_APP_UPDATE => {
-                self.on_update()?;
-                Ok(Some(LRESULT(0)))
-            }
             m if m == self.taskbar_msg && m != 0 => {
                 self.on_taskbar_created();
                 Ok(Some(LRESULT(0)))
@@ -1329,7 +1345,15 @@ pub fn frame() -> bool {
     APP.with(|cell| {
         cell.try_borrow_mut()
             .ok()
-            .and_then(|mut guard| guard.as_mut().map(App::frame))
+            .and_then(|mut guard| {
+                let app = guard.as_mut()?;
+                if UPDATE_READY.with(|ready| ready.replace(false))
+                    && let Err(e) = app.on_update()
+                {
+                    tracing::error!("update: {e:#}");
+                }
+                Some(app.frame())
+            })
             .unwrap_or(false)
     })
 }
@@ -1341,6 +1365,11 @@ pub extern "system" fn wndproc(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPA
     // Stateless geometry answers, handled here because they also arrive
     // re-entrantly from our own SetWindowPos calls (when the app is busy).
     match msg {
+        WM_APP_UPDATE => {
+            // A tray menu or modal dialog can dispatch this while App is borrowed.
+            UPDATE_READY.with(|ready| ready.set(true));
+            return LRESULT(0);
+        }
         WM_DESTROY => {
             // SAFETY: no preconditions.
             unsafe { PostQuitMessage(0) };

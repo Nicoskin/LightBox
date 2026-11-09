@@ -171,6 +171,7 @@ pub struct CellView {
 /// The settings card.
 pub struct CardView {
     pub rect: Rect,
+    pub dim_background: bool,
     pub title: (Rect, String),
     pub close: (Rect, bool),
     /// Page switcher (`selected` = the page shown).
