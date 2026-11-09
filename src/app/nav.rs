@@ -389,6 +389,10 @@ impl App {
         };
         let mut wanted = Vec::new();
         let cur = &self.current;
+        // Tray startup and the home screen have no file to decode.
+        if cur.as_os_str().is_empty() {
+            return;
+        }
         // Nothing to show yet for this file: its EXIF thumbnail first (not
         // while it is already on screen, e.g. reloading after a save).
         let on_screen = self
@@ -400,7 +404,11 @@ impl App {
             .initial
             .as_ref()
             .is_some_and(|(path, _)| cache::key(path) == cache::key(cur));
-        if self.cache.image(cur).is_none() && !on_screen && !starting {
+        if self.cache.image(cur).is_none()
+            && !self.cache.satisfies(cur, false)
+            && !on_screen
+            && !starting
+        {
             wanted.push(Request {
                 path: cur.clone(),
                 quality: Quality::Thumb,
