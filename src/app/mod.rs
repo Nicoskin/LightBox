@@ -623,7 +623,7 @@ impl App {
         }
     }
 
-    /// A preview of one photo (Space in Explorer, pinned): no folder.
+    /// Compact preview (Space in Explorer or pinned).
     fn preview(&self) -> bool {
         self.quicklook || self.pinned
     }

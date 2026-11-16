@@ -175,9 +175,10 @@ impl App {
     }
 
     pub(super) fn matches_folder_filter(&self, path: &std::path::Path) -> bool {
-        (self.rating_filter == 0
-            || self.ratings.get(&cache::key(path)).copied().unwrap_or(0) >= self.rating_filter)
-            && crate::library::matches(path, &self.folder_query, &self.folder_extension)
+        self.quicklook
+            || ((self.rating_filter == 0
+                || self.ratings.get(&cache::key(path)).copied().unwrap_or(0) >= self.rating_filter)
+                && crate::library::matches(path, &self.folder_query, &self.folder_extension))
     }
 
     /// "фильтр: от ★★★" while filtering.

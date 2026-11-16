@@ -81,8 +81,13 @@ impl App {
         match last {
             Some(p) if p.as_os_str() == ipc::SHOW_HOME => self.show_home(),
             Some(p) => {
+                let was_quicklook = self.quicklook;
                 self.quicklook = false;
-                self.open_external(&p)
+                self.open_external(&p)?;
+                if was_quicklook && self.library_rx.is_none() {
+                    self.rescan_folder();
+                }
+                Ok(())
             }
             None => Ok(()),
         }
@@ -198,6 +203,9 @@ impl App {
         self.hidden = true;
         self.pending_show = false;
         self.quicklook = false;
+        self.library_rx = None;
+        self.watcher = None;
+        self.changed.clear();
         self.anim = None;
         self.shown = None;
         self.detail = None;

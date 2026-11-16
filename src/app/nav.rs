@@ -68,8 +68,10 @@ impl App {
         if self.current.as_os_str().is_empty() {
             return; // started in the tray without a file
         }
-        if self.preview() || self.is_doc() {
-            return; // a preview or a document shows only its one file
+        self.library_rx = None;
+        let quicklook = self.quicklook;
+        if self.pinned || self.is_doc() || (quicklook && self.model_mode()) {
+            return; // pinned windows, documents and QuickLook models show one file
         }
         let hwnd = self.hwnd.0 as isize;
         let current = self.current.clone();
@@ -82,7 +84,10 @@ impl App {
         let spawned = thread::Builder::new()
             .name("library".into())
             .spawn(move || {
-                let files = library::scan(&dir, &current, mode);
+                let mut files = library::scan(&dir, &current, mode);
+                if quicklook {
+                    files.retain(|p| !crate::model::is_model(p) && !crate::decode::is_document(p));
+                }
                 if tx.send(files).is_ok() {
                     post(hwnd, WM_APP_LIBRARY);
                 }

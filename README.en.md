@@ -110,7 +110,7 @@ Time from starting a program with a file to the photo on screen, ms (median of f
 
 ## Tray and Space in Explorer
 
-In Settings → System Lightbox can stay in the tray after closing and start with Windows. Photos then open even faster, and **Space preview** works: select a file in Explorer and press Space — a window sized to the photo opens. Space again or Esc closes it; the 📌 button keeps the photo in its own window on top of the others.
+In Settings → System Lightbox can stay in the tray after closing and start with Windows. Photos then open even faster, and **Space preview** works: select a file in Explorer and press Space — a window sized to the photo opens. Use ← and → to browse photos in that folder. Space again or Esc closes the window; the 📌 button keeps the photo in its own window on top of the others.
 
 Settings are kept in `%APPDATA%\Lightbox\settings.toml`.
 
